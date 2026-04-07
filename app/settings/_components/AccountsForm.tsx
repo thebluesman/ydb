@@ -240,8 +240,8 @@ export function AccountsForm({
                     className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none w-24 font-mono"
                     style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)', fontWeight: 400 }}
                   >
-                    <Select.Value />
-                    <Select.Icon className="ml-auto" style={{ color: 'var(--tx-tertiary)' }}><ChevronDown size={14} /></Select.Icon>
+                    <span className="flex-1">{account.currency || baseCurrency}</span>
+                    <Select.Icon style={{ color: 'var(--tx-tertiary)' }}><ChevronDown size={14} /></Select.Icon>
                   </Select.Trigger>
                   <Select.Portal>
                     <Select.Content
