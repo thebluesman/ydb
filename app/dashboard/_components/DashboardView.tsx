@@ -284,10 +284,10 @@ export function DashboardView({
             const bg = isDark ? '#1a1917' : '#f2f1ed'
             const fadeStyle = (dir: 'left' | 'right'): React.CSSProperties => ({
               position: 'absolute',
-              top: -24,
+              top: 0,
               [dir]: 0,
               width: 80,
-              height: 'calc(100% + 60px)',
+              height: '100%',
               pointerEvents: 'none',
               transition: 'opacity 0.2s',
               background: `linear-gradient(to ${dir === 'left' ? 'right' : 'left'}, ${bg}, transparent)`,
