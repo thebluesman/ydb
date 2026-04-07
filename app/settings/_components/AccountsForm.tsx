@@ -187,8 +187,8 @@ export function AccountsForm({
                 <Select.Root value={account.accountType} onValueChange={(v) => updateAccount(i, 'accountType', v)}>
                   <Select.Trigger
                     id={`acc-type-${i}`}
-                    className="flex items-center gap-2 px-3 py-2 text-sm font-normal rounded-[8px] outline-none min-w-[110px]"
-                    style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+                    className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none min-w-[110px]"
+                    style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)', fontWeight: 400 }}
                   >
                     <Select.Value />
                     <Select.Icon className="ml-auto" style={{ color: 'var(--tx-tertiary)' }}><ChevronDown size={14} /></Select.Icon>
