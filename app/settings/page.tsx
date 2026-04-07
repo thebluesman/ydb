@@ -61,6 +61,7 @@ export default async function SettingsPage() {
               : '',
           }))}
           initialCategories={categories}
+          baseCurrency={settings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'}
         />
         <PreferencesForm initialSettings={settings} />
 

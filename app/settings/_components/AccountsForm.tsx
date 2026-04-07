@@ -21,10 +21,10 @@ type Category = { id: number; name: string; color: string }
 
 const labelCls = 'block text-[11px] font-medium uppercase tracking-[0.048px] mb-1'
 
-const BLANK_ACCOUNT = (): Account => ({
+const BLANK_ACCOUNT = (currency: string): Account => ({
   name: '',
   accountType: 'current',
-  currency: 'GBP',
+  currency,
   isActive: true,
   openingBalance: 0,
   openingBalanceDate: '',
@@ -34,9 +34,11 @@ const BLANK_ACCOUNT = (): Account => ({
 export function AccountsForm({
   initialAccounts,
   initialCategories,
+  baseCurrency,
 }: {
   initialAccounts: Account[]
   initialCategories: Category[]
+  baseCurrency: string
 }) {
   const [accounts, setAccounts] = useState<Account[]>(() =>
     initialAccounts.length > 0
@@ -48,7 +50,7 @@ export function AccountsForm({
             : '',
           creditLimit: (a as Account).creditLimit ?? null,
         }))
-      : [BLANK_ACCOUNT()]
+      : [BLANK_ACCOUNT(baseCurrency)]
   )
   const [categories, setCategories] = useState<Category[]>(initialCategories)
   const [saving, setSaving] = useState(false)
@@ -62,7 +64,7 @@ export function AccountsForm({
       return n
     })
 
-  const addAccount = () => setAccounts((prev) => [...prev, BLANK_ACCOUNT()])
+  const addAccount = () => setAccounts((prev) => [...prev, BLANK_ACCOUNT(baseCurrency)])
 
   const removeAccount = async (i: number) => {
     const acc = accounts[i]
@@ -185,7 +187,7 @@ export function AccountsForm({
                 <Select.Root value={account.accountType} onValueChange={(v) => updateAccount(i, 'accountType', v)}>
                   <Select.Trigger
                     id={`acc-type-${i}`}
-                    className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none min-w-[110px]"
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-normal rounded-[8px] outline-none min-w-[110px]"
                     style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
                   >
                     <Select.Value />
@@ -200,6 +202,7 @@ export function AccountsForm({
                       <Select.Viewport className="p-1">
                         {([
                           ['current', 'Current'],
+                          ['savings', 'Savings'],
                           ['credit', 'Credit Card'],
                           ['personal_loan', 'Personal Loan'],
                           ['auto_loan', 'Auto Loan'],

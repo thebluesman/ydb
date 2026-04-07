@@ -201,7 +201,7 @@ export function DashboardView({
           <div
             ref={balScrollRef}
             className="bal-scroll flex gap-4"
-            style={{ overflowX: 'auto', scrollbarWidth: 'none', paddingTop: 4, paddingBottom: 4 }}
+            style={{ overflowX: 'auto', scrollbarWidth: 'none', paddingTop: 24, paddingBottom: 36, paddingLeft: 28, marginTop: -24, marginBottom: -36, marginLeft: -28 }}
             onScroll={updateBalScroll}
           >
             <style>{`.bal-scroll::-webkit-scrollbar{display:none}`}</style>
@@ -231,6 +231,7 @@ export function DashboardView({
                   {acc.accountType === 'personal_loan' ? 'Personal Loan'
                     : acc.accountType === 'auto_loan' ? 'Auto Loan'
                     : acc.accountType === 'credit' ? 'Credit'
+                    : acc.accountType === 'savings' ? 'Savings'
                     : acc.accountType}
                 </span>
               </div>
@@ -277,6 +278,7 @@ export function DashboardView({
               )}
             </div>
           ))}
+          <div style={{ flexShrink: 0, width: 28 }} />
           </div>
           {/* Gradient fades */}
           {(() => {
