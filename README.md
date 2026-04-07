@@ -28,7 +28,7 @@ A personal finance tracker with AI-powered natural language querying. Import ban
 ## Prerequisites
 
 - Node.js 20+
-- [Ollama](https://ollama.com) running locally with a model pulled (Gemma 4 12B or 27B recommended for best SQL accuracy)
+- [Ollama](https://ollama.com) running locally with a model pulled (Qwen2.5:32b recommended for best SQL accuracy)
 
 ## Getting Started
 
