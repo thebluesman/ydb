@@ -201,7 +201,7 @@ export function DashboardView({
           <div
             ref={balScrollRef}
             className="bal-scroll flex gap-4"
-            style={{ overflowX: 'auto', scrollbarWidth: 'none', paddingTop: 24, paddingBottom: 36, paddingLeft: 28, marginTop: -24, marginBottom: -36, marginLeft: -28 }}
+            style={{ overflowX: 'auto', scrollbarWidth: 'none', paddingTop: 24, paddingBottom: 36, marginTop: -24, marginBottom: -36 }}
             onScroll={updateBalScroll}
           >
             <style>{`.bal-scroll::-webkit-scrollbar{display:none}`}</style>
@@ -278,17 +278,16 @@ export function DashboardView({
               )}
             </div>
           ))}
-          <div style={{ flexShrink: 0, width: 28 }} />
           </div>
           {/* Gradient fades */}
           {(() => {
             const bg = isDark ? '#1a1917' : '#f2f1ed'
             const fadeStyle = (dir: 'left' | 'right'): React.CSSProperties => ({
               position: 'absolute',
-              top: 0,
+              top: -24,
               [dir]: 0,
               width: 80,
-              height: '100%',
+              height: 'calc(100% + 60px)',
               pointerEvents: 'none',
               transition: 'opacity 0.2s',
               background: `linear-gradient(to ${dir === 'left' ? 'right' : 'left'}, ${bg}, transparent)`,
