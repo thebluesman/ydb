@@ -1,0 +1,1090 @@
+'use client'
+
+import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, ArrowRight, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RefreshCw, Target } from 'lucide-react'
+
+const SECTIONS = [
+  { id: 'overview',   label: 'Overview',         num: '00' },
+  { id: 'accounts',   label: 'Accounts',          num: '01' },
+  { id: 'upload',     label: 'Upload',            num: '02' },
+  { id: 'review',     label: 'Review',            num: '03' },
+  { id: 'ledger',     label: 'Ledger',            num: '04' },
+  { id: 'categories', label: 'Categories & AI',   num: '05' },
+  { id: 'dashboard',  label: 'Dashboard',         num: '06' },
+  { id: 'chat',       label: 'Chat',              num: '07' },
+  { id: 'budgets',    label: 'Budgets',           num: '08' },
+  { id: 'recurring',  label: 'Recurring',         num: '09' },
+]
+
+// ── Inline demo components ────────────────────────────────────────────────────
+
+function DemoShell({ children, label }: { children: React.ReactNode; label?: string }) {
+  return (
+    <div
+      className="mt-5 rounded-[10px] overflow-hidden"
+      style={{ border: '1px solid var(--border-warm)', background: 'var(--bg-page)' }}
+    >
+      {label && (
+        <div
+          className="px-4 py-2 text-[11px] font-medium uppercase tracking-widest"
+          style={{
+            borderBottom: '1px solid var(--border-warm)',
+            background: 'var(--bg-card-alt)',
+            color: 'var(--tx-tertiary)',
+            letterSpacing: '0.08em',
+          }}
+        >
+          {label}
+        </div>
+      )}
+      <div className="p-4 flex flex-col items-center">{children}</div>
+    </div>
+  )
+}
+
+function FlowDiagram() {
+  const steps = [
+    { icon: <Upload size={18} />, label: 'Upload', sub: 'PDF statement' },
+    { icon: <ScanText size={18} />, label: 'Extract', sub: 'Qwen reads it' },
+    { icon: <CheckCircle size={18} />, label: 'Review', sub: 'Edit & commit' },
+    { icon: <LayoutDashboard size={18} />, label: 'Insights', sub: 'Dashboard' },
+  ]
+  return (
+    <div className="flex items-center gap-0 flex-wrap justify-center">
+      {steps.map((s, i) => (
+        <div key={s.label} className="flex items-center">
+          <div className="flex flex-col items-center gap-1.5 px-3 py-3">
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center"
+              style={{ background: i === 0 ? '#f54e00' : 'var(--bg-card-alt)', color: i === 0 ? '#fff' : 'var(--tx-primary)', border: '1px solid var(--border-warm)' }}
+            >
+              {s.icon}
+            </div>
+            <span className="text-xs font-medium" style={{ color: 'var(--tx-primary)' }}>{s.label}</span>
+            <span className="text-[10px]" style={{ color: 'var(--tx-tertiary)' }}>{s.sub}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <div className="w-8 h-px mx-1 hidden sm:block" style={{ background: 'var(--border-warm-md)' }} />
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function AccountCardDemo({ currency }: { currency: string }) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      {[
+        { name: 'Barclays Current', type: 'CURRENT', balance: `${currency} 2,450.00`, color: '#1D4ED8' },
+        { name: 'Amex Gold', type: 'CREDIT', balance: `-${currency} 340.50`, color: '#B91C1C' },
+        { name: 'Honda Finance', type: 'AUTO LOAN', balance: `${currency} 8,200.00`, color: '#0E7490' },
+      ].map((acc) => (
+        <div
+          key={acc.name}
+          className="flex-none p-5 rounded-[8px] min-w-[180px]"
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm font-medium truncate" style={{ color: 'var(--tx-primary)' }}>{acc.name}</span>
+            <span
+              className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0"
+              style={{ background: acc.color, color: '#fff' }}
+            >
+              {acc.type}
+            </span>
+          </div>
+          <div
+            className="text-2xl font-mono tracking-tight"
+            style={{ color: acc.balance.startsWith('-') ? 'var(--tx-error)' : 'var(--tx-success)', letterSpacing: '-0.5px' }}
+          >
+            {acc.balance}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function FormatDemo() {
+  const [active, setActive] = useState('credit-card')
+  const formats = [
+    { id: 'credit-card', label: 'Credit Card', hint: 'Single amount column. Positive = expense, CR suffix = payment.' },
+    { id: 'bank-account', label: 'Bank Account', hint: 'Separate Debit and Credit columns.' },
+    { id: 'auto', label: 'Auto', hint: "Let Qwen figure it out — works for most statements." },
+  ]
+  const active_fmt = formats.find(f => f.id === active)
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2 flex-wrap justify-center">
+        {formats.map((f) => (
+          <button
+            key={f.id}
+            onClick={() => setActive(f.id)}
+            className="px-3 py-1.5 text-sm rounded-[8px] transition-all duration-150"
+            style={{
+              background: active === f.id ? 'var(--bg-selected)' : 'var(--bg-btn)',
+              color: active === f.id ? 'var(--tx-selected)' : 'var(--tx-secondary)',
+              border: `1px solid ${active === f.id ? 'var(--bg-selected)' : 'var(--border-warm)'}`,
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-sm text-center" style={{ color: 'var(--tx-secondary)' }}>{active_fmt?.hint}</p>
+    </div>
+  )
+}
+
+function TransactionRowDemo({ currency }: { currency: string }) {
+  const [committed, setCommitted] = useState(false)
+  return (
+    <div className="space-y-2">
+      <div
+        className="flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
+      >
+        <span className="w-24 shrink-0 font-mono text-xs" style={{ color: 'var(--tx-tertiary)' }}>2024-03-15</span>
+        <span className="flex-1 truncate" style={{ color: 'var(--tx-primary)' }}>NETFLIX.COM</span>
+        <span
+          className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0"
+          style={{ background: '#1D4ED8', color: '#fff' }}
+        >
+          Entertainment
+        </span>
+        <span className="font-mono text-sm shrink-0" style={{ color: 'var(--tx-error)', letterSpacing: '-0.275px' }}>-{currency} 15.99</span>
+        <span
+          className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0"
+          style={{
+            background: committed ? 'var(--bg-badge-committed)' : 'var(--bg-badge-review)',
+            color: committed ? 'var(--tx-badge-committed)' : 'var(--tx-badge-review)',
+          }}
+        >
+          {committed ? 'Committed' : 'Review'}
+        </span>
+        <button
+          onClick={() => setCommitted(!committed)}
+          className="text-xs px-2.5 py-1 rounded-[6px] transition-colors duration-150 shrink-0"
+          style={{ background: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+        >
+          {committed ? 'Undo' : 'Commit'}
+        </button>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--tx-tertiary)' }}>
+        {committed ? '✓ Transaction committed to ledger.' : 'Click Commit to move this to the permanent ledger.'}
+      </p>
+    </div>
+  )
+}
+
+function StatusBadgeDemo() {
+  const statuses = [
+    { label: 'Review',     bg: 'var(--bg-badge-review)',      tx: 'var(--tx-badge-review)',      desc: 'Newly extracted. Needs your eyes.' },
+    { label: 'Committed',  bg: 'var(--bg-badge-committed)',   tx: 'var(--tx-badge-committed)',   desc: 'Confirmed and locked into the ledger.' },
+    { label: 'Reconciled', bg: 'var(--bg-badge-reconciled)',  tx: 'var(--tx-badge-reconciled)',  desc: 'Matched against a bank statement total.' },
+  ]
+  return (
+    <div className="space-y-2">
+      {statuses.map((s) => (
+        <div key={s.label} className="flex items-center gap-3">
+          <span
+            className="text-xs px-2.5 py-0.5 rounded-full font-medium w-24 text-center shrink-0"
+            style={{ background: s.bg, color: s.tx }}
+          >
+            {s.label}
+          </span>
+          <span className="text-sm" style={{ color: 'var(--tx-secondary)' }}>{s.desc}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CategoryPillsDemo() {
+  const cats = [
+    { name: 'Groceries',     color: '#15803D' },
+    { name: 'Entertainment', color: '#1D4ED8' },
+    { name: 'Transport',     color: '#B45309' },
+    { name: 'Dining',        color: '#BE185D' },
+    { name: 'Utilities',     color: '#0E7490' },
+    { name: 'Income',        color: '#047857' },
+    { name: 'Transfer',      color: '#0369A1' },
+    { name: 'Other',         color: '#5B21B6' },
+  ]
+  return (
+    <div className="flex flex-wrap gap-2">
+      {cats.map((c) => (
+        <span
+          key={c.name}
+          className="text-xs px-3 py-1 rounded-full font-medium"
+          style={{ background: c.color, color: '#fff' }}
+        >
+          {c.name}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function VendorRuleDemo() {
+  return (
+    <div className="rounded-[8px] overflow-hidden" style={{ border: '1px solid var(--border-warm)' }}>
+      <table className="w-full text-sm">
+        <thead>
+          <tr style={{ background: 'var(--bg-card-alt)', borderBottom: '1px solid var(--border-warm)' }}>
+            {['Vendor', 'Pattern', 'Category'].map((h) => (
+              <th key={h} className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--tx-tertiary)' }}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {[
+            { vendor: 'Netflix', pattern: 'NETFLIX', category: 'Entertainment', color: '#1D4ED8' },
+            { vendor: 'Tesco', pattern: 'TESCO', category: 'Groceries', color: '#15803D' },
+            { vendor: 'TfL', pattern: 'TFL', category: 'Transport', color: '#B45309' },
+          ].map((r, i) => (
+            <tr key={r.vendor} style={{ borderTop: i > 0 ? '1px solid var(--border-warm)' : 'none' }}>
+              <td className="px-3 py-2.5" style={{ color: 'var(--tx-primary)' }}>{r.vendor}</td>
+              <td className="px-3 py-2.5 font-mono text-xs" style={{ color: 'var(--tx-secondary)' }}>{r.pattern}</td>
+              <td className="px-3 py-2.5">
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: r.color, color: '#fff' }}>
+                  {r.category}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function StatCardsDemo({ currency }: { currency: string }) {
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      {[
+        { label: 'Total Income',   value: `${currency} 4,200.00`,  bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
+        { label: 'Total Expenses', value: `${currency} 2,810.45`,  bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
+        { label: 'Net',            value: `+${currency} 1,389.55`, bg: 'var(--bg-stat-net)',     tx: 'var(--tx-stat-net-pos)' },
+      ].map((s) => (
+        <div
+          key={s.label}
+          className="p-3 rounded-[8px]"
+          style={{ background: s.bg, border: '1px solid var(--border-warm)' }}
+        >
+          <div className="text-[11px] font-medium uppercase tracking-wide mb-1.5" style={{ color: s.tx, opacity: 0.7 }}>
+            {s.label}
+          </div>
+          <div className="text-base font-mono font-medium" style={{ color: s.tx, letterSpacing: '-0.3px' }}>
+            {s.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ChatFlowDiagram() {
+  const steps = [
+    { icon: <MessageCircle size={18} />, label: 'Question', sub: 'Plain English' },
+    { icon: <FileCode2 size={18} />,     label: 'SQL',      sub: 'Generated by Qwen' },
+    { icon: <Database size={18} />,      label: 'Query',    sub: 'Run on SQLite' },
+    { icon: <TextQuote size={18} />,     label: 'Answer',   sub: 'Narrated back' },
+  ]
+  return (
+    <div className="flex items-center flex-wrap justify-center">
+      {steps.map((s, i) => (
+        <div key={s.label} className="flex items-center">
+          <div className="flex flex-col items-center gap-1.5 px-3 py-3">
+            <div
+              className="w-10 h-10 rounded-full flex items-center justify-center"
+              style={{
+                background: i === 0 ? '#f54e00' : 'var(--bg-card-alt)',
+                color: i === 0 ? '#fff' : 'var(--tx-primary)',
+                border: '1px solid var(--border-warm)',
+              }}
+            >
+              {s.icon}
+            </div>
+            <span className="text-xs font-medium" style={{ color: 'var(--tx-primary)' }}>{s.label}</span>
+            <span className="text-[10px]" style={{ color: 'var(--tx-tertiary)' }}>{s.sub}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <div className="w-8 h-px mx-1 hidden sm:block" style={{ background: 'var(--border-warm-md)' }} />
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ChatConversationDemo({ currency }: { currency: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="w-full space-y-3 text-sm">
+      {/* User bubble */}
+      <div className="flex justify-end">
+        <div
+          className="px-3.5 py-2.5 rounded-[14px] rounded-tr-[4px] max-w-[80%]"
+          style={{ background: 'var(--bg-selected)', color: 'var(--tx-selected)' }}
+        >
+          What were my top 3 spending categories last month?
+        </div>
+      </div>
+      {/* Assistant bubble */}
+      <div className="flex justify-start">
+        <div className="max-w-[85%] space-y-1.5">
+          <div
+            className="px-3.5 py-2.5 rounded-[14px] rounded-tl-[4px]"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+          >
+            Last month your top three spending categories were <strong>Dining</strong> (−{currency} 342.10),{' '}
+            <strong>Groceries</strong> (−{currency} 289.45), and <strong>Transport</strong> (−{currency} 104.80).
+          </div>
+          {/* Show SQL toggle */}
+          <div>
+            <button
+              onClick={() => setOpen((o) => !o)}
+              className="flex items-center gap-1.5 text-xs transition-opacity duration-150"
+              style={{ color: 'var(--tx-tertiary)', opacity: 0.75 }}
+            >
+              <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▸</span>
+              Show SQL
+            </button>
+            {open && (
+              <pre
+                className="mt-1.5 px-3 py-2.5 rounded-[8px] text-[11px] overflow-x-auto"
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-warm)',
+                  color: 'var(--tx-secondary)',
+                  fontFamily: 'ui-monospace, monospace',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                }}
+              >
+{`SELECT category, SUM(amount) AS total
+FROM "Transaction"
+WHERE amount < 0
+  AND strftime('%Y-%m', date) =
+      strftime('%Y-%m', date('now','-1 month'))
+  AND status IN ('committed','reconciled')
+GROUP BY category
+ORDER BY total ASC
+LIMIT 3`}
+              </pre>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Tip box ───────────────────────────────────────────────────────────────────
+
+function Tip({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="mt-5 flex gap-3 px-4 py-3 rounded-[8px] text-sm"
+      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
+    >
+      <Gem size={14} className="shrink-0 mt-0.5" style={{ color: '#f54e00' }} />
+      <span style={{ color: 'var(--tx-secondary)' }}>{children}</span>
+    </div>
+  )
+}
+
+// ── Section wrapper ───────────────────────────────────────────────────────────
+
+function Section({ id, num, title, children }: { id: string; num: string; title: string; children: React.ReactNode }) {
+  return (
+    <section id={id} className="scroll-mt-20 pb-16" style={{ borderBottom: '1px solid var(--border-warm)' }}>
+      <div className="flex items-baseline gap-3 mb-6">
+        <span
+          className="font-mono text-[11px] font-medium shrink-0"
+          style={{ color: '#f54e00', letterSpacing: '0.05em' }}
+        >
+          {num}
+        </span>
+        <h2
+          className="text-[22px] font-semibold leading-tight"
+          style={{ color: 'var(--tx-primary)', letterSpacing: '-0.11px' }}
+        >
+          {title}
+        </h2>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function BodyText({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[15px] leading-relaxed mb-0" style={{ color: 'var(--tx-secondary)' }}>
+      {children}
+    </p>
+  )
+}
+
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h3
+      className="text-[13px] font-medium uppercase tracking-widest mt-6 mb-2"
+      style={{ color: 'var(--tx-tertiary)', letterSpacing: '0.08em' }}
+    >
+      {children}
+    </h3>
+  )
+}
+
+function TransferLinkDemo({ currency }: { currency: string }) {
+  return (
+    <div className="w-full space-y-1.5 font-mono text-xs">
+      {[
+        { account: 'Current Account', desc: 'ATM Withdrawal', amount: `−${currency} 200.00`, color: '#f87171' },
+        { account: 'Cash',            desc: 'ATM Withdrawal', amount: `+${currency} 200.00`, color: '#34d399' },
+      ].map(({ account, desc, amount, color }) => (
+        <div key={account} className="flex items-center gap-3 px-3 py-2 rounded-[6px]" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border-warm)' }}>
+          <span className="w-32 shrink-0" style={{ color: 'var(--tx-tertiary)' }}>{account}</span>
+          <span className="flex-1" style={{ color: 'var(--tx-primary)' }}>{desc}</span>
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)', color: 'var(--tx-secondary)' }}>
+            <Link2 size={10} /> Linked
+          </span>
+          <span style={{ color }}>{amount}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SplitDemoRows({ currency }: { currency: string }) {
+  return (
+    <div className="w-full space-y-1 font-mono text-xs">
+      <div className="flex items-center gap-3 px-3 py-2 rounded-[6px]" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border-warm)' }}>
+        <span className="w-24 shrink-0" style={{ color: 'var(--tx-secondary)' }}>2024-03-15</span>
+        <span className="flex-1" style={{ color: 'var(--tx-primary)' }}>IKEA STORE 0423</span>
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)', color: 'var(--tx-secondary)' }}>
+          <Scissors size={10} /> Split ×2
+        </span>
+        <span style={{ color: '#f87171' }}>−{currency} 245.00</span>
+      </div>
+      {[
+        { label: 'Home & Furniture', amount: `−${currency} 180.00` },
+        { label: 'Groceries',        amount: `−${currency} 65.00` },
+      ].map(({ label, amount }) => (
+        <div key={label} className="flex items-center gap-3 px-3 py-1.5 ml-8 rounded-[6px]" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-warm)' }}>
+          <span className="flex-1" style={{ color: 'var(--tx-tertiary)' }}>{label}</span>
+          <span style={{ color: 'var(--tx-secondary)' }}>{amount}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function BudgetProgressDemo({ currency }: { currency: string }) {
+  const items = [
+    { category: 'Groceries', budget: 500, actual: 320 },
+    { category: 'Dining',    budget: 200, actual: 186 },
+    { category: 'Transport', budget: 150, actual: 210 },
+  ]
+  return (
+    <div className="w-full space-y-4">
+      {items.map(({ category, budget, actual }) => {
+        const pct = (actual / budget) * 100
+        const bar = Math.min(pct, 100)
+        const color = pct > 100 ? '#f87171' : pct >= 80 ? '#fbbf24' : '#34d399'
+        return (
+          <div key={category}>
+            <div className="flex justify-between text-xs mb-1.5">
+              <span style={{ color: 'var(--tx-primary)', fontWeight: 500 }}>{category}</span>
+              <span style={{ color: 'var(--tx-secondary)' }}>{currency} {actual} / {currency} {budget}</span>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border-warm)' }}>
+              <div className="h-full rounded-full" style={{ width: `${bar}%`, background: color, transition: 'width 0.3s' }} />
+            </div>
+            {pct > 100 && (
+              <p className="text-[10px] mt-1" style={{ color: '#f87171' }}>Over budget by {currency} {(actual - budget).toFixed(0)}</p>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export function GuideView({ currency }: { currency: string }) {
+  const [active, setActive] = useState('overview')
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const observers: IntersectionObserver[] = []
+    const entries = new Map<string, boolean>()
+
+    SECTIONS.forEach(({ id }) => {
+      const el = document.getElementById(id)
+      if (!el) return
+      const obs = new IntersectionObserver(
+        ([entry]) => {
+          entries.set(id, entry.isIntersecting)
+          // Pick the topmost visible section
+          const first = SECTIONS.find((s) => entries.get(s.id))
+          if (first) setActive(first.id)
+        },
+        { rootMargin: '-20% 0px -60% 0px' }
+      )
+      obs.observe(el)
+      observers.push(obs)
+    })
+
+    // When scrolled to the bottom, activate the last section
+    const onScroll = () => {
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 32) {
+        setActive(SECTIONS[SECTIONS.length - 1].id)
+      }
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+
+    return () => {
+      observers.forEach((o) => o.disconnect())
+      window.removeEventListener('scroll', onScroll)
+    }
+  }, [])
+
+  const scrollTo = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  return (
+    <div className="flex-1" style={{ background: 'var(--bg-page)' }}>
+      <div className="max-w-5xl mx-auto px-6 md:px-10 py-10">
+
+        {/* Page header */}
+        <div className="mb-12">
+          <div
+            className="text-[11px] font-medium uppercase tracking-widest mb-3"
+            style={{ color: '#f54e00', letterSpacing: '0.1em' }}
+          >
+            Field Guide
+          </div>
+          <h1
+            className="text-[36px] font-semibold leading-[1.15] mb-3"
+            style={{ color: 'var(--tx-primary)', letterSpacing: '-0.72px' }}
+          >
+            Everything you need<br />to know about ydb
+          </h1>
+          <p className="text-base max-w-xl" style={{ color: 'var(--tx-secondary)', lineHeight: 1.6 }}>
+            A private, local-first bookkeeper that uses AI to extract transactions from your bank statements —
+            then gets smarter every time you use it.
+          </p>
+        </div>
+
+        <div className="flex gap-12 items-start">
+
+          {/* ── Sidebar ──────────────────────────────────────────────────── */}
+          <aside className="hidden lg:block shrink-0 w-44 sticky top-24">
+            <nav className="space-y-0.5">
+              {SECTIONS.map((s) => {
+                const isActive = active === s.id
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => scrollTo(s.id)}
+                    className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-[6px] text-left transition-all duration-150 group"
+                    style={{
+                      background: isActive ? 'var(--bg-card-alt)' : 'transparent',
+                      color: isActive ? 'var(--tx-primary)' : 'var(--tx-tertiary)',
+                    }}
+                  >
+                    <span
+                      className="font-mono text-[10px] shrink-0 transition-colors duration-150"
+                      style={{ color: isActive ? '#f54e00' : 'var(--tx-faint)' }}
+                    >
+                      {s.num}
+                    </span>
+                    <span className="text-sm">{s.label}</span>
+                  </button>
+                )
+              })}
+            </nav>
+
+            {/* Quick links */}
+            <div className="mt-8 pt-6" style={{ borderTop: '1px solid var(--border-warm)' }}>
+              <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: 'var(--tx-faint)', letterSpacing: '0.08em' }}>
+                Jump to
+              </div>
+              {[
+                { href: '/settings', label: 'Settings' },
+                { href: '/upload', label: 'Upload' },
+                { href: '/ledger', label: 'Ledger' },
+                { href: '/chat', label: 'Chat' },
+              ].map((l) => (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  className="flex items-center gap-1.5 py-1 text-sm transition-colors duration-150 hover:opacity-100"
+                  style={{ color: 'var(--tx-tertiary)', opacity: 0.8 }}
+                >
+                  <ArrowRight size={12} style={{ color: '#f54e00' }} />
+                  {l.label}
+                </Link>
+              ))}
+            </div>
+          </aside>
+
+          {/* ── Main content ─────────────────────────────────────────────── */}
+          <div ref={contentRef} className="flex-1 min-w-0 space-y-16">
+
+            {/* 00 — Overview */}
+            <Section id="overview" num="00" title="Overview">
+              <BodyText>
+                ydb is a personal accounting tool that lives entirely on your machine. There is no cloud, no
+                subscription, no third-party seeing your data. You export statements from your bank, drop them
+                in, and a local AI model (Qwen via Ollama) reads them and extracts every transaction.
+              </BodyText>
+              <DemoShell label="How it works">
+                <FlowDiagram />
+              </DemoShell>
+              <Tip>
+                All data is stored in a SQLite database file on your computer. Nothing leaves your machine.
+              </Tip>
+            </Section>
+
+            {/* 01 — Accounts */}
+            <Section id="accounts" num="01" title="Setting up Accounts">
+              <BodyText>
+                Before you upload anything, add your bank accounts in{' '}
+                <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>.
+                Each account corresponds to one bank or card. You can have as many as you need.
+              </BodyText>
+
+              <SubHeading>Account types</SubHeading>
+              <div className="space-y-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                {[
+                  ['Current', 'A regular bank account with Debit and Credit columns in statements.'],
+                  ['Credit', 'A credit card with a single Amount column. Positive = purchase, CR = payment back.'],
+                  ['Cash', 'A cash wallet. No statement to import — you enter transactions manually as you spend.'],
+                  ['Personal Loan', 'A personal loan. Opening balance is the amount outstanding — decreases as EMIs are paid.'],
+                  ['Auto Loan', 'A vehicle finance loan. Same as Personal Loan — balance tracks what you still owe.'],
+                ].map(([label, desc]) => (
+                  <div key={label} className="flex gap-3">
+                    <span className="w-36 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
+
+              <DemoShell label="Example accounts">
+                <AccountCardDemo currency={currency} />
+              </DemoShell>
+
+              <SubHeading>Cash & withdrawals</SubHeading>
+              <BodyText>
+                Create a <strong>Cash</strong> account to track physical money. When you withdraw from an ATM,
+                record it as two linked transactions: a debit on your current account and a matching credit on
+                the Cash account, both categorised as <strong>Transfer</strong>. Cash spending is then entered
+                as regular transactions on the Cash account. This keeps your balances correct — the ATM
+                withdrawal is neutral (money moved, not spent), and each cash purchase is counted once.
+              </BodyText>
+
+              <SubHeading>Opening balance</SubHeading>
+              <BodyText>
+                The opening balance is the account balance on the day you start tracking — the fixed
+                starting point that all imported transactions build on top of.
+              </BodyText>
+              <BodyText>
+                {'ydb computes your current balance as:'}
+              </BodyText>
+              <div
+                className="my-4 px-4 py-3 rounded-[8px] font-mono text-sm"
+                style={{ background: 'var(--bg-card-alt)', color: 'var(--tx-primary)', border: '1px solid var(--border-warm)' }}
+              >
+                current balance = opening balance + sum of all transactions
+              </div>
+              <BodyText>
+                If your opening balance is wrong, the displayed balance will be off by exactly that
+                amount — it is a flat offset, not a compounding error. Easy to fix: just edit the
+                opening balance in Settings and everything snaps to the correct number instantly.
+              </BodyText>
+
+              <SubHeading>Where to find it</SubHeading>
+              <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                {[
+                  ['Current / Credit', 'The closing balance on the last statement before your chosen start date — or the opening balance printed on the first statement you plan to import.'],
+                  ['Loans', 'The outstanding principal on your first loan statement from around your start date. This is what you owed, not what you paid.'],
+                ].map(([label, desc]) => (
+                  <div key={label} className="flex gap-3">
+                    <span className="w-32 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
+
+              <SubHeading>Loan EMIs</SubHeading>
+              <BodyText>
+                Your loan EMIs are automatically deducted from your current account — they will appear
+                in your current account statement as a regular debit. When you import those transactions,
+                set the category to <strong>Transfer</strong> and they will be excluded from your
+                expense totals. The loan account balance will decrease as you record each payment against it.
+              </BodyText>
+
+              <Tip>
+                A good starting point is 1 January of the previous year. You get a full year of history,
+                your loans are covered from the start, and import effort is manageable.
+              </Tip>
+            </Section>
+
+            {/* 02 — Upload */}
+            <Section id="upload" num="02" title="Uploading Statements">
+              <BodyText>
+                Head to{' '}
+                <Link href="/upload" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Upload</Link>{' '}
+                and drop in a PDF bank statement. ydb uses OCR (Tesseract) to read the text, then passes it
+                to the Qwen AI model running locally via Ollama.
+              </BodyText>
+
+              <SubHeading>Format hint</SubHeading>
+              <BodyText>
+                Tell Qwen which statement format it is looking at. This helps it interpret the amount columns correctly.
+              </BodyText>
+              <DemoShell label="Format selector — click to try">
+                <FormatDemo />
+              </DemoShell>
+
+              <SubHeading>Password-protected PDFs</SubHeading>
+              <BodyText>
+                If your statement is password-protected, ydb will ask you for the password inline — it is
+                never stored anywhere.
+              </BodyText>
+
+              <SubHeading>Import order</SubHeading>
+              <BodyText>
+                Import statements chronologically — oldest first. Each statement builds on the previous
+                balance, so order keeps your running totals accurate. Start with one month to test the
+                pipeline before importing a full year.
+              </BodyText>
+
+              <Tip>
+                If Qwen gets amounts wrong (e.g. all positive when some should be negative), try switching the
+                format hint. Credit card statements are the most common mismatch.
+              </Tip>
+            </Section>
+
+            {/* 03 — Review */}
+            <Section id="review" num="03" title="Reviewing Transactions">
+              <BodyText>
+                After extraction, every transaction lands in a Review table before touching the ledger.
+                This is your chance to check amounts, fix categories, and remove anything that looks wrong.
+              </BodyText>
+
+              <DemoShell label="Transaction row — click Commit to try">
+                <div className="w-full"><TransactionRowDemo currency={currency} /></div>
+              </DemoShell>
+
+              <SubHeading>What to check</SubHeading>
+              <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                {[
+                  ['Amounts', 'Expenses should be negative, income positive. Credits (payments into account) are positive.'],
+                  ['Categories', 'Qwen assigns categories based on your vendor rules and past transactions. Correct any that are wrong.'],
+                  ['Duplicates', 'If you upload the same statement twice, duplicate transactions will appear. Delete the extras.'],
+                  ['Descriptions', 'The raw bank description is preserved. You can edit it if needed.'],
+                ].map(([label, desc]) => (
+                  <div key={label} className="flex gap-3">
+                    <span className="w-28 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
+
+              <Tip>
+                Use the bulk commit button to commit everything at once once you have reviewed the batch.
+                You can always revert individual transactions from the Ledger later.
+              </Tip>
+            </Section>
+
+            {/* 04 — Ledger */}
+            <Section id="ledger" num="04" title="The Ledger">
+              <BodyText>
+                The{' '}
+                <Link href="/ledger" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Ledger</Link>{' '}
+                is the permanent record of all your transactions. Once committed, a transaction appears here
+                and contributes to your account balances and dashboard figures.
+              </BodyText>
+
+              <SubHeading>Transaction statuses</SubHeading>
+              <DemoShell label="Status badges">
+                <StatusBadgeDemo />
+              </DemoShell>
+
+              <SubHeading>Editing & reverting</SubHeading>
+              <BodyText>
+                Click the pencil icon on any row to edit the category, amount, date, or description.
+                You can also revert a committed transaction back to Review status if something needs correcting.
+              </BodyText>
+
+              <SubHeading>Filtering</SubHeading>
+              <BodyText>
+                Filter by account, date range, category, or status using the controls at the top of the ledger.
+                The row count updates live.
+              </BodyText>
+
+              <SubHeading>Transfer linking</SubHeading>
+              <BodyText>
+                When money moves between two of your own accounts (e.g. an ATM withdrawal from Current to Cash,
+                or a credit card payment), you can link both sides of the transfer so they appear as a matched pair.
+                Click the <strong>link icon</strong> on either transaction row — ydb will suggest candidates with
+                a matching amount and nearby date. Once linked, a chain badge appears on both rows.
+              </BodyText>
+              <DemoShell label="Linked transfer pair">
+                <TransferLinkDemo currency={currency} />
+              </DemoShell>
+
+              <SubHeading>Split transactions</SubHeading>
+              <BodyText>
+                If a single transaction spans multiple categories — a supermarket run that includes
+                groceries <em>and</em> household items — you can split it into legs. Click the{' '}
+                <strong>scissors icon</strong> on any row, add a leg per category, and adjust amounts so
+                they sum to the original total. The parent row remains in the ledger; its category cell
+                shows a <strong>Split ×N</strong> badge you can expand to see each leg inline.
+              </BodyText>
+              <DemoShell label="Split transaction — parent + legs">
+                <SplitDemoRows currency={currency} />
+              </DemoShell>
+
+              <SubHeading>CSV export</SubHeading>
+              <BodyText>
+                Click the <Download size={13} style={{ display: 'inline', verticalAlign: 'middle' }} />{' '}
+                <strong>Export</strong> button in the filter bar to download the current filtered view as a CSV.
+                All columns are included — date, description, amount, category, account, status, notes.
+              </BodyText>
+
+              <Tip>
+                Transfer transactions (moving money between your own accounts) use the{' '}
+                <strong>Transfer</strong> category and are excluded from income/expense totals on the dashboard.
+              </Tip>
+            </Section>
+
+            {/* 05 — Categories & AI */}
+            <Section id="categories" num="05" title="Categories & AI Training">
+              <BodyText>
+                Categories help you understand where your money goes. ydb ships without any — you define
+                them to match your life. Qwen then assigns categories automatically as it reads new statements.
+              </BodyText>
+
+              <SubHeading>Categories</SubHeading>
+              <BodyText>
+                Add categories in Settings. Each one gets a colour automatically assigned from a
+                curated palette — all colours meet WCAG AA contrast standards.
+              </BodyText>
+              <DemoShell label="Example categories">
+                <CategoryPillsDemo />
+              </DemoShell>
+
+              <SubHeading>Vendor rules — teaching Qwen</SubHeading>
+              <BodyText>
+                Vendor rules are explicit pattern-to-category mappings. When a transaction description
+                contains a pattern (case-insensitive), Qwen will always assign the mapped category.
+                These override Qwen's guesses.
+              </BodyText>
+              <DemoShell label="Vendor rules">
+                <div className="w-full"><VendorRuleDemo /></div>
+              </DemoShell>
+
+              <SubHeading>Auto-suggestions</SubHeading>
+              <BodyText>
+                After you save a category edit in the Ledger, ydb checks whether the transaction
+                description already matches any vendor rule. If it does not, a suggestion banner
+                appears beneath the row — pre-filled with the description as the pattern and the
+                category you just assigned. Click <strong>Add Rule</strong> to create it instantly,
+                or dismiss it to skip. This is the fastest way to build up rules organically as
+                you categorise transactions.
+              </BodyText>
+
+              <SubHeading>Learned patterns</SubHeading>
+              <BodyText>
+                Beyond explicit rules, Qwen also learns from your committed transactions. The more
+                you commit and correct, the better its categorisation gets — automatically.
+              </BodyText>
+
+              <Tip>
+                Start with your most frequent vendors (supermarkets, subscriptions, transport) as
+                explicit rules. Let learned patterns fill in the rest over time.
+              </Tip>
+            </Section>
+
+            {/* 06 — Dashboard */}
+            <Section id="dashboard" num="06" title="Dashboard">
+              <BodyText>
+                The{' '}
+                <Link href="/dashboard" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Dashboard</Link>{' '}
+                gives you a financial overview across a date range. All figures are computed
+                from committed and reconciled transactions only — Review-status transactions are excluded.
+              </BodyText>
+
+              <DemoShell label="Summary statistics">
+                <StatCardsDemo currency={currency} />
+              </DemoShell>
+
+              <SubHeading>What's on the dashboard</SubHeading>
+              <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                {[
+                  ['Account balances', 'Opening balance + all committed transactions = current balance for each account.'],
+                  ['Net Worth',        'Assets (current accounts) minus liabilities (credit cards + loans), with a trend line using the cash-flow period.'],
+                  ['Monthly chart',    'Income vs expenses bar chart across the selected date range.'],
+                  ['Category breakdown', 'Donut chart showing your biggest expense categories.'],
+                  ['Category trends',  'Line chart showing how each category changes month over month.'],
+                  ['Top transactions', 'The 10 largest transactions by absolute amount in the period.'],
+                  ['Cash flow table',  'Month-by-month opening balance, income, expenses, and closing balance.'],
+                  ['Budgets',          'Current-month spend vs monthly limit for each budget you have set up. See section 08.'],
+                ].map(([label, desc]) => (
+                  <div key={label} className="flex gap-3">
+                    <span className="w-44 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
+
+              <SubHeading>Filtering</SubHeading>
+              <BodyText>
+                Use the date range picker at the top to narrow the period. If you have accounts in multiple
+                currencies, use the currency selector to switch between views — each currency is shown
+                independently.
+              </BodyText>
+
+              <Tip>
+                Transfer transactions are automatically excluded from all income/expense calculations.
+                Only moves between external accounts (income, expenses) count.
+              </Tip>
+            </Section>
+
+            {/* 07 — Chat */}
+            <Section id="chat" num="07" title="Chat">
+              <BodyText>
+                The{' '}
+                <Link href="/chat" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Chat</Link>{' '}
+                page lets you ask plain-English questions about your transactions and get a direct answer —
+                no filters to configure, no charts to interpret. Just ask.
+              </BodyText>
+
+              <DemoShell label="How a question becomes an answer">
+                <ChatFlowDiagram />
+              </DemoShell>
+
+              <SubHeading>How it works</SubHeading>
+              <BodyText>
+                Under the hood, Chat uses a two-step process. Your question is first sent to Qwen, which
+                writes a SQL query against your local database. That query runs instantly on your machine,
+                and the results are handed back to Qwen to narrate as a plain-English answer.
+                No data leaves your device at any point.
+              </BodyText>
+
+              <DemoShell label="Example conversation — click Show SQL to inspect">
+                <ChatConversationDemo currency={currency} />
+              </DemoShell>
+
+              <SubHeading>Conversation history</SubHeading>
+              <BodyText>
+                Each conversation is saved as a named session. The left sidebar lists all your past
+                chats — click one to resume it, or press <strong>New Chat</strong> to start fresh.
+                Sessions are automatically titled from your first message. Context from earlier
+                messages in the same session is carried forward, so you can ask follow-up questions
+                without repeating yourself.
+              </BodyText>
+
+              <SubHeading>Show SQL</SubHeading>
+              <BodyText>
+                Every assistant response has a <strong>Show SQL</strong> toggle beneath it. Use this to
+                verify the query that produced the answer — if a number looks off, the SQL will tell you
+                exactly why.
+              </BodyText>
+
+              <SubHeading>What it can answer</SubHeading>
+              <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                {[
+                  ['Totals',       'How much did I spend last month? What is my total income this year?'],
+                  ['Categories',   'What were my top 5 spending categories? How much on groceries?'],
+                  ['Trends',       'Which month did I spend the most? How has dining changed over time?'],
+                  ['Transactions', `Show me all transactions over ${currency} 500. What did I spend at Tesco?`],
+                ].map(([label, desc]) => (
+                  <div key={label} className="flex gap-3">
+                    <span className="w-28 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
+
+              <Tip>
+                Chat only reads your data — it never writes to the database. If an answer looks wrong,
+                check the SQL and try rephrasing with more specific date or category terms.
+              </Tip>
+            </Section>
+
+            {/* 08 — Budgets */}
+            <Section id="budgets" num="08" title="Budgets">
+              <BodyText>
+                Budgets let you set a monthly spending limit per category. Once set, the Dashboard shows
+                a live progress bar for each budget — green while you're on track, amber when you're
+                approaching the limit (80 %), and red if you've gone over.
+              </BodyText>
+
+              <DemoShell label="Budget progress — current month">
+                <BudgetProgressDemo currency={currency} />
+              </DemoShell>
+
+              <SubHeading>Setting budgets</SubHeading>
+              <BodyText>
+                Go to{' '}
+                <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>{' '}
+                and find the <strong>Budgets</strong> card. Pick a category, enter a monthly limit,
+                and click Add. Each category can have at most one budget — adding a duplicate replaces
+                the existing limit.
+              </BodyText>
+
+              <Tip>
+                Budgets only count the <em>current calendar month</em> regardless of the date range
+                selected on the Dashboard. This keeps the progress bars meaningful day-to-day.
+              </Tip>
+            </Section>
+
+            {/* 09 — Recurring */}
+            <Section id="recurring" num="09" title="Recurring Transactions">
+              <BodyText>
+                ydb can automatically detect recurring charges in your transaction history —
+                subscriptions, standing orders, insurance premiums, loan EMIs — anything that
+                appears with a consistent amount on a roughly monthly interval.
+              </BodyText>
+
+              <SubHeading>How detection works</SubHeading>
+              <BodyText>
+                ydb groups your committed transactions by description prefix, then looks for groups
+                where the same amount (within ±10 %) appears at least three times with an average
+                gap of 25–40 days. Matches are surfaced in{' '}
+                <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>{' '}
+                under <strong>Recurring Transactions</strong>, showing the estimated monthly cost,
+                occurrence count, and when the last one landed.
+              </BodyText>
+
+              <SubHeading>What to do with them</SubHeading>
+              <BodyText>
+                Use the list as a prompt to create vendor rules or budgets for any recurring charge
+                you haven't already categorised. It's also a quick way to spot forgotten subscriptions.
+              </BodyText>
+
+              <Tip>
+                The list refreshes on every page load — it reads your live transaction data, so
+                accuracy improves as you import more history.
+              </Tip>
+            </Section>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

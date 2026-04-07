@@ -1,0 +1,95 @@
+datasource db {
+  provider = "sqlite"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Account {
+  id                 Int            @id @default(autoincrement())
+  name               String
+  accountType        String         // "current" | "credit" | "personal_loan" | "auto_loan"
+  currency           String         @default("GBP")
+  isActive           Boolean        @default(true)
+  openingBalance     Float          @default(0)
+  openingBalanceDate DateTime?
+  creditLimit        Float?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  transactions       Transaction[]
+  importRecords      ImportRecord[]
+}
+
+model ImportRecord {
+  id               Int      @id @default(autoincrement())
+  filename         String
+  accountId        Int
+  account          Account  @relation(fields: [accountId], references: [id])
+  transactionCount Int
+  importedAt       DateTime @default(now())
+}
+
+model Transaction {
+  id                  Int           @id @default(autoincrement())
+  date                DateTime
+  amount              Float
+  description         String
+  category            String
+  accountId           Int
+  account             Account       @relation(fields: [accountId], references: [id])
+  status              String        @default("review")  // "review" | "committed" | "reconciled"
+  notes               String?
+  rawSource           String?
+  linkedTransferId    Int?
+  linkedTransfer      Transaction?  @relation("TransferLink", fields: [linkedTransferId], references: [id])
+  linkedFrom          Transaction[] @relation("TransferLink")
+  parentTransactionId Int?
+  parentTransaction   Transaction?  @relation("SplitLeg", fields: [parentTransactionId], references: [id])
+  splitLegs           Transaction[] @relation("SplitLeg")
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+}
+
+model ChatSession {
+  id        Int           @id @default(autoincrement())
+  title     String        @default("New Chat")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        Int         @id @default(autoincrement())
+  sessionId Int
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String      // "user" | "assistant"
+  text      String
+  sql       String?
+  createdAt DateTime    @default(now())
+}
+
+model Category {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  color String @default("#6750A4")
+}
+
+model Setting {
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String
+}
+
+model Budget {
+  id           Int    @id @default(autoincrement())
+  category     String @unique
+  monthlyLimit Float
+}
+
+model VendorRule {
+  id       Int    @id @default(autoincrement())
+  pattern  String @unique  // substring to match against transaction description (case-insensitive)
+  vendor   String          // display name shown in UI
+  category String          // must match a Category.name
+}

@@ -1,0 +1,299 @@
+'use client'
+
+import { useState } from 'react'
+import { CheckCircle } from 'lucide-react'
+import { FileDropzone } from './FileDropzone'
+import { ReviewTable, type DraftTransaction } from './ReviewTable'
+import { detectFormat, normalizeTransactions, type StatementFormat } from '@/lib/statementFormats'
+
+type Account = { id: number; name: string; currency: string; accountType: string }
+type Category = { id: number; name: string; color: string }
+type Phase = 'idle' | 'ocr' | 'parsing' | 'review' | 'done'
+
+const cardStyle: React.CSSProperties = {
+  backgroundColor: 'var(--bg-card)',
+  border: '1px solid var(--border-warm)',
+  borderRadius: '8px',
+}
+
+export function UploadFlow({ accounts, categories }: { accounts: Account[]; categories: Category[] }) {
+  const [phase, setPhase] = useState<Phase>('idle')
+  const [file, setFile] = useState<File | null>(null)
+  const [selectedAccountId, setSelectedAccountId] = useState<number>(accounts[0]?.id ?? 0)
+  const [ocrProgress, setOcrProgress] = useState(0)
+  const [ocrPage, setOcrPage] = useState<{ current: number; total: number }>({ current: 0, total: 0 })
+  const [drafts, setDrafts] = useState<DraftTransaction[]>([])
+  const [error, setError] = useState('')
+  const [committedCount, setCommittedCount] = useState(0)
+  const [pdfPassword, setPdfPassword] = useState('')
+  const [passwordPhase, setPasswordPhase] = useState<'none' | 'needed' | 'wrong'>('none')
+
+  const reset = () => {
+    setPhase('idle'); setFile(null); setOcrProgress(0)
+    setOcrPage({ current: 0, total: 0 }); setDrafts([]); setError('')
+    setPdfPassword(''); setPasswordPhase('none')
+  }
+
+  const handleProcess = async () => {
+    if (!file || !selectedAccountId) return
+    setError(''); setPhase('ocr')
+    let ocrText = ''
+
+    try {
+      const { createWorker } = await import('tesseract.js')
+      const worker = await createWorker('eng', 1, {
+        logger: (m: { status: string; progress: number }) => {
+          if (m.status === 'recognizing text') setOcrProgress(Math.round(m.progress * 100))
+        },
+      })
+
+      if (file.type === 'application/pdf') {
+        const pdfjsLib = await import('pdfjs-dist')
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString()
+        let pdf
+        try {
+          pdf = await pdfjsLib.getDocument({
+            data: await file.arrayBuffer(),
+            password: pdfPassword || undefined,
+          }).promise
+        } catch (e) {
+          await worker.terminate()
+          const isPasswordErr = e !== null && typeof e === 'object' && 'name' in e &&
+            (e as { name: string }).name === 'PasswordException'
+          if (isPasswordErr) {
+            setPasswordPhase((e as unknown as { code: number }).code === 2 ? 'wrong' : 'needed')
+            setPhase('idle')
+            return
+          }
+          throw e
+        }
+        setOcrPage({ current: 0, total: pdf.numPages })
+        for (let i = 1; i <= pdf.numPages; i++) {
+          setOcrPage({ current: i, total: pdf.numPages }); setOcrProgress(0)
+          const page = await pdf.getPage(i)
+          const viewport = page.getViewport({ scale: 2 })
+          const canvas = document.createElement('canvas')
+          canvas.width = viewport.width; canvas.height = viewport.height
+          await page.render({ canvas, viewport }).promise
+          ocrText += (await worker.recognize(canvas)).data.text + '\n'
+        }
+      } else {
+        setOcrPage({ current: 1, total: 1 })
+        ocrText = (await worker.recognize(file)).data.text
+      }
+      await worker.terminate()
+    } catch (e) {
+      setError(`OCR failed: ${String(e)}`); setPhase('idle'); return
+    }
+
+    if (!ocrText.trim()) {
+      setError('No text could be extracted. Try a clearer image.'); setPhase('idle'); return
+    }
+
+    const fmt: StatementFormat = detectFormat(ocrText)
+    setPasswordPhase('none')
+    setPhase('parsing')
+    let accumulated = ''
+
+    try {
+      const res = await fetch('/api/ollama', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: ocrText, formatHint: fmt.type }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        throw new Error(err.error ?? 'Ollama request failed')
+      }
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n'); buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try { accumulated += JSON.parse(line).response ?? '' } catch { /* skip */ }
+        }
+      }
+    } catch (e) {
+      setError(`Parsing failed: ${String(e)}`); setPhase('idle'); return
+    }
+
+    try {
+      const clean = accumulated.replace(/```json|```/g, '').trim()
+      const start = clean.indexOf('['); const end = clean.lastIndexOf(']')
+      if (start === -1 || end === -1) throw new Error('No JSON array found')
+      const parsed: Array<{ date: string; description: string; amount: number; category: string }> =
+        JSON.parse(clean.slice(start, end + 1))
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        setError('The model found no transactions in this document.'); setPhase('idle'); return
+      }
+      const normalized = normalizeTransactions(parsed, fmt)
+      const today = new Date().toISOString().split('T')[0]
+      setDrafts(normalized.map((t) => ({
+        _id: crypto.randomUUID(), date: t.date ?? today,
+        description: t.description ?? '', amount: Number(t.amount) || 0,
+        category: t.category ?? 'Other', accountId: selectedAccountId,
+        notes: '', rawSource: ocrText.slice(0, 2000),
+      })))
+      setPhase('review')
+    } catch (e) {
+      setError(`Could not parse model output.\n\n${accumulated.slice(0, 500)}\n\nError: ${String(e)}`)
+      setPhase('idle')
+    }
+  }
+
+  const handleCommit = async () => {
+    const res = await fetch('/api/transactions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(drafts.map(({ _id: _, ...t }) => t)),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error ?? 'Failed to save')
+    }
+    const { count } = await res.json()
+    // Record the import (fire-and-forget)
+    fetch('/api/import-records', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file?.name ?? 'unknown', accountId: selectedAccountId, transactionCount: count }),
+    }).catch(() => { /* non-critical */ })
+    setCommittedCount(count)
+    setPhase('done')
+  }
+
+  if (phase === 'done') {
+    return (
+      <div key="done" className="py-16 text-center space-y-4 rounded-[8px]" style={{ ...cardStyle, animation: 'ydb-page-in 0.25s cubic-bezier(0.22,1,0.36,1) both' }}>
+        <CheckCircle size={40} style={{ color: 'var(--tx-success)', margin: '0 auto' }} />
+        <h2 className="text-[22px] font-semibold" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
+          {committedCount} transaction{committedCount !== 1 ? 's' : ''} saved
+        </h2>
+        <p className="text-sm" style={{ color: 'var(--tx-secondary)' }}>They are now in your ledger.</p>
+        <button onClick={reset}
+          className="px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 hover:text-error"
+          style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
+          Upload another
+        </button>
+      </div>
+    )
+  }
+
+  if (phase === 'review') {
+    return (
+      <div key="review" className="p-6 rounded-[8px]" style={{ ...cardStyle, animation: 'ydb-page-in 0.25s cubic-bezier(0.22,1,0.36,1) both' }}>
+        <ReviewTable drafts={drafts} accounts={accounts} categories={categories}
+          onChange={setDrafts} onCommit={handleCommit} onDiscard={reset} />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Account selector */}
+      <div className="p-6 space-y-3 rounded-[8px]" style={cardStyle}>
+        <p className="text-[11px] font-medium uppercase tracking-[0.048px]" style={{ color: 'var(--tx-secondary)' }}>Account</p>
+        {accounts.length === 0 ? (
+          <p className="text-sm" style={{ color: 'var(--tx-secondary)' }}>
+            No accounts yet. <a href="/settings" style={{ color: '#f54e00', textDecoration: 'underline' }}>Configure accounts first.</a>
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {accounts.map((a) => (
+              <button key={a.id} onClick={() => setSelectedAccountId(a.id)} disabled={phase !== 'idle'}
+                className="px-3 py-1.5 rounded-full text-sm transition-colors duration-150"
+                style={selectedAccountId === a.id
+                  ? { backgroundColor: 'var(--bg-selected)', color: 'var(--tx-selected)', border: '1px solid var(--bg-selected)' }
+                  : { backgroundColor: 'var(--bg-btn)', color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }
+                }>
+                {a.name || `Account ${a.id}`}
+                <span className="ml-1.5 text-xs opacity-50">
+                  {a.accountType === 'personal_loan' ? 'Personal Loan'
+                    : a.accountType === 'auto_loan' ? 'Auto Loan'
+                    : a.accountType === 'credit' ? 'Credit'
+                    : a.accountType.charAt(0).toUpperCase() + a.accountType.slice(1)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Drop zone */}
+      <div className="p-6 space-y-5 rounded-[8px]" style={cardStyle}>
+        <p className="text-[11px] font-medium uppercase tracking-[0.048px]" style={{ color: 'var(--tx-secondary)' }}>Statement File</p>
+        <FileDropzone file={file} onFile={setFile} onClear={() => setFile(null)} disabled={phase !== 'idle'} />
+
+        {phase === 'ocr' && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs" style={{ color: 'var(--tx-secondary)' }}>
+              <span>Reading document{ocrPage.total > 1 ? ` — page ${ocrPage.current} of ${ocrPage.total}` : ''}…</span>
+              <span className="font-mono">{ocrProgress}%</span>
+            </div>
+            <div className="h-[3px] rounded-full overflow-hidden" style={{ backgroundColor: 'var(--border-warm)' }}>
+              <div className="h-full rounded-full transition-all duration-200"
+                style={{ width: `${ocrProgress}%`, backgroundColor: 'var(--progress-fg)' }} />
+            </div>
+          </div>
+        )}
+
+        {phase === 'parsing' && (
+          <div className="flex items-center gap-3 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+            <div className="flex gap-1">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="w-1.5 h-1.5 rounded-full animate-bounce"
+                  style={{ backgroundColor: 'var(--progress-fg)', animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </div>
+            Qwen is thinking…
+          </div>
+        )}
+
+        {error && (
+          <div className="text-sm px-4 py-3 rounded-[8px] whitespace-pre-wrap"
+            style={{ backgroundColor: 'var(--bg-notify-error)', color: 'var(--tx-notify-error)' }}>
+            {error}
+          </div>
+        )}
+
+        {phase === 'idle' && passwordPhase === 'none' && (
+          <button onClick={handleProcess} disabled={!file || !selectedAccountId}
+            className="w-full py-[10px] px-[14px] rounded-[8px] text-sm font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}>
+            Extract Transactions
+          </button>
+        )}
+
+        {phase === 'idle' && passwordPhase !== 'none' && (
+          <div className="space-y-3 pt-1">
+            <p className="text-sm" style={{ color: 'var(--tx-secondary)' }}>
+              {passwordPhase === 'wrong'
+                ? 'Incorrect password. Try again.'
+                : 'This PDF is password-protected. Enter the password to continue.'}
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={pdfPassword}
+                onChange={(e) => setPdfPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleProcess()}
+                placeholder="PDF password"
+                autoFocus
+                className="flex-1 px-3 py-2 text-sm rounded-[8px] outline-none"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              />
+              <button onClick={handleProcess} disabled={!pdfPassword}
+                className="px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
+                Unlock
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
