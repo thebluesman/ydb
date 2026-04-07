@@ -21,6 +21,11 @@ type Category = { id: number; name: string; color: string }
 
 const labelCls = 'block text-[11px] font-medium uppercase tracking-[0.048px] mb-1'
 
+const CURRENCIES = [
+  'AED', 'AUD', 'BHD', 'CAD', 'CHF', 'CNY', 'EUR', 'GBP', 'HKD',
+  'INR', 'JPY', 'KWD', 'OMR', 'PKR', 'QAR', 'SAR', 'SGD', 'USD',
+]
+
 const BLANK_ACCOUNT = (currency: string): Account => ({
   name: '',
   accountType: 'current',
@@ -49,6 +54,7 @@ export function AccountsForm({
             ? new Date((a as Account).openingBalanceDate).toISOString().split('T')[0]
             : '',
           creditLimit: (a as Account).creditLimit ?? null,
+          currency: (a as Account).currency || baseCurrency,
         }))
       : [BLANK_ACCOUNT(baseCurrency)]
   )
@@ -228,17 +234,38 @@ export function AccountsForm({
                 <Label.Root htmlFor={`acc-currency-${i}`} className={labelCls} style={{ color: 'var(--tx-secondary)' }}>
                   Currency
                 </Label.Root>
-                <input
-                  id={`acc-currency-${i}`}
-                  type="text"
-                  maxLength={3}
-                  value={account.currency}
-                  onChange={(e) => updateAccount(i, 'currency', e.target.value.toUpperCase())}
-                  className="w-20 px-3 py-2 text-sm rounded-[8px] font-mono uppercase outline-none transition-colors duration-150"
-                  style={inputStyle}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm)')}
-                />
+                <Select.Root value={account.currency || baseCurrency} onValueChange={(v) => updateAccount(i, 'currency', v)}>
+                  <Select.Trigger
+                    id={`acc-currency-${i}`}
+                    className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none w-24 font-mono"
+                    style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)', fontWeight: 400 }}
+                  >
+                    <Select.Value />
+                    <Select.Icon className="ml-auto" style={{ color: 'var(--tx-tertiary)' }}><ChevronDown size={14} /></Select.Icon>
+                  </Select.Trigger>
+                  <Select.Portal>
+                    <Select.Content
+                      position="popper" sideOffset={4}
+                      className="rounded-[8px] z-50 overflow-hidden"
+                      style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', boxShadow: 'var(--shadow-card)' }}
+                    >
+                      <Select.Viewport className="p-1">
+                        {[baseCurrency, ...CURRENCIES.filter((c) => c !== baseCurrency)].map((code) => (
+                          <Select.Item
+                            key={code}
+                            value={code}
+                            className="px-3 py-2 text-sm font-mono rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
+                            style={{ color: 'var(--tx-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                          >
+                            <Select.ItemText>{code}</Select.ItemText>
+                          </Select.Item>
+                        ))}
+                      </Select.Viewport>
+                    </Select.Content>
+                  </Select.Portal>
+                </Select.Root>
               </div>
 
               <div className="flex flex-col items-center">
