@@ -197,11 +197,11 @@ export function DashboardView({
 
       {/* ── Account balances ───────────────────────────────────────────────── */}
       {accountBalances.length > 0 && (
-        <div style={{ position: 'relative' }}>
+        <div style={{ position: 'relative', overflowY: 'clip' }}>
           <div
             ref={balScrollRef}
             className="bal-scroll flex gap-4"
-            style={{ overflowX: 'auto', scrollbarWidth: 'none', paddingTop: 24, paddingBottom: 36, marginTop: -24, marginBottom: -36 }}
+            style={{ overflowX: 'auto', scrollbarWidth: 'none', paddingTop: 24, paddingBottom: 36 }}
             onScroll={updateBalScroll}
           >
             <style>{`.bal-scroll::-webkit-scrollbar{display:none}`}</style>
