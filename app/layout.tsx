@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import Link from "next/link";
+import Script from "next/script";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { NavLinks, ConfigLink } from "./components/NavLinks";
 import "./globals.css";
@@ -39,15 +40,15 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${clashDisplay.variable} ${clashGrotesk.variable} ${ibmPlexMono.variable} h-full antialiased`} suppressHydrationWarning>
-      <head>
+      <body className="min-h-full flex flex-col">
         {/* Prevent flash of wrong theme */}
-        <script
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark')}catch(e){}})()`,
           }}
         />
-      </head>
-      <body className="min-h-full flex flex-col">
         <header
           className="sticky top-0 z-50 flex items-center gap-8 px-6 py-3 shrink-0"
           style={{
