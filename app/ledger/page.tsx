@@ -6,7 +6,7 @@ export const metadata = {
 }
 
 export default async function LedgerPage() {
-  const [transactions, accounts, categories] = await Promise.all([
+  const [transactions, accounts, categories, baseCurrencySetting] = await Promise.all([
     prisma.transaction.findMany({
       orderBy: { date: 'desc' },
       include: {
@@ -18,6 +18,7 @@ export default async function LedgerPage() {
     }),
     prisma.account.findMany({ where: { isActive: true }, orderBy: { id: 'asc' } }),
     prisma.category.findMany({ orderBy: { name: 'asc' } }),
+    prisma.setting.findFirst({ where: { key: 'baseCurrency' } }),
   ])
 
   return (
@@ -38,6 +39,7 @@ export default async function LedgerPage() {
           initialTransactions={transactions}
           accounts={accounts}
           categories={categories}
+          baseCurrency={baseCurrencySetting?.value ?? accounts[0]?.currency ?? 'GBP'}
         />
       </div>
     </div>

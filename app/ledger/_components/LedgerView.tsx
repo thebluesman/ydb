@@ -33,8 +33,8 @@ function SortIcon({ col, sortKey, sortDir }: { col: string; sortKey: string; sor
     : <ArrowDown size={12} className="ml-1 inline-block" style={{ color: 'var(--tx-secondary)' }} />
 }
 
-export function LedgerView({ initialTransactions, accounts, categories }: {
-  initialTransactions: Transaction[]; accounts: Account[]; categories: Category[]
+export function LedgerView({ initialTransactions, accounts, categories, baseCurrency }: {
+  initialTransactions: Transaction[]; accounts: Account[]; categories: Category[]; baseCurrency: string
 }) {
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions)
   const [accountFilter, setAccountFilter] = useState('all')
@@ -93,10 +93,10 @@ export function LedgerView({ initialTransactions, accounts, categories }: {
 
   const currency = useMemo(() => {
     if (accountFilter !== 'all') {
-      return accounts.find((a) => String(a.id) === accountFilter)?.currency ?? 'GBP'
+      return accounts.find((a) => String(a.id) === accountFilter)?.currency ?? baseCurrency
     }
-    return accounts[0]?.currency ?? 'GBP'
-  }, [accounts, accountFilter])
+    return baseCurrency
+  }, [accounts, accountFilter, baseCurrency])
 
   const sorted = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1
