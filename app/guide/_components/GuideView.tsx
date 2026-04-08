@@ -2,19 +2,21 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, ArrowRight, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RefreshCw, Target } from 'lucide-react'
+import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, ArrowRight, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RefreshCw, Target, RotateCcw, CheckCircle2, FlaskConical } from 'lucide-react'
 
 const SECTIONS = [
-  { id: 'overview',   label: 'Overview',         num: '00' },
-  { id: 'accounts',   label: 'Accounts',          num: '01' },
-  { id: 'upload',     label: 'Upload',            num: '02' },
-  { id: 'review',     label: 'Review',            num: '03' },
-  { id: 'ledger',     label: 'Ledger',            num: '04' },
-  { id: 'categories', label: 'Categories & AI',   num: '05' },
-  { id: 'dashboard',  label: 'Dashboard',         num: '06' },
-  { id: 'chat',       label: 'Chat',              num: '07' },
-  { id: 'budgets',    label: 'Budgets',           num: '08' },
-  { id: 'recurring',  label: 'Recurring',         num: '09' },
+  { id: 'overview',        label: 'Overview',        num: '00' },
+  { id: 'accounts',        label: 'Accounts',         num: '01' },
+  { id: 'upload',          label: 'Upload',           num: '02' },
+  { id: 'review',          label: 'Review',           num: '03' },
+  { id: 'ledger',          label: 'Ledger',           num: '04' },
+  { id: 'categories',      label: 'Categories & AI',  num: '05' },
+  { id: 'budgets',         label: 'Budgets',          num: '06' },
+  { id: 'dashboard',       label: 'Dashboard',        num: '07' },
+  { id: 'recurring',       label: 'Recurring',        num: '08' },
+  { id: 'chat',            label: 'Chat',             num: '09' },
+  { id: 'reimbursements',  label: 'Reimbursements',   num: '10' },
+  { id: 'backups',         label: 'Backups',          num: '11' },
 ]
 
 // ── Inline demo components ────────────────────────────────────────────────────
@@ -229,12 +231,18 @@ function CategoryPillsDemo() {
 }
 
 function VendorRuleDemo() {
+  const rows = [
+    { vendor: 'Netflix',  pattern: 'NETFLIX',      match: '~',  matchLabel: 'contains',    direction: null,     category: 'Entertainment', color: '#1D4ED8' },
+    { vendor: 'Tesco',    pattern: '^TESCO',        match: '^',  matchLabel: 'starts-with', direction: null,     category: 'Groceries',     color: '#15803D' },
+    { vendor: 'Amazon',   pattern: 'AMAZON',        match: '~',  matchLabel: 'contains',    direction: '↓debit', category: 'Shopping',      color: '#B45309' },
+    { vendor: 'Amazon',   pattern: 'AMAZON RETURN', match: '=',  matchLabel: 'exact',       direction: '↑credit',category: 'Shopping',      color: '#B45309' },
+  ]
   return (
-    <div className="rounded-[8px] overflow-hidden" style={{ border: '1px solid var(--border-warm)' }}>
+    <div className="rounded-[8px] overflow-hidden w-full" style={{ border: '1px solid var(--border-warm)' }}>
       <table className="w-full text-sm">
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', borderBottom: '1px solid var(--border-warm)' }}>
-            {['Vendor', 'Pattern', 'Category'].map((h) => (
+            {['Vendor', 'Pattern', 'Match', 'Direction', 'Category'].map((h) => (
               <th key={h} className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--tx-tertiary)' }}>
                 {h}
               </th>
@@ -242,14 +250,22 @@ function VendorRuleDemo() {
           </tr>
         </thead>
         <tbody>
-          {[
-            { vendor: 'Netflix', pattern: 'NETFLIX', category: 'Entertainment', color: '#1D4ED8' },
-            { vendor: 'Tesco', pattern: 'TESCO', category: 'Groceries', color: '#15803D' },
-            { vendor: 'TfL', pattern: 'TFL', category: 'Transport', color: '#B45309' },
-          ].map((r, i) => (
-            <tr key={r.vendor} style={{ borderTop: i > 0 ? '1px solid var(--border-warm)' : 'none' }}>
-              <td className="px-3 py-2.5" style={{ color: 'var(--tx-primary)' }}>{r.vendor}</td>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ borderTop: i > 0 ? '1px solid var(--border-warm)' : 'none' }}>
+              <td className="px-3 py-2.5 font-medium" style={{ color: 'var(--tx-primary)' }}>{r.vendor}</td>
               <td className="px-3 py-2.5 font-mono text-xs" style={{ color: 'var(--tx-secondary)' }}>{r.pattern}</td>
+              <td className="px-3 py-2.5">
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded-[4px] font-mono"
+                  style={{ background: 'var(--bg-card-alt)', color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }}
+                  title={r.matchLabel}
+                >
+                  {r.match}
+                </span>
+              </td>
+              <td className="px-3 py-2.5 text-xs" style={{ color: 'var(--tx-faint)' }}>
+                {r.direction ?? '—'}
+              </td>
               <td className="px-3 py-2.5">
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: r.color, color: '#fff' }}>
                   {r.category}
@@ -380,6 +396,88 @@ LIMIT 3`}
             )}
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function ReimbursementDemo({ currency }: { currency: string }) {
+  const [settled, setSettled] = useState(false)
+  return (
+    <div className="w-full space-y-2">
+      {/* Pending banner */}
+      {!settled && (
+        <div
+          className="flex items-center gap-2.5 px-3 py-2.5 rounded-[8px] text-xs"
+          style={{ backgroundColor: 'var(--bg-badge-review)', border: '1px solid var(--border-warm)', color: 'var(--tx-badge-review)' }}
+        >
+          <RotateCcw size={13} style={{ flexShrink: 0 }} />
+          <span>1 pending reimbursement awaiting settlement — {currency} 500.00 outstanding</span>
+          <span className="ml-auto" style={{ color: 'var(--tx-secondary)' }}>Filter</span>
+        </div>
+      )}
+
+      {/* Expense row */}
+      <div
+        className="flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
+      >
+        <span className="w-24 shrink-0 font-mono text-[11px]" style={{ color: 'var(--tx-tertiary)' }}>2024-03-10</span>
+        <span className="flex-1 flex items-center gap-1.5 min-w-0" style={{ color: 'var(--tx-primary)' }}>
+          <span className="truncate">Dubai Hospital</span>
+          {settled
+            ? <CheckCircle2 size={11} style={{ color: '#34d399', flexShrink: 0 }} />
+            : <RotateCcw size={11} style={{ color: 'var(--tx-faint)', flexShrink: 0 }} />}
+        </span>
+        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0" style={{ background: '#0E7490', color: '#fff' }}>
+          Healthcare
+        </span>
+        <div className="font-mono text-sm shrink-0 text-right" style={{ letterSpacing: '-0.275px' }}>
+          <div style={{ color: '#f87171' }}>−{currency} 500.00</div>
+          {settled && (
+            <div className="text-[10px] font-normal" style={{ color: 'var(--tx-secondary)', letterSpacing: 0 }}>
+              net −{currency} 50.00
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Settlement credit — visible once linked */}
+      {settled && (
+        <div
+          className="flex items-center gap-3 px-3 py-2 ml-6 rounded-[6px] text-sm"
+          style={{ background: 'var(--bg-page)', border: '1px solid var(--border-warm)' }}
+        >
+          <span className="w-24 shrink-0 font-mono text-[11px]" style={{ color: 'var(--tx-tertiary)' }}>2024-03-24</span>
+          <span className="flex-1 flex items-center gap-1.5" style={{ color: 'var(--tx-secondary)' }}>
+            <RotateCcw size={10} style={{ color: '#34d399' }} />
+            Insurance Refund
+          </span>
+          <span className="font-mono text-sm" style={{ color: '#34d399', letterSpacing: '-0.275px' }}>
+            +{currency} 450.00
+          </span>
+        </div>
+      )}
+
+      {/* Action */}
+      <div className="flex justify-center pt-1">
+        {settled ? (
+          <button
+            onClick={() => setSettled(false)}
+            className="text-xs transition-opacity duration-150 hover:opacity-100"
+            style={{ color: 'var(--tx-tertiary)', opacity: 0.6 }}
+          >
+            Reset
+          </button>
+        ) : (
+          <button
+            onClick={() => setSettled(true)}
+            className="text-xs px-3 py-1.5 rounded-[6px] transition-colors duration-150"
+            style={{ background: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+          >
+            Link reimbursement →
+          </button>
+        )}
       </div>
     </div>
   )
@@ -527,12 +625,18 @@ export function GuideView({ currency }: { currency: string }) {
     const observers: IntersectionObserver[] = []
     const entries = new Map<string, boolean>()
 
+    const atBottom = () =>
+      window.innerHeight + window.scrollY >=
+      document.documentElement.scrollHeight - 32
+
     SECTIONS.forEach(({ id }) => {
       const el = document.getElementById(id)
       if (!el) return
       const obs = new IntersectionObserver(
         ([entry]) => {
           entries.set(id, entry.isIntersecting)
+          // Don't override when already pinned at the bottom
+          if (atBottom()) return
           // Pick the topmost visible section
           const first = SECTIONS.find((s) => entries.get(s.id))
           if (first) setActive(first.id)
@@ -545,9 +649,7 @@ export function GuideView({ currency }: { currency: string }) {
 
     // When scrolled to the bottom, activate the last section
     const onScroll = () => {
-      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 32) {
-        setActive(SECTIONS[SECTIONS.length - 1].id)
-      }
+      if (atBottom()) setActive(SECTIONS[SECTIONS.length - 1].id)
     }
     window.addEventListener('scroll', onScroll, { passive: true })
 
@@ -889,21 +991,74 @@ export function GuideView({ currency }: { currency: string }) {
               <SubHeading>Vendor rules — teaching Qwen</SubHeading>
               <BodyText>
                 Vendor rules are explicit pattern-to-category mappings. When a transaction description
-                contains a pattern (case-insensitive), Qwen will always assign the mapped category.
-                These override Qwen's guesses.
+                matches a rule, Qwen always assigns the mapped category — overriding its own guesses.
+                Rules support five match types, optional direction scoping, amount bounds, and
+                a priority system to resolve conflicts.
               </BodyText>
-              <DemoShell label="Vendor rules">
+              <DemoShell label="Vendor rules — pattern types and direction">
                 <div className="w-full"><VendorRuleDemo /></div>
               </DemoShell>
+
+              <SubHeading>Match types</SubHeading>
+              <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                {[
+                  ['~ contains',    'Pattern appears anywhere in the description. Default. Case-insensitive.'],
+                  ['^ starts-with', 'Description must begin with the pattern. Useful when banks prefix with a code.'],
+                  ['$ ends-with',   'Description must end with the pattern.'],
+                  ['= exact',       'Full description must equal the pattern exactly (case-insensitive).'],
+                  ['.* regex',      'Pattern is a regular expression. Use for complex cases. Validated on save.'],
+                ].map(([label, desc]) => (
+                  <div key={label} className="flex gap-3">
+                    <span className="w-28 shrink-0 font-mono text-xs pt-0.5" style={{ color: 'var(--tx-primary)' }}>{label}</span>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
+
+              <SubHeading>Direction &amp; amount filters</SubHeading>
+              <BodyText>
+                Scope a rule to <strong>debit-only</strong> (expenses) or <strong>credit-only</strong> (income/refunds) so the
+                same description string maps to different categories depending on which way money flows.
+                For example: <em>AMAZON</em> debit → Shopping, <em>AMAZON RETURN</em> credit → Shopping (refund).
+              </BodyText>
+              <BodyText>
+                Amount bounds (<strong>min</strong> / <strong>max</strong>) narrow a rule to a specific size range.
+                Add them under <strong>Advanced options</strong> when creating a rule.
+                Example: <em>AMAZON</em> debit, max 500 → Shopping; <em>AMAZON</em> debit, min 500 → Electronics.
+              </BodyText>
+
+              <SubHeading>Priority</SubHeading>
+              <BodyText>
+                When multiple rules could match the same transaction, the one with the <strong>lowest
+                priority number</strong> wins. All rules default to priority 0 — if you need a rule
+                to take precedence, set it to a negative number or adjust others upward.
+                Edit the priority inline in the Settings table; the list reorders immediately.
+              </BodyText>
+
+              <SubHeading>Multiple patterns per vendor</SubHeading>
+              <BodyText>
+                Banks render the same merchant inconsistently across statement types — NETFLIX.COM,
+                NFLX*SERVICE, NETFLIX INTL. Add all variants under one vendor name: rules with the
+                same vendor name are grouped together in Settings. Click <strong>+ Add pattern</strong>{' '}
+                on a vendor group to attach another pattern without retyping the name and category.
+              </BodyText>
+
+              <SubHeading>Testing rules</SubHeading>
+              <BodyText>
+                Hover any rule row and click the <FlaskConical size={12} style={{ display: 'inline', verticalAlign: 'middle', marginInline: 2 }} />{' '}
+                icon to run a live test against your committed transactions. A panel shows every
+                matching transaction — useful before enabling a broad pattern to check it won't
+                mis-categorise anything.
+              </BodyText>
 
               <SubHeading>Auto-suggestions</SubHeading>
               <BodyText>
                 After you save a category edit in the Ledger, ydb checks whether the transaction
-                description already matches any vendor rule. If it does not, a suggestion banner
-                appears beneath the row — pre-filled with the description as the pattern and the
-                category you just assigned. Click <strong>Add Rule</strong> to create it instantly,
-                or dismiss it to skip. This is the fastest way to build up rules organically as
-                you categorise transactions.
+                matches any existing rule (including direction and amount). If nothing matches, a
+                suggestion banner appears pre-filled with the description as the pattern, the saved
+                category, and a <strong>match type selector</strong> so you can pick the right type
+                before clicking <strong>Add Rule</strong>. Direction is inferred automatically from
+                the transaction amount — debits create debit-scoped rules, credits create credit-scoped ones.
               </BodyText>
 
               <SubHeading>Learned patterns</SubHeading>
@@ -918,8 +1073,35 @@ export function GuideView({ currency }: { currency: string }) {
               </Tip>
             </Section>
 
-            {/* 06 — Dashboard */}
-            <Section id="dashboard" num="06" title="Dashboard">
+            {/* 06 — Budgets */}
+            <Section id="budgets" num="06" title="Budgets">
+              <BodyText>
+                Budgets let you set a monthly spending limit per category. Once set, the Dashboard shows
+                a live progress bar for each budget — green while you're on track, amber when you're
+                approaching the limit (80 %), and red if you've gone over.
+              </BodyText>
+
+              <DemoShell label="Budget progress — current month">
+                <BudgetProgressDemo currency={currency} />
+              </DemoShell>
+
+              <SubHeading>Setting budgets</SubHeading>
+              <BodyText>
+                Go to{' '}
+                <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>{' '}
+                and find the <strong>Budgets</strong> card. Pick a category, enter a monthly limit,
+                and click Add. Each category can have at most one budget — adding a duplicate replaces
+                the existing limit.
+              </BodyText>
+
+              <Tip>
+                Budgets only count the <em>current calendar month</em> regardless of the date range
+                selected on the Dashboard. This keeps the progress bars meaningful day-to-day.
+              </Tip>
+            </Section>
+
+            {/* 07 — Dashboard */}
+            <Section id="dashboard" num="07" title="Dashboard">
               <BodyText>
                 The{' '}
                 <Link href="/dashboard" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Dashboard</Link>{' '}
@@ -941,7 +1123,7 @@ export function GuideView({ currency }: { currency: string }) {
                   ['Category trends',  'Line chart showing how each category changes month over month.'],
                   ['Top transactions', 'The 10 largest transactions by absolute amount in the period.'],
                   ['Cash flow table',  'Month-by-month opening balance, income, expenses, and closing balance.'],
-                  ['Budgets',          'Current-month spend vs monthly limit for each budget you have set up. See section 08.'],
+                  ['Budgets',          'Current-month spend vs monthly limit for each budget you have set up. See section 06.'],
                 ].map(([label, desc]) => (
                   <div key={label} className="flex gap-3">
                     <span className="w-44 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
@@ -963,8 +1145,38 @@ export function GuideView({ currency }: { currency: string }) {
               </Tip>
             </Section>
 
-            {/* 07 — Chat */}
-            <Section id="chat" num="07" title="Chat">
+            {/* 08 — Recurring */}
+            <Section id="recurring" num="08" title="Recurring Transactions">
+              <BodyText>
+                ydb can automatically detect recurring charges in your transaction history —
+                subscriptions, standing orders, insurance premiums, loan EMIs — anything that
+                appears with a consistent amount on a roughly monthly interval.
+              </BodyText>
+
+              <SubHeading>How detection works</SubHeading>
+              <BodyText>
+                ydb groups your committed transactions by description prefix, then looks for groups
+                where the same amount (within ±10 %) appears at least three times with an average
+                gap of 25–40 days. Matches are surfaced in{' '}
+                <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>{' '}
+                under <strong>Recurring Transactions</strong>, showing the estimated monthly cost,
+                occurrence count, and when the last one landed.
+              </BodyText>
+
+              <SubHeading>What to do with them</SubHeading>
+              <BodyText>
+                Use the list as a prompt to create vendor rules or budgets for any recurring charge
+                you haven't already categorised. It's also a quick way to spot forgotten subscriptions.
+              </BodyText>
+
+              <Tip>
+                The list refreshes on every page load — it reads your live transaction data, so
+                accuracy improves as you import more history.
+              </Tip>
+            </Section>
+
+            {/* 09 — Chat */}
+            <Section id="chat" num="09" title="Chat">
               <BodyText>
                 The{' '}
                 <Link href="/chat" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Chat</Link>{' '}
@@ -1025,60 +1237,114 @@ export function GuideView({ currency }: { currency: string }) {
               </Tip>
             </Section>
 
-            {/* 08 — Budgets */}
-            <Section id="budgets" num="08" title="Budgets">
+            {/* 10 — Reimbursements */}
+            <Section id="reimbursements" num="10" title="Reimbursements">
               <BodyText>
-                Budgets let you set a monthly spending limit per category. Once set, the Dashboard shows
-                a live progress bar for each budget — green while you're on track, amber when you're
-                approaching the limit (80 %), and red if you've gone over.
+                Some expenses are temporary — you pay upfront and get part or all of it back later.
+                Insurance claims are the classic example: you settle a medical bill today and the insurer
+                credits you 10–15 days later. ydb tracks these as a matched pair so your books stay honest:
+                the expense is recorded in full, and when the credit arrives you link it. The row then
+                shows your actual out-of-pocket cost.
               </BodyText>
 
-              <DemoShell label="Budget progress — current month">
-                <BudgetProgressDemo currency={currency} />
+              <SubHeading>Step 1 — Flag the expense</SubHeading>
+              <BodyText>
+                Edit the transaction in the{' '}
+                <Link href="/ledger" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Ledger</Link>.
+                In the Notes cell, check the <strong>Reimbursable</strong> checkbox and type who owes
+                you — for example <em>Insurance</em> or <em>Employer</em>. Save the row. The transaction
+                now carries a{' '}
+                <RotateCcw size={12} style={{ display: 'inline', verticalAlign: 'middle', marginInline: 2 }} />{' '}
+                icon and appears in the pending reimbursements banner at the top of the ledger.
+              </BodyText>
+
+              <SubHeading>Step 2 — Link the settlement</SubHeading>
+              <BodyText>
+                When the credit appears in your account, hover the flagged expense row and click the{' '}
+                <RotateCcw size={12} style={{ display: 'inline', verticalAlign: 'middle', marginInline: 2 }} />{' '}
+                icon in the actions column. A modal opens showing all available credit transactions,
+                sorted by closest amount match. Select the one that settles this expense. The row
+                updates immediately: the gross amount stays, the net appears beneath it, and the row
+                gains a{' '}
+                <CheckCircle2 size={12} style={{ display: 'inline', verticalAlign: 'middle', marginInline: 2, color: '#34d399' }} />{' '}
+                icon to confirm the link.
+              </BodyText>
+
+              <DemoShell label="Reimbursement lifecycle — click to link">
+                <ReimbursementDemo currency={currency} />
               </DemoShell>
 
-              <SubHeading>Setting budgets</SubHeading>
+              <SubHeading>Pending reimbursements banner</SubHeading>
               <BodyText>
-                Go to{' '}
-                <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>{' '}
-                and find the <strong>Budgets</strong> card. Pick a category, enter a monthly limit,
-                and click Add. Each category can have at most one budget — adding a duplicate replaces
-                the existing limit.
+                The top of the Ledger shows a banner whenever you have unsettled reimbursable expenses.
+                It displays the count and total amount outstanding. Click it to toggle a filter that shows
+                only pending reimbursements — useful when you are chasing multiple claims at once.
+              </BodyText>
+
+              <SubHeading>Partial reimbursements</SubHeading>
+              <BodyText>
+                Insurance often covers less than the full amount — an 80 % policy on a{' '}
+                {currency} 500 bill pays back {currency} 400. Link whatever credit arrives and the net
+                amount updates to reflect your actual cost ({currency} 100 out of pocket in that example).
+                If a claim is denied entirely, the expense stays pending in the banner indefinitely until
+                you either link a credit or manually uncheck the Reimbursable flag.
               </BodyText>
 
               <Tip>
-                Budgets only count the <em>current calendar month</em> regardless of the date range
-                selected on the Dashboard. This keeps the progress bars meaningful day-to-day.
+                Reimbursements are not counted as income. The credit is a cost correction — linking it
+                reduces your net expense without inflating your income or savings rate figures.
               </Tip>
             </Section>
 
-            {/* 09 — Recurring */}
-            <Section id="recurring" num="09" title="Recurring Transactions">
+            {/* 11 — Backups */}
+            <Section id="backups" num="11" title="Backups">
               <BodyText>
-                ydb can automatically detect recurring charges in your transaction history —
-                subscriptions, standing orders, insurance premiums, loan EMIs — anything that
-                appears with a consistent amount on a roughly monthly interval.
+                ydb stores everything in a single SQLite file on your machine. Backups are plain copies
+                of that file — portable, self-contained, and restorable without any tooling beyond
+                replacing the file.
               </BodyText>
 
-              <SubHeading>How detection works</SubHeading>
+              <SubHeading>Automatic backups</SubHeading>
               <BodyText>
-                ydb groups your committed transactions by description prefix, then looks for groups
-                where the same amount (within ±10 %) appears at least three times with an average
-                gap of 25–40 days. Matches are surfaced in{' '}
+                A backup is created automatically each time the app server starts, but at most once per
+                day. If you leave the app running continuously, trigger a manual backup before
+                importing a large batch of statements or making bulk edits.
+              </BodyText>
+
+              <SubHeading>Manual backups</SubHeading>
+              <BodyText>
+                Open{' '}
                 <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>{' '}
-                under <strong>Recurring Transactions</strong>, showing the estimated monthly cost,
-                occurrence count, and when the last one landed.
+                and scroll to the <strong>Backups</strong> card. Click <strong>Back up now</strong> to
+                snapshot the database immediately. The new entry appears at the top of the list with its
+                timestamp and file size.
               </BodyText>
 
-              <SubHeading>What to do with them</SubHeading>
+              <SubHeading>Downloading a backup</SubHeading>
               <BodyText>
-                Use the list as a prompt to create vendor rules or budgets for any recurring charge
-                you haven't already categorised. It's also a quick way to spot forgotten subscriptions.
+                Each backup has a{' '}
+                <Download size={12} style={{ display: 'inline', verticalAlign: 'middle', marginInline: 2 }} />{' '}
+                <strong>Download</strong> link. The file is a standard SQLite database — open it with
+                any SQLite viewer, or restore by replacing{' '}
+                <code
+                  className="font-mono text-[13px] px-1 py-0.5 rounded"
+                  style={{ background: 'var(--bg-card-alt)', color: 'var(--tx-primary)' }}
+                >
+                  prisma/dev.db
+                </code>{' '}
+                in the project directory and restarting the app.
+              </BodyText>
+
+              <SubHeading>Retention</SubHeading>
+              <BodyText>
+                The last 14 backups are kept. Older ones are pruned automatically when a new backup is
+                created. With daily auto-backups that gives you a two-week rolling window.
               </BodyText>
 
               <Tip>
-                The list refreshes on every page load — it reads your live transaction data, so
-                accuracy improves as you import more history.
+                Backups are excluded from git. Store downloaded snapshots somewhere safe — cloud
+                storage, an external drive — if you want longer-term coverage beyond the 14-backup
+                window.
               </Tip>
             </Section>
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
 
@@ -14,6 +14,10 @@ type Transaction = {
   parentTransactionId: number | null
   splitLegs?: SplitLeg[]
   account: { name: string; currency: string }
+  reimbursableFor: string | null
+  reimbursementTxId: number | null
+  reimbursementTx: { id: number; amount: number; description: string } | null
+  reimbursedExpense: { id: number; description: string } | null
 }
 type Account = { id: number; name: string; currency: string }
 type Category = { id: number; name: string; color: string }
@@ -46,6 +50,7 @@ export function LedgerView({ initialTransactions, accounts, categories }: {
   const [bulkCategory, setBulkCategory] = useState('')
   const [bulkStatus, setBulkStatus] = useState('')
   const [bulkApplying, setBulkApplying] = useState(false)
+  const [showPendingOnly, setShowPendingOnly] = useState(false)
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -53,16 +58,22 @@ export function LedgerView({ initialTransactions, accounts, categories }: {
     setPage(1)
   }
 
-  useEffect(() => { setPage(1) }, [accountFilter, categoryFilter, statusFilter, search, sortKey, sortDir])
+  useEffect(() => { setPage(1) }, [accountFilter, categoryFilter, statusFilter, search, sortKey, sortDir, showPendingOnly])
+
+  const pendingReimbursements = useMemo(
+    () => transactions.filter((t) => t.reimbursableFor && !t.reimbursementTxId && !t.parentTransactionId),
+    [transactions]
+  )
 
   const filtered = useMemo(() => transactions.filter((t) => {
     if (t.parentTransactionId !== null) return false // hide split legs from main list
+    if (showPendingOnly && !(t.reimbursableFor && !t.reimbursementTxId)) return false
     if (accountFilter !== 'all' && t.accountId !== parseInt(accountFilter)) return false
     if (categoryFilter !== 'all' && t.category !== categoryFilter) return false
     if (statusFilter !== 'all' && t.status !== statusFilter) return false
     if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
     return true
-  }), [transactions, accountFilter, categoryFilter, statusFilter, search])
+  }), [transactions, accountFilter, categoryFilter, statusFilter, search, showPendingOnly])
 
   const allCategories = useMemo(() => {
     const all = [...new Set([...categories.map((c) => c.name), 'Transfer', 'Income', 'Other', ...transactions.map((t) => t.category)])]
@@ -104,7 +115,7 @@ export function LedgerView({ initialTransactions, accounts, categories }: {
     [sorted, page]
   )
 
-  const hasFilters = accountFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || search
+  const hasFilters = accountFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || search || showPendingOnly
 
   const handleUpdate = (updated: Transaction) =>
     setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
@@ -204,6 +215,29 @@ export function LedgerView({ initialTransactions, accounts, categories }: {
         ))}
       </div>
 
+      {/* Pending reimbursements banner */}
+      {pendingReimbursements.length > 0 && (
+        <button
+          onClick={() => setShowPendingOnly((v) => !v)}
+          className="w-full flex items-center gap-2.5 px-4 py-3 rounded-[8px] text-sm text-left transition-colors duration-150"
+          style={{
+            backgroundColor: showPendingOnly ? 'var(--bg-badge-review)' : 'var(--bg-card)',
+            border: '1px solid var(--border-warm)',
+            color: 'var(--tx-badge-review)',
+          }}
+        >
+          <RotateCcw size={14} style={{ flexShrink: 0 }} />
+          <span>
+            {pendingReimbursements.length} pending reimbursement{pendingReimbursements.length !== 1 ? 's' : ''} awaiting settlement
+            {' — '}
+            {currency}{pendingReimbursements.reduce((s, t) => s + Math.abs(t.amount), 0).toFixed(2)} outstanding
+          </span>
+          <span className="ml-auto text-xs" style={{ color: 'var(--tx-secondary)' }}>
+            {showPendingOnly ? 'Show all' : 'Filter'}
+          </span>
+        </button>
+      )}
+
       {/* Filters */}
       <div className="p-4" style={cardStyle}>
         <div className="flex flex-wrap gap-3 items-center">
@@ -271,7 +305,7 @@ export function LedgerView({ initialTransactions, accounts, categories }: {
             </Select.Portal>
           </Select.Root>
           {hasFilters && (
-            <button onClick={() => { setAccountFilter('all'); setCategoryFilter('all'); setStatusFilter('all'); setSearch('') }}
+            <button onClick={() => { setAccountFilter('all'); setCategoryFilter('all'); setStatusFilter('all'); setSearch(''); setShowPendingOnly(false) }}
               className="text-sm transition-colors duration-150 hover:text-error" style={{ color: 'var(--tx-secondary)' }}>
               Clear
             </button>

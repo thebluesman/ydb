@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { colorForCategory, PALETTE } from '@/lib/category-colors'
+import { countMatchingTransactions } from '@/lib/vendor-rule-match'
 import { AccountsForm } from './_components/AccountsForm'
 import { PreferencesForm } from './_components/PreferencesForm'
 import { VendorRuleManager } from './_components/VendorRuleManager'
@@ -7,24 +8,36 @@ import { BudgetManager } from './_components/BudgetManager'
 import { RecurringTransactions } from './_components/RecurringTransactions'
 import { ImportHistory } from './_components/ImportHistory'
 import { DangerZone } from './_components/DangerZone'
+import { BackupManager } from './_components/BackupManager'
+import { listBackups } from '@/lib/backup'
 
 export const metadata = {
   title: 'Settings — ydb',
 }
 
 export default async function SettingsPage() {
-  const [rawAccounts, categories, settings, vendorRules, budgets, rawImportRecords] = await Promise.all([
+  const backups = listBackups()
+
+  const [rawAccounts, categories, settings, rawVendorRules, budgets, rawImportRecords, committedTxns] = await Promise.all([
     prisma.account.findMany({ orderBy: { id: 'asc' } }),
     prisma.category.findMany({ orderBy: { name: 'asc' } }),
     prisma.setting.findMany(),
-    prisma.vendorRule.findMany({ orderBy: { vendor: 'asc' } }),
+    prisma.vendorRule.findMany({ orderBy: [{ priority: 'asc' }, { vendor: 'asc' }] }),
     prisma.budget.findMany({ orderBy: { category: 'asc' } }),
     prisma.importRecord.findMany({
       orderBy: { importedAt: 'desc' },
       take: 50,
       include: { account: { select: { name: true } } },
     }),
+    prisma.transaction.findMany({
+      where: { status: { in: ['committed', 'reconciled'] } },
+      select: { description: true, amount: true },
+    }),
   ])
+  const vendorRules = rawVendorRules.map((r) => ({
+    ...r,
+    matchCount: countMatchingTransactions(r, committedTxns),
+  }))
   const importRecords = rawImportRecords.map((r) => ({
     ...r,
     importedAt: r.importedAt.toISOString(),
@@ -76,7 +89,11 @@ export default async function SettingsPage() {
           <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
             Teach Qwen how to categorise your recurring vendors. Explicit rules take priority over learned patterns.
           </p>
-          <VendorRuleManager rules={vendorRules} categories={categories} />
+          <VendorRuleManager
+            rules={vendorRules}
+            categories={categories}
+            currency={settings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'}
+          />
         </div>
 
         {/* Budgets card */}
@@ -119,6 +136,20 @@ export default async function SettingsPage() {
             Statements uploaded in this app.
           </p>
           <ImportHistory initialRecords={importRecords} />
+        </div>
+
+        {/* Backups card */}
+        <div
+          className="p-6 rounded-[8px]"
+          style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
+        >
+          <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
+            Backups
+          </h2>
+          <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
+            A backup is created automatically each day the app starts. You can also back up manually and download any snapshot.
+          </p>
+          <BackupManager initialBackups={backups} />
         </div>
 
         <DangerZone />

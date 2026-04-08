@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma'
 async function buildSystemPrompt(formatHint?: string): Promise<string> {
   const [dbCategories, vendorRules, learnedTxns] = await Promise.all([
     prisma.category.findMany({ orderBy: { name: 'asc' } }),
-    prisma.vendorRule.findMany({ orderBy: { vendor: 'asc' } }),
+    prisma.vendorRule.findMany({ orderBy: [{ priority: 'asc' }, { vendor: 'asc' }] }),
     // Top 60 most-recently-committed distinct description→category pairs
     prisma.transaction.findMany({
       where: { status: 'committed' },
@@ -22,8 +22,18 @@ async function buildSystemPrompt(formatHint?: string): Promise<string> {
   // Build explicit vendor dictionary from VendorRule table
   let dictionary = ''
   if (vendorRules.length > 0) {
-    const lines = vendorRules.map((r) => `  - "${r.pattern}" → ${r.category}  (${r.vendor})`)
-    dictionary += `\nVendor dictionary — when a description contains one of these patterns (case-insensitive), use the mapped category:\n${lines.join('\n')}`
+    const lines = vendorRules.map((r) => {
+      const typeLabel = r.matchType === 'contains' ? 'contains' : r.matchType
+      let line = `  - ${typeLabel} "${r.pattern}" → ${r.category}  (${r.vendor})`
+      const constraints: string[] = []
+      if (r.direction === 'debit')   constraints.push('debit only')
+      if (r.direction === 'credit')  constraints.push('credit only')
+      if (r.minAmount != null)       constraints.push(`amount ≥ ${r.minAmount}`)
+      if (r.maxAmount != null)       constraints.push(`amount ≤ ${r.maxAmount}`)
+      if (constraints.length)        line += `  [${constraints.join(', ')}]`
+      return line
+    })
+    dictionary += `\nVendor dictionary — apply each rule when the description matches the rule type (case-insensitive). Higher-priority rules (listed first) take precedence:\n${lines.join('\n')}`
   }
 
   // Supplement with learned patterns from committed transactions (deduplicated)

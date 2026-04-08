@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
-import { X, Link2, Unlink, Scissors, ChevronDown, ChevronRight } from 'lucide-react'
+import { X, Link2, Unlink, Scissors, ChevronDown, ChevronRight, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { TransferLinkModal } from './TransferLinkModal'
+import { ReimburseLinkModal } from './ReimburseLinkModal'
 import { SplitForm } from './SplitForm'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
@@ -20,6 +21,10 @@ type Transaction = {
   parentTransactionId: number | null
   splitLegs?: SplitLeg[]
   account: { name: string; currency: string }
+  reimbursableFor: string | null
+  reimbursementTxId: number | null
+  reimbursementTx: { id: number; amount: number; description: string } | null
+  reimbursedExpense: { id: number; description: string } | null
 }
 
 type Account = { id: number; name: string; currency: string }
@@ -85,6 +90,9 @@ export function LedgerRow({
   const [unlinking, setUnlinking] = useState(false)
   const [showSplitForm, setShowSplitForm] = useState(false)
   const [showSplitLegs, setShowSplitLegs] = useState(false)
+  const [showReimburseModal, setShowReimburseModal] = useState(false)
+  const [unlinkingReimburse, setUnlinkingReimburse] = useState(false)
+  const [ruleMatchType, setRuleMatchType] = useState('contains')
   const [draft, setDraft] = useState({
     date: formatDate(transaction.date),
     description: transaction.description,
@@ -93,6 +101,7 @@ export function LedgerRow({
     accountId: transaction.accountId,
     status: transaction.status,
     notes: transaction.notes ?? '',
+    reimbursableFor: transaction.reimbursableFor ?? '',
   })
 
   const set = (field: string, value: string | number) =>
@@ -105,13 +114,13 @@ export function LedgerRow({
       const res = await fetch(`/api/transactions/${transaction.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ ...draft, reimbursableFor: draft.reimbursableFor || null }),
       })
       if (!res.ok) throw new Error(await res.text())
       onUpdate(await res.json())
       setEditing(false)
       // Non-blocking vendor rule suggestion check
-      fetch(`/api/vendor-rules/check?description=${encodeURIComponent(draft.description)}`)
+      fetch(`/api/vendor-rules/check?description=${encodeURIComponent(draft.description)}&amount=${draft.amount}`)
         .then((r) => r.json())
         .then(({ matched }) => {
           if (!matched) {
@@ -147,6 +156,7 @@ export function LedgerRow({
       accountId: transaction.accountId,
       status: transaction.status,
       notes: transaction.notes ?? '',
+      reimbursableFor: transaction.reimbursableFor ?? '',
     })
     setError('')
     setRuleSuggestion(null)
@@ -160,7 +170,13 @@ export function LedgerRow({
       const res = await fetch('/api/vendor-rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pattern: rulePattern, vendor: ruleVendor, category: ruleSuggestion.category }),
+        body: JSON.stringify({
+          pattern: rulePattern,
+          vendor: ruleVendor,
+          category: ruleSuggestion.category,
+          matchType: ruleMatchType,
+          direction: draft.amount < 0 ? 'debit' : draft.amount > 0 ? 'credit' : 'either',
+        }),
       })
       if (!res.ok) throw new Error(await res.text())
       setRuleSuggestion(null)
@@ -175,13 +191,28 @@ export function LedgerRow({
       const res = await fetch(`/api/transactions/${transaction.id}/link`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await res.text())
       const updated = await res.json()
-      // Also clear the other side in local state
       if (transaction.linkedTransferId) {
         onUpdateById?.(transaction.linkedTransferId, { linkedTransferId: null })
       }
       onUpdate(updated)
     } catch { /* silent */ } finally {
       setUnlinking(false)
+    }
+  }
+
+  const handleUnlinkReimbursement = async () => {
+    const prevSettlementId = transaction.reimbursementTxId
+    setUnlinkingReimburse(true)
+    try {
+      const res = await fetch(`/api/transactions/${transaction.id}/reimburse`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await res.text())
+      const updated = await res.json()
+      onUpdate(updated)
+      if (prevSettlementId) {
+        onUpdateById?.(prevSettlementId, { reimbursedExpense: null })
+      }
+    } catch { /* silent */ } finally {
+      setUnlinkingReimburse(false)
     }
   }
 
@@ -193,7 +224,12 @@ export function LedgerRow({
 
   const rowBorder: React.CSSProperties = { borderTop: '1px solid var(--border-warm)' }
 
+  const netAmount = transaction.reimbursementTx
+    ? transaction.amount + transaction.reimbursementTx.amount
+    : null
+
   if (editing) {
+    const reimbursableChecked = !!draft.reimbursableFor
     return (
       <>
         <tr style={{ ...rowBorder, backgroundColor: 'var(--bg-edit-row)' }}>
@@ -234,6 +270,36 @@ export function LedgerRow({
           </td>
           <td className="px-2 py-2 min-w-[160px]">
             <input type="text" value={draft.notes} placeholder="Optional" onChange={(e) => set('notes', e.target.value)} className={inputCls} style={inputStyle} />
+            {/* Reimbursable toggle */}
+            <div className="flex items-center gap-1.5 mt-1.5">
+              <input
+                type="checkbox"
+                id={`reimb-${transaction.id}`}
+                checked={reimbursableChecked}
+                onChange={(e) =>
+                  set('reimbursableFor', e.target.checked ? 'Insurance' : '')
+                }
+                className="cursor-pointer"
+              />
+              {reimbursableChecked ? (
+                <input
+                  type="text"
+                  value={draft.reimbursableFor}
+                  onChange={(e) => set('reimbursableFor', e.target.value)}
+                  placeholder="Reimbursed by…"
+                  className="flex-1 px-1.5 py-0.5 text-[11px] rounded-[4px] outline-none"
+                  style={inputStyle}
+                />
+              ) : (
+                <label
+                  htmlFor={`reimb-${transaction.id}`}
+                  className="text-[11px] cursor-pointer select-none"
+                  style={{ color: 'var(--tx-faint)' }}
+                >
+                  Reimbursable
+                </label>
+              )}
+            </div>
           </td>
           <td className="px-2 py-2 whitespace-nowrap">
             <div className="flex items-center gap-2">
@@ -287,6 +353,19 @@ export function LedgerRow({
             className="px-2 py-0.5 rounded-[4px] text-xs outline-none w-32"
             style={inputStyle}
           />
+          <select
+            value={ruleMatchType}
+            onChange={(e) => setRuleMatchType(e.target.value)}
+            className="px-1.5 py-0.5 rounded-[4px] text-xs outline-none"
+            style={inputStyle}
+            title="Match type"
+          >
+            <option value="contains">contains</option>
+            <option value="starts-with">starts-with</option>
+            <option value="ends-with">ends-with</option>
+            <option value="exact">exact</option>
+            <option value="regex">regex</option>
+          </select>
           <button
             onClick={handleCreateRule}
             disabled={ruleSaving}
@@ -326,13 +405,32 @@ export function LedgerRow({
           {transaction.linkedTransferId && (
             <span title="Linked transfer"><Link2 size={11} style={{ color: 'var(--tx-faint)', flexShrink: 0 }} /></span>
           )}
+          {transaction.reimbursableFor && !transaction.reimbursementTxId && (
+            <span title={`Pending reimbursement from ${transaction.reimbursableFor}`}>
+              <RotateCcw size={11} style={{ color: 'var(--tx-faint)', flexShrink: 0 }} />
+            </span>
+          )}
+          {transaction.reimbursementTx && (
+            <span title={`Reimbursed: ${transaction.reimbursementTx.description}`}>
+              <CheckCircle2 size={11} style={{ color: 'var(--tx-success)', flexShrink: 0 }} />
+            </span>
+          )}
+          {transaction.reimbursedExpense && (
+            <span title={`Reimburses: ${transaction.reimbursedExpense.description}`}>
+              <RotateCcw size={11} style={{ color: 'var(--tx-success)', flexShrink: 0 }} />
+            </span>
+          )}
         </div>
       </td>
-      <td
-        className="px-3 py-2.5 text-sm font-mono whitespace-nowrap"
-        style={{ color: amtColor(transaction.amount), letterSpacing: '-0.275px' }}
-      >
-        {transaction.amount < 0 ? '−' : '+'}{currency}{Math.abs(transaction.amount).toFixed(2)}
+      <td className="px-3 py-2.5 text-sm font-mono whitespace-nowrap" style={{ letterSpacing: '-0.275px' }}>
+        <div style={{ color: amtColor(transaction.amount) }}>
+          {transaction.amount < 0 ? '−' : '+'}{currency}{Math.abs(transaction.amount).toFixed(2)}
+        </div>
+        {netAmount !== null && (
+          <div className="text-[10px] font-normal" style={{ color: 'var(--tx-secondary)', letterSpacing: 0 }}>
+            net {netAmount < 0 ? '−' : '+'}{currency}{Math.abs(netAmount).toFixed(2)}
+          </div>
+        )}
       </td>
       <td className="px-3 py-2.5 text-xs" style={{ color: 'var(--tx-secondary)' }}>
         {transaction.splitLegs && transaction.splitLegs.length > 0 ? (
@@ -353,7 +451,12 @@ export function LedgerRow({
         <StatusBadge status={transaction.status} />
       </td>
       <td className="px-3 py-2.5 text-xs max-w-[160px] truncate" style={{ color: 'var(--tx-faint)' }}>
-        {transaction.notes ?? '—'}
+        {transaction.reimbursableFor ? (
+          <span>
+            <span style={{ color: 'var(--tx-secondary)' }}>{transaction.reimbursableFor}</span>
+            {transaction.notes ? <span> · {transaction.notes}</span> : null}
+          </span>
+        ) : (transaction.notes ?? '—')}
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
@@ -386,6 +489,31 @@ export function LedgerRow({
             >
               <Link2 size={13} />
             </button>
+          )}
+          {/* Reimbursement actions: only show if flagged as reimbursable */}
+          {transaction.reimbursableFor && (
+            transaction.reimbursementTxId ? (
+              <button
+                onClick={handleUnlinkReimbursement}
+                disabled={unlinkingReimburse}
+                className="text-xs transition-colors duration-150 hover:text-error disabled:opacity-40"
+                style={{ color: 'var(--tx-tertiary)' }}
+                title="Unlink reimbursement"
+                aria-label="Unlink reimbursement"
+              >
+                <Unlink size={13} />
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowReimburseModal(true)}
+                className="text-xs transition-colors duration-150 hover:text-accent"
+                style={{ color: 'var(--tx-tertiary)' }}
+                title="Link reimbursement transaction"
+                aria-label="Link reimbursement"
+              >
+                <RotateCcw size={13} />
+              </button>
+            )
           )}
           {!transaction.parentTransactionId && (
             <button
@@ -447,6 +575,21 @@ export function LedgerRow({
           setShowLinkModal(false)
         }}
         onClose={() => setShowLinkModal(false)}
+      />
+    )}
+    {showReimburseModal && (
+      <ReimburseLinkModal
+        expenseId={transaction.id}
+        expenseDescription={transaction.description}
+        expenseAmount={transaction.amount}
+        onLink={(settlementId, updatedExpense) => {
+          onUpdate(updatedExpense as Transaction)
+          onUpdateById?.(settlementId, {
+            reimbursedExpense: { id: transaction.id, description: transaction.description },
+          })
+          setShowReimburseModal(false)
+        }}
+        onClose={() => setShowReimburseModal(false)}
       />
     )}
     </>

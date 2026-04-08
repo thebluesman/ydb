@@ -7,6 +7,8 @@ export async function GET() {
     include: {
       account: { select: { name: true, currency: true } },
       splitLegs: { select: { id: true, amount: true, category: true, description: true } },
+      reimbursementTx: { select: { id: true, amount: true, description: true } },
+      reimbursedExpense: { select: { id: true, description: true } },
     },
   })
   return NextResponse.json(transactions)

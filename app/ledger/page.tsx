@@ -9,7 +9,12 @@ export default async function LedgerPage() {
   const [transactions, accounts, categories] = await Promise.all([
     prisma.transaction.findMany({
       orderBy: { date: 'desc' },
-      include: { account: { select: { name: true, currency: true } } },
+      include: {
+        account: { select: { name: true, currency: true } },
+        splitLegs: { select: { id: true, amount: true, category: true, description: true } },
+        reimbursementTx: { select: { id: true, amount: true, description: true } },
+        reimbursedExpense: { select: { id: true, description: true } },
+      },
     }),
     prisma.account.findMany({ where: { isActive: true }, orderBy: { id: 'asc' } }),
     prisma.category.findMany({ orderBy: { name: 'asc' } }),

@@ -47,6 +47,10 @@ model Transaction {
   parentTransactionId Int?
   parentTransaction   Transaction?  @relation("SplitLeg", fields: [parentTransactionId], references: [id])
   splitLegs           Transaction[] @relation("SplitLeg")
+  reimbursableFor     String?                           // who owes the money back (e.g. "Insurance")
+  reimbursementTxId   Int?          @unique             // settlement transaction id (one-to-one)
+  reimbursementTx     Transaction?  @relation("ReimbursementLink", fields: [reimbursementTxId], references: [id], onDelete: SetNull)
+  reimbursedExpense   Transaction?  @relation("ReimbursementLink")
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 }
@@ -88,8 +92,13 @@ model Budget {
 }
 
 model VendorRule {
-  id       Int    @id @default(autoincrement())
-  pattern  String @unique  // substring to match against transaction description (case-insensitive)
-  vendor   String          // display name shown in UI
-  category String          // must match a Category.name
+  id        Int    @id @default(autoincrement())
+  pattern   String                          // no longer unique — multiple vendors can share a pattern
+  matchType String @default("contains")    // "contains" | "starts-with" | "ends-with" | "exact" | "regex"
+  vendor    String                          // display name shown in UI
+  category  String                          // must match a Category.name
+  direction String @default("either")      // "either" | "debit" | "credit"
+  minAmount Float?                          // optional lower bound on abs(amount)
+  maxAmount Float?                          // optional upper bound on abs(amount)
+  priority  Int    @default(0)             // lower number = higher priority
 }
