@@ -21,6 +21,7 @@ export async function PATCH(
   if (body.openingBalanceDate !== undefined) {
     data.openingBalanceDate = body.openingBalanceDate ? new Date(body.openingBalanceDate) : null
   }
+  if (body.creditLimit !== undefined) data.creditLimit = body.creditLimit
 
   const account = await prisma.account.update({ where: { id: accountId }, data })
   return NextResponse.json(account)

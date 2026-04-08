@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Download, DatabaseBackup } from 'lucide-react'
+import { Download, DatabaseBackup, Trash2 } from 'lucide-react'
 
 type BackupEntry = {
   filename: string
@@ -25,6 +25,7 @@ function formatDate(iso: string): string {
 export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[] }) {
   const [backups, setBackups] = useState<BackupEntry[]>(initialBackups)
   const [loading, setLoading] = useState(false)
+  const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const inputStyle = {
@@ -34,6 +35,20 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
     borderRadius: '6px',
     fontSize: '13px',
     padding: '6px 10px',
+  }
+
+  async function handleDelete(filename: string) {
+    setDeleting(filename)
+    setError(null)
+    try {
+      const res = await fetch(`/api/backup/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await res.text())
+      setBackups((prev) => prev.filter((b) => b.filename !== filename))
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setDeleting(null)
+    }
   }
 
   async function handleBackupNow() {
@@ -101,19 +116,35 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
                   {formatDate(b.createdAt)} · {formatSize(b.sizeBytes)}
                 </span>
               </div>
-              <a
-                href={`/api/backup/${encodeURIComponent(b.filename)}`}
-                download={b.filename}
-                className="flex items-center gap-1 text-xs px-2 py-1 rounded-[5px] flex-shrink-0"
-                style={{
-                  color: 'var(--tx-secondary)',
-                  border: '1px solid var(--border-warm)',
-                  backgroundColor: 'var(--bg-input)',
-                }}
-              >
-                <Download size={11} />
-                Download
-              </a>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <a
+                  href={`/api/backup/${encodeURIComponent(b.filename)}`}
+                  download={b.filename}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-[5px]"
+                  style={{
+                    color: 'var(--tx-secondary)',
+                    border: '1px solid var(--border-warm)',
+                    backgroundColor: 'var(--bg-input)',
+                  }}
+                >
+                  <Download size={11} />
+                  Download
+                </a>
+                <button
+                  onClick={() => handleDelete(b.filename)}
+                  disabled={deleting === b.filename}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-[5px] disabled:opacity-50"
+                  style={{
+                    color: 'var(--color-error, #e53e3e)',
+                    border: '1px solid var(--border-warm)',
+                    backgroundColor: 'var(--bg-input)',
+                    cursor: deleting === b.filename ? 'default' : 'pointer',
+                  }}
+                >
+                  <Trash2 size={11} />
+                  {deleting === b.filename ? '…' : 'Delete'}
+                </button>
+              </div>
             </div>
           ))}
         </div>

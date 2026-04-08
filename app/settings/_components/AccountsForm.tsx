@@ -59,16 +59,78 @@ export function AccountsForm({
       : [BLANK_ACCOUNT(baseCurrency)]
   )
   const [categories, setCategories] = useState<Category[]>(initialCategories)
-  const [saving, setSaving] = useState(false)
+  const [savingIdx, setSavingIdx] = useState<number | null>(null)
+  const [savedIdx, setSavedIdx] = useState<number | null>(null)
   const [removing, setRemoving] = useState<number | null>(null)
-  const [status, setStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const updateAccount = (i: number, field: keyof Account, value: string | boolean | number) =>
+  const persistAccount = async (i: number, account: Account) => {
+    if (!account.name.trim()) return
+    setSavingIdx(i)
+    setError(null)
+    try {
+      const payload = {
+        name: account.name,
+        accountType: account.accountType,
+        currency: account.currency,
+        isActive: account.isActive,
+        openingBalance: account.openingBalance,
+        openingBalanceDate: account.openingBalanceDate || null,
+        creditLimit: account.accountType === 'credit' ? (account.creditLimit ?? null) : null,
+      }
+      if (account.id) {
+        const res = await fetch(`/api/accounts/${account.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) throw new Error(await res.text())
+      } else {
+        const res = await fetch('/api/accounts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([payload]),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const [saved]: Account[] = await res.json()
+        setAccounts((prev) => {
+          const n = [...prev]
+          n[i] = { ...n[i], id: saved.id }
+          return n
+        })
+      }
+      setSavedIdx(i)
+      setTimeout(() => setSavedIdx((prev) => (prev === i ? null : prev)), 2000)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setSavingIdx(null)
+    }
+  }
+
+  const updateAccount = (i: number, field: keyof Account, value: string | boolean | number | null) =>
     setAccounts((prev) => {
       const n = [...prev]
       n[i] = { ...n[i], [field]: value }
       return n
     })
+
+  // For selects and checkboxes: update state and immediately persist
+  const updateAndSave = async (i: number, field: keyof Account, value: string | boolean | number | null) => {
+    const updated = { ...accounts[i], [field]: value }
+    setAccounts((prev) => {
+      const n = [...prev]
+      n[i] = updated
+      return n
+    })
+    await persistAccount(i, updated)
+  }
+
+  // For text inputs: save on blur using the event value to avoid stale state
+  const handleTextBlur = (i: number, field: keyof Account, value: string | number) => {
+    const updated = { ...accounts[i], [field]: value }
+    persistAccount(i, updated)
+  }
 
   const addAccount = () => setAccounts((prev) => [...prev, BLANK_ACCOUNT(baseCurrency)])
 
@@ -83,59 +145,15 @@ export function AccountsForm({
       const res = await fetch(`/api/accounts/${acc.id}`, { method: 'DELETE' })
       if (res.status === 409) {
         const data = await res.json()
-        setStatus({
-          type: 'error',
-          message: `Cannot delete "${acc.name}" — it has ${data.count} transaction(s). Archive it instead by unchecking Active.`,
-        })
+        setError(`Cannot delete "${acc.name}" — it has ${data.count} transaction(s). Archive it instead by unchecking Active.`)
         return
       }
       if (!res.ok) throw new Error(await res.text())
       setAccounts((prev) => prev.filter((_, idx) => idx !== i))
-      setStatus({ type: 'success', message: `"${acc.name}" deleted.` })
     } catch (err) {
-      setStatus({ type: 'error', message: String(err) })
+      setError(String(err))
     } finally {
       setRemoving(null)
-    }
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    setStatus(null)
-    try {
-      const payload = accounts
-        .filter((a) => a.name.trim())
-        .map((a) => ({
-          ...(a.id && { id: a.id }),
-          name: a.name,
-          accountType: a.accountType,
-          currency: a.currency,
-          isActive: a.isActive,
-          openingBalance: a.openingBalance,
-          openingBalanceDate: a.openingBalanceDate || null,
-          creditLimit: a.accountType === 'credit' ? (a.creditLimit ?? null) : null,
-        }))
-      const res = await fetch('/api/accounts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const saved: Account[] = await res.json()
-      // Merge saved ids back into local state
-      setAccounts((prev) => {
-        const namedSaved = saved.reverse()
-        return prev.map((a) => {
-          if (a.id) return a
-          const match = namedSaved.find((s) => s.name === a.name)
-          return match ? { ...a, id: match.id } : a
-        })
-      })
-      setStatus({ type: 'success', message: 'Configuration saved.' })
-    } catch (err) {
-      setStatus({ type: 'error', message: String(err) })
-    } finally {
-      setSaving(false)
     }
   }
 
@@ -167,8 +185,8 @@ export function AccountsForm({
             className="pb-5 last:pb-0 space-y-3"
             style={{ borderBottom: i < accounts.length - 1 ? '1px solid var(--border-warm)' : 'none' }}
           >
-            {/* Row 1: Name, Type, Currency, Active */}
-            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 items-end">
+            {/* Row 1: Name, Type, Currency, Active, saved indicator */}
+            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 items-end">
               <div>
                 <Label.Root htmlFor={`acc-name-${i}`} className={labelCls} style={{ color: 'var(--tx-secondary)' }}>
                   Account Name
@@ -179,10 +197,10 @@ export function AccountsForm({
                   placeholder="e.g. Barclays Current"
                   value={account.name}
                   onChange={(e) => updateAccount(i, 'name', e.target.value)}
+                  onBlur={(e) => handleTextBlur(i, 'name', e.target.value)}
                   className="w-full px-3 py-2 text-sm rounded-[8px] outline-none transition-colors duration-150"
                   style={inputStyle}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm)')}
                 />
               </div>
 
@@ -190,7 +208,7 @@ export function AccountsForm({
                 <Label.Root htmlFor={`acc-type-${i}`} className={labelCls} style={{ color: 'var(--tx-secondary)' }}>
                   Type
                 </Label.Root>
-                <Select.Root value={account.accountType} onValueChange={(v) => updateAccount(i, 'accountType', v)}>
+                <Select.Root value={account.accountType} onValueChange={(v) => updateAndSave(i, 'accountType', v)}>
                   <Select.Trigger
                     id={`acc-type-${i}`}
                     className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none min-w-[110px]"
@@ -234,7 +252,7 @@ export function AccountsForm({
                 <Label.Root htmlFor={`acc-currency-${i}`} className={labelCls} style={{ color: 'var(--tx-secondary)' }}>
                   Currency
                 </Label.Root>
-                <Select.Root value={account.currency || baseCurrency} onValueChange={(v) => updateAccount(i, 'currency', v)}>
+                <Select.Root value={account.currency || baseCurrency} onValueChange={(v) => updateAndSave(i, 'currency', v)}>
                   <Select.Trigger
                     id={`acc-currency-${i}`}
                     className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none w-24 font-mono"
@@ -276,7 +294,7 @@ export function AccountsForm({
                   <Checkbox.Root
                     id={`acc-active-${i}`}
                     checked={account.isActive}
-                    onCheckedChange={(v) => updateAccount(i, 'isActive', v === true)}
+                    onCheckedChange={(v) => updateAndSave(i, 'isActive', v === true)}
                     title="Archive account"
                     className="flex items-center justify-center w-[18px] h-[18px] rounded-[4px] outline-none cursor-pointer transition-colors duration-150"
                     style={{
@@ -289,6 +307,16 @@ export function AccountsForm({
                     </Checkbox.Indicator>
                   </Checkbox.Root>
                 </div>
+              </div>
+
+              {/* Per-account save indicator */}
+              <div className="flex items-end pb-[9px] w-8 justify-center">
+                {savingIdx === i && (
+                  <span className="text-[10px]" style={{ color: 'var(--tx-tertiary)' }}>…</span>
+                )}
+                {savedIdx === i && savingIdx !== i && (
+                  <Check size={12} style={{ color: 'var(--tx-success, var(--tx-secondary))' }} />
+                )}
               </div>
             </div>
 
@@ -306,10 +334,10 @@ export function AccountsForm({
                   step="0.01"
                   value={account.openingBalance}
                   onChange={(e) => updateAccount(i, 'openingBalance', parseFloat(e.target.value) || 0)}
+                  onBlur={(e) => handleTextBlur(i, 'openingBalance', parseFloat(e.target.value) || 0)}
                   className="w-36 px-3 py-2 text-sm rounded-[8px] outline-none font-mono transition-colors duration-150"
                   style={inputStyle}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm)')}
                 />
               </div>
 
@@ -322,10 +350,10 @@ export function AccountsForm({
                   type="date"
                   value={account.openingBalanceDate}
                   onChange={(e) => updateAccount(i, 'openingBalanceDate', e.target.value)}
+                  onBlur={(e) => handleTextBlur(i, 'openingBalanceDate', e.target.value)}
                   className="px-3 py-2 text-sm rounded-[8px] outline-none transition-colors duration-150"
                   style={inputStyle}
                   onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm)')}
                 />
               </div>
 
@@ -341,11 +369,17 @@ export function AccountsForm({
                     min="0"
                     placeholder="e.g. 5000"
                     value={account.creditLimit ?? ''}
-                    onChange={(e) => { const v = e.target.value === '' ? null : parseFloat(e.target.value); setAccounts((prev) => { const n = [...prev]; n[i] = { ...n[i], creditLimit: v }; return n }) }}
+                    onChange={(e) => {
+                      const v = e.target.value === '' ? null : parseFloat(e.target.value)
+                      setAccounts((prev) => { const n = [...prev]; n[i] = { ...n[i], creditLimit: v }; return n })
+                    }}
+                    onBlur={(e) => {
+                      const v = e.target.value === '' ? null : parseFloat(e.target.value)
+                      handleTextBlur(i, 'creditLimit', v as number)
+                    }}
                     className="w-36 px-3 py-2 text-sm rounded-[8px] outline-none font-mono transition-colors duration-150"
                     style={inputStyle}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm)')}
                   />
                 </div>
               )}
@@ -363,6 +397,12 @@ export function AccountsForm({
             </div>
           </div>
         ))}
+
+        {error && (
+          <p className="px-4 py-3 rounded-[8px] text-sm" style={{ backgroundColor: 'var(--bg-notify-error)', color: 'var(--tx-notify-error)', border: '1px solid var(--border-warm)' }}>
+            {error}
+          </p>
+        )}
 
         <button
           onClick={addAccount}
@@ -385,30 +425,6 @@ export function AccountsForm({
         </h2>
         <CategoryManager categories={categories} onChange={setCategories} />
       </div>
-
-      {/* Status */}
-      {status && (
-        <p
-          className="px-4 py-3 rounded-[8px] text-sm"
-          style={{
-            backgroundColor: status.type === 'success' ? 'var(--bg-notify-success)' : 'var(--bg-notify-error)',
-            color: status.type === 'success' ? 'var(--tx-notify-success)' : 'var(--tx-notify-error)',
-            border: '1px solid var(--border-warm)',
-          }}
-        >
-          {status.message}
-        </p>
-      )}
-
-      {/* Save */}
-      <button
-        onClick={handleSave}
-        disabled={saving}
-        className="w-full py-[10px] px-[14px] rounded-[8px] text-sm font-semibold transition-colors duration-150 hover:text-error disabled:opacity-40 disabled:cursor-not-allowed"
-        style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-      >
-        {saving ? 'Saving…' : 'Save Configuration'}
-      </button>
     </div>
   )
 }

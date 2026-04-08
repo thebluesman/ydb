@@ -12,7 +12,7 @@ export async function GET() {
 
 export async function POST() {
   try {
-    const entry = createBackup()
+    const entry = await createBackup()
     return NextResponse.json({ backup: entry })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })

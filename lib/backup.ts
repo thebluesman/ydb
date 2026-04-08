@@ -28,7 +28,7 @@ export function listBackups(): BackupEntry[] {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
-export function createBackup(): BackupEntry {
+export async function createBackup(): Promise<BackupEntry> {
   ensureBackupDir()
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
   const filename = `ydb-${timestamp}.db`
@@ -36,7 +36,7 @@ export function createBackup(): BackupEntry {
 
   const db = new Database(DB_PATH, { readonly: true })
   try {
-    db.backup(destPath)
+    await db.backup(destPath)
   } finally {
     db.close()
   }
@@ -63,9 +63,9 @@ export function backupFilePath(filename: string): string | null {
 }
 
 /** Auto-backup: skip if a backup already exists from today */
-export function autoBackupIfNeeded(): void {
+export async function autoBackupIfNeeded(): Promise<void> {
   ensureBackupDir()
   const today = new Date().toISOString().slice(0, 10)  // YYYY-MM-DD
   const existing = listBackups().find((b) => b.filename.startsWith(`ydb-${today}`))
-  if (!existing) createBackup()
+  if (!existing) await createBackup()
 }

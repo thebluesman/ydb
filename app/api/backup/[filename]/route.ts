@@ -18,3 +18,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ filenam
     },
   })
 }
+
+export async function DELETE(_req: Request, { params }: { params: Promise<{ filename: string }> }) {
+  const { filename } = await params
+  const filePath = backupFilePath(filename)
+  if (!filePath) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  fs.rmSync(filePath)
+  return NextResponse.json({ ok: true })
+}
