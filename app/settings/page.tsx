@@ -1,9 +1,8 @@
 import { prisma } from '@/lib/prisma'
 import { colorForCategory, PALETTE } from '@/lib/category-colors'
 import { countMatchingTransactions } from '@/lib/vendor-rule-match'
-import { AccountsForm } from './_components/AccountsForm'
 import { PreferencesForm } from './_components/PreferencesForm'
-import { VendorRuleManager } from './_components/VendorRuleManager'
+import { SettingsCategoryBridge } from './_components/SettingsCategoryBridge'
 import { BudgetManager } from './_components/BudgetManager'
 import { RecurringTransactions } from './_components/RecurringTransactions'
 import { ImportHistory } from './_components/ImportHistory'
@@ -66,7 +65,7 @@ export default async function SettingsPage() {
             Configure your accounts, categories, and preferences.
           </p>
         </div>
-        <AccountsForm
+        <SettingsCategoryBridge
           initialAccounts={rawAccounts.map((a) => ({
             ...a,
             openingBalanceDate: a.openingBalanceDate
@@ -75,26 +74,10 @@ export default async function SettingsPage() {
           }))}
           initialCategories={categories}
           baseCurrency={settings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'}
+          rules={vendorRules}
+          currency={settings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'}
+          preferencesSlot={<PreferencesForm initialSettings={settings} />}
         />
-        <PreferencesForm initialSettings={settings} />
-
-        {/* Vendor rules card */}
-        <div
-          className="p-6 rounded-[8px]"
-          style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
-        >
-          <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
-            Vendor Rules
-          </h2>
-          <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
-            Teach Qwen how to categorise your recurring vendors. Explicit rules take priority over learned patterns.
-          </p>
-          <VendorRuleManager
-            rules={vendorRules}
-            categories={categories}
-            currency={settings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'}
-          />
-        </div>
 
         {/* Budgets card */}
         <div

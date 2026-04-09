@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
-import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
 
@@ -44,6 +44,19 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
   const [sortKey, setSortKey] = useState<SortKey>('date')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
   const [page, setPage] = useState(1)
+
+  // Add transaction form
+  const [showAddForm, setShowAddForm]       = useState(false)
+  const [addDate, setAddDate]               = useState(() => new Date().toISOString().split('T')[0])
+  const [addDescription, setAddDescription] = useState('')
+  const [addAmount, setAddAmount]           = useState('')
+  const [addIsExpense, setAddIsExpense]     = useState(true)
+  const [addAccountId, setAddAccountId]     = useState(() => String(accounts[0]?.id ?? ''))
+  const [addCategory, setAddCategory]       = useState('')
+  const [addStatus, setAddStatus]           = useState('committed')
+  const [addNotes, setAddNotes]             = useState('')
+  const [addSaving, setAddSaving]           = useState(false)
+  const [addError, setAddError]             = useState('')
 
   // Bulk select state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -195,11 +208,71 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     }
   }
 
+  const handleAddTransaction = async () => {
+    const desc = addDescription.trim()
+    if (!desc) { setAddError('Description required'); return }
+    const amt = parseFloat(addAmount)
+    if (isNaN(amt) || amt <= 0) { setAddError('Enter a positive amount'); return }
+    if (!addAccountId) { setAddError('Select an account'); return }
+
+    setAddSaving(true); setAddError('')
+    try {
+      const res = await fetch('/api/transactions/manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: addDate,
+          description: desc,
+          amount: addIsExpense ? -amt : amt,
+          category: addCategory || 'Other',
+          accountId: parseInt(addAccountId),
+          notes: addNotes.trim() || undefined,
+          status: addStatus,
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error ?? 'Failed to add')
+      }
+      const created = await res.json()
+      setTransactions((prev) => [created, ...prev])
+      // Reset form
+      setAddDescription(''); setAddAmount(''); setAddNotes('')
+      setAddDate(new Date().toISOString().split('T')[0])
+      setAddCategory(''); setAddIsExpense(true)
+      setShowAddForm(false)
+    } catch (e) {
+      setAddError(String(e instanceof Error ? e.message : e))
+    } finally {
+      setAddSaving(false)
+    }
+  }
+
   const cardStyle: React.CSSProperties = { backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', borderRadius: '8px' }
   const selectStyle: React.CSSProperties = { border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }
 
   return (
     <div className="space-y-5">
+      {/* Page header */}
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-[26px] font-semibold text-cursor-dark leading-[1.25]" style={{ letterSpacing: '-0.325px' }}>
+            Ledger
+          </h1>
+          <p className="mt-1 text-sm leading-[1.5]" style={{ color: 'var(--tx-secondary)' }}>
+            All transactions — filter, edit, and manage.
+          </p>
+        </div>
+        <button
+          onClick={() => { setShowAddForm((v) => !v); setAddError('') }}
+          className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-[8px] transition-colors duration-150"
+          style={{ backgroundColor: showAddForm ? 'var(--bg-card-alt)' : 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+        >
+          <Plus size={14} />
+          Add
+        </button>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
         {[
@@ -322,6 +395,116 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
           </button>
         </div>
       </div>
+
+      {/* Add transaction form */}
+      {showAddForm && (
+        <div className="p-4 rounded-[8px] space-y-3" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}>
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium" style={{ color: 'var(--tx-primary)' }}>New transaction</span>
+            <button onClick={() => { setShowAddForm(false); setAddError('') }} style={{ color: 'var(--tx-tertiary)' }}>
+              <X size={15} />
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-3 items-end">
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Date</label>
+              <input
+                type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)}
+                className="px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              />
+            </div>
+            <div className="flex-1 min-w-[180px]">
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Description</label>
+              <input
+                type="text" value={addDescription} onChange={(e) => { setAddDescription(e.target.value); setAddError('') }}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddTransaction()}
+                placeholder="e.g. Coffee"
+                className="w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Amount</label>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setAddIsExpense((v) => !v)}
+                  className="px-2 py-1.5 text-sm rounded-[6px] font-mono w-8 text-center shrink-0"
+                  style={{
+                    border: '1px solid var(--border-warm)',
+                    backgroundColor: addIsExpense ? 'var(--bg-stat-expense)' : 'var(--bg-stat-income)',
+                    color: addIsExpense ? 'var(--tx-stat-expense)' : 'var(--tx-stat-income)',
+                  }}
+                  title="Toggle expense/income"
+                >
+                  {addIsExpense ? '−' : '+'}
+                </button>
+                <input
+                  type="number" min="0" step="0.01" value={addAmount}
+                  onChange={(e) => { setAddAmount(e.target.value); setAddError('') }}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddTransaction()}
+                  placeholder="0.00"
+                  className="w-24 px-2 py-1.5 text-sm rounded-[6px] outline-none font-mono"
+                  style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Account</label>
+              <select
+                value={addAccountId} onChange={(e) => setAddAccountId(e.target.value)}
+                className="px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              >
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Category</label>
+              <select
+                value={addCategory} onChange={(e) => setAddCategory(e.target.value)}
+                className="px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              >
+                <option value="">Other</option>
+                {allCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Status</label>
+              <select
+                value={addStatus} onChange={(e) => setAddStatus(e.target.value)}
+                className="px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              >
+                <option value="committed">Committed</option>
+                <option value="review">Review</option>
+                <option value="reconciled">Reconciled</option>
+              </select>
+            </div>
+            <div className="flex-1 min-w-[140px]">
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Notes</label>
+              <input
+                type="text" value={addNotes} onChange={(e) => setAddNotes(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddTransaction()}
+                placeholder="Optional"
+                className="w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleAddTransaction} disabled={addSaving}
+              className="px-4 py-1.5 text-sm rounded-[6px] font-medium disabled:opacity-40"
+              style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+            >
+              {addSaving ? '…' : 'Save'}
+            </button>
+            {addError && <span className="text-xs" style={{ color: 'var(--tx-error)' }}>{addError}</span>}
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div className="overflow-hidden rounded-[8px]" style={{ border: '1px solid var(--border-warm)' }}>

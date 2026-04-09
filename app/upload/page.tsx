@@ -13,7 +13,7 @@ export default async function UploadPage() {
 
   return (
     <div className="flex-1 px-6 py-10 md:px-10 bg-surface-200">
-      <div className="max-w-3xl mx-auto space-y-8">
+      <div className="max-w-6xl mx-auto space-y-8">
         <div>
           <h1
             className="text-[26px] font-semibold text-cursor-dark leading-[1.25]"

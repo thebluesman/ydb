@@ -216,8 +216,9 @@ export function LedgerRow({
     }
   }
 
+  const isTransfer = transaction.category === 'Transfer'
   const amtColor = (amt: number) =>
-    amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-faint)'
+    isTransfer ? '#F59E0B' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-faint)'
 
   const currency =
     accounts.find((a) => a.id === transaction.accountId)?.currency ?? transaction.account.currency

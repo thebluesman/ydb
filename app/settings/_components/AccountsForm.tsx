@@ -40,10 +40,12 @@ export function AccountsForm({
   initialAccounts,
   initialCategories,
   baseCurrency,
+  onCategoriesChange,
 }: {
   initialAccounts: Account[]
   initialCategories: Category[]
   baseCurrency: string
+  onCategoriesChange?: (cats: Category[]) => void
 }) {
   const [accounts, setAccounts] = useState<Account[]>(() =>
     initialAccounts.length > 0
@@ -424,7 +426,7 @@ export function AccountsForm({
         <h2 className="text-[22px] font-semibold mb-4" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
           Categories
         </h2>
-        <CategoryManager categories={categories} onChange={setCategories} />
+        <CategoryManager categories={categories} onChange={(cats) => { setCategories(cats); onCategoriesChange?.(cats) }} />
       </div>
     </div>
   )
