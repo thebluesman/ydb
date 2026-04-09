@@ -227,6 +227,7 @@ export function AccountsForm({
                         {([
                           ['current', 'Current'],
                           ['savings', 'Savings'],
+                          ['cash', 'Cash'],
                           ['credit', 'Credit Card'],
                           ['personal_loan', 'Personal Loan'],
                           ['auto_loan', 'Auto Loan'],

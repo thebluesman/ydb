@@ -37,7 +37,7 @@ export function NetWorthWidget({
   }, [])
 
   const assets = accountBalances
-    .filter((a) => a.accountType === 'current')
+    .filter((a) => a.accountType === 'current' || a.accountType === 'savings' || a.accountType === 'cash')
     .reduce((s, a) => s + Math.max(a.currentBalance, 0), 0)
 
   const liabilities = accountBalances

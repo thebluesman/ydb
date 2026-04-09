@@ -232,6 +232,7 @@ export function DashboardView({
                     : acc.accountType === 'auto_loan' ? 'Auto Loan'
                     : acc.accountType === 'credit' ? 'Credit'
                     : acc.accountType === 'savings' ? 'Savings'
+                    : acc.accountType === 'cash' ? 'Cash'
                     : acc.accountType}
                 </span>
               </div>

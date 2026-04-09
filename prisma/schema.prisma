@@ -9,7 +9,7 @@ generator client {
 model Account {
   id                 Int            @id @default(autoincrement())
   name               String
-  accountType        String         // "current" | "credit" | "personal_loan" | "auto_loan"
+  accountType        String         // "current" | "savings" | "cash" | "credit" | "personal_loan" | "auto_loan"
   currency           String         @default("GBP")
   isActive           Boolean        @default(true)
   openingBalance     Float          @default(0)
