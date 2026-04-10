@@ -22,6 +22,7 @@ type VendorRule = {
   vendor: string
   category: string
   direction: string
+  transactionType: string | null
   minAmount: number | null
   maxAmount: number | null
   priority: number
@@ -59,10 +60,10 @@ export function SettingsCategoryBridge({
         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
       >
         <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
-          Vendor Rules
+          Patterns
         </h2>
         <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
-          Teach Qwen how to categorise your recurring vendors. Explicit rules take priority over learned patterns.
+          Match raw statement text to a display name and category. Patterns run at import time and take priority over the model's guesses.
         </p>
         <VendorRuleManager
           rules={rules}

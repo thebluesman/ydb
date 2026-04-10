@@ -4,7 +4,8 @@ import { NextResponse } from 'next/server'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const description = searchParams.get('description') ?? ''
+  // Prefer originalDescription (raw text) for matching, fall back to description
+  const description = searchParams.get('originalDescription') ?? searchParams.get('description') ?? ''
   const amount = parseFloat(searchParams.get('amount') ?? '0') || 0
 
   const rules = await prisma.vendorRule.findMany({

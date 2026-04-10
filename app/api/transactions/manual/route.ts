@@ -6,6 +6,7 @@ export async function POST(request: Request) {
     date: string
     amount: number
     description: string
+    transactionType: string
     category: string
     accountId: number
     notes?: string
@@ -21,7 +22,8 @@ export async function POST(request: Request) {
       date: new Date(body.date),
       amount: body.amount,
       description: body.description,
-      category: body.category || 'Other',
+      transactionType: body.transactionType ?? (body.amount >= 0 ? 'credit' : 'debit'),
+      category: body.category ?? '',
       accountId: body.accountId,
       notes: body.notes ?? null,
       status: body.status ?? 'committed',

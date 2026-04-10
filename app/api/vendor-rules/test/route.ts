@@ -12,17 +12,21 @@ export async function GET(request: Request) {
 
   const transactions = await prisma.transaction.findMany({
     where: { status: { in: ['committed', 'reconciled'] } },
-    select: { id: true, date: true, description: true, amount: true, category: true },
+    select: { id: true, date: true, description: true, originalDescription: true, amount: true, category: true },
     orderBy: { date: 'desc' },
   })
 
-  const matches = transactions.filter((tx) => matchesRule(rule, tx.description, tx.amount))
+  const matches = transactions.filter((tx) => matchesRule(rule, tx.originalDescription ?? tx.description, tx.amount))
 
   return NextResponse.json({
     total: matches.length,
     transactions: matches.slice(0, 500).map((tx) => ({
-      ...tx,
+      id: tx.id,
       date: tx.date.toISOString().split('T')[0],
+      description: tx.description,
+      originalDescription: tx.originalDescription,
+      amount: tx.amount,
+      category: tx.category,
     })),
   })
 }

@@ -5,6 +5,7 @@ import { CheckCircle } from 'lucide-react'
 import { FileDropzone } from './FileDropzone'
 import { ReviewTable, type DraftTransaction } from './ReviewTable'
 import { detectFormat, normalizeTransactions, type StatementFormat } from '@/lib/statementFormats'
+import { findMatchingRule } from '@/lib/vendor-rule-match'
 
 type Account = { id: number; name: string; currency: string; accountType: string }
 type Category = { id: number; name: string; color: string }
@@ -132,12 +133,31 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
       }
       const normalized = normalizeTransactions(parsed, fmt)
       const today = new Date().toISOString().split('T')[0]
-      setDrafts(normalized.map((t) => ({
-        _id: crypto.randomUUID(), date: t.date ?? today,
-        description: t.description ?? '', amount: Number(t.amount) || 0,
-        category: t.category ?? 'Other', accountId: selectedAccountId,
-        notes: '', rawSource: ocrText.slice(0, 2000),
-      })))
+
+      // Fetch patterns and apply them: set friendly description + category where matched
+      let patterns: { id: number; pattern: string; matchType: string; vendor: string; category: string; direction: string; transactionType: string | null; minAmount: number | null; maxAmount: number | null; priority: number }[] = []
+      try {
+        const pr = await fetch('/api/vendor-rules')
+        if (pr.ok) patterns = await pr.json()
+      } catch { /* non-critical — fall back to raw descriptions */ }
+
+      setDrafts(normalized.map((t) => {
+        const rawDesc = t.originalDescription
+        const amt = Number(t.amount) || 0
+        const match = patterns.length > 0 ? findMatchingRule(patterns, rawDesc, amt) : null
+        return {
+          _id: crypto.randomUUID(),
+          date: t.date ?? today,
+          description: match ? match.vendor : rawDesc,
+          originalDescription: rawDesc,
+          amount: amt,
+          transactionType: (match?.transactionType) ?? t.transactionType,
+          category: match ? match.category : (t.category ?? ''),
+          accountId: selectedAccountId,
+          notes: '',
+          rawSource: ocrText.slice(0, 2000),
+        }
+      }))
       setPhase('review')
     } catch (e) {
       setError(`Could not parse model output.\n\n${accumulated.slice(0, 500)}\n\nError: ${String(e)}`)

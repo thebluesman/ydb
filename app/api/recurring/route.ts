@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 export async function GET() {
   const txs = await prisma.transaction.findMany({
-    where: { status: { in: ['committed', 'reconciled'] }, amount: { lt: 0 } },
+    where: { status: { in: ['committed', 'reconciled'] }, transactionType: 'debit' },
     orderBy: { date: 'asc' },
     select: { id: true, date: true, amount: true, description: true, category: true },
     take: 2000,

@@ -11,8 +11,8 @@ export async function POST(
   const tgtId = parseInt(targetId)
 
   await prisma.$transaction([
-    prisma.transaction.update({ where: { id: txId }, data: { linkedTransferId: tgtId } }),
-    prisma.transaction.update({ where: { id: tgtId }, data: { linkedTransferId: txId } }),
+    prisma.transaction.update({ where: { id: txId }, data: { linkedTransferId: tgtId, transactionType: 'transfer' } }),
+    prisma.transaction.update({ where: { id: tgtId }, data: { linkedTransferId: txId, transactionType: 'transfer' } }),
   ])
 
   const updated = await prisma.transaction.findUnique({
@@ -32,7 +32,7 @@ export async function DELETE(
 
   if (tx?.linkedTransferId) {
     await prisma.$transaction([
-      prisma.transaction.update({ where: { id: txId }, data: { linkedTransferId: null } }),
+      prisma.transaction.update({ where: { id: txId }, data: { linkedTransferId: null, transactionType: tx.amount >= 0 ? 'credit' : 'debit' } }),
       prisma.transaction.update({ where: { id: tx.linkedTransferId }, data: { linkedTransferId: null } }),
     ])
   }

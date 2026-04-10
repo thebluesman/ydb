@@ -1,8 +1,11 @@
 export type RuleInput = {
   id?: number
   pattern: string
-  matchType: string   // "contains" | "starts-with" | "ends-with" | "exact" | "regex"
-  direction: string   // "either" | "debit" | "credit"
+  matchType: string        // "contains" | "starts-with" | "ends-with" | "exact" | "regex"
+  vendor?: string          // display name to set on the transaction
+  category?: string        // category to assign
+  direction: string        // "either" | "debit" | "credit"
+  transactionType?: string | null  // output override: "credit" | "debit" | "transfer" | null
   minAmount: number | null
   maxAmount: number | null
   priority: number
@@ -57,14 +60,15 @@ export function findMatchingRule<T extends RuleInput & { id: number }>(
 
 /**
  * Counts how many transactions satisfy matchesRule for the given rule.
+ * Matches against originalDescription when available, falling back to description.
  */
 export function countMatchingTransactions(
   rule: RuleInput,
-  transactions: { description: string; amount: number }[],
+  transactions: { description: string; originalDescription?: string | null; amount: number }[],
 ): number {
   let count = 0
   for (const tx of transactions) {
-    if (matchesRule(rule, tx.description, tx.amount)) count++
+    if (matchesRule(rule, tx.originalDescription ?? tx.description, tx.amount)) count++
   }
   return count
 }

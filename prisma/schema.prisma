@@ -34,8 +34,10 @@ model Transaction {
   id                  Int           @id @default(autoincrement())
   date                DateTime
   amount              Float
-  description         String
-  category            String
+  description         String        // human-readable display name (may be set by a pattern)
+  originalDescription String?       // raw text from PDF/LLM before pattern substitution
+  transactionType     String        @default("debit")  // "credit" | "debit" | "transfer"
+  category            String        @default("")
   accountId           Int
   account             Account       @relation(fields: [accountId], references: [id])
   status              String        @default("review")  // "review" | "committed" | "reconciled"
@@ -92,13 +94,14 @@ model Budget {
 }
 
 model VendorRule {
-  id        Int    @id @default(autoincrement())
-  pattern   String                          // no longer unique — multiple vendors can share a pattern
-  matchType String @default("contains")    // "contains" | "starts-with" | "ends-with" | "exact" | "regex"
-  vendor    String                          // display name shown in UI
-  category  String                          // must match a Category.name
-  direction String @default("either")      // "either" | "debit" | "credit"
-  minAmount Float?                          // optional lower bound on abs(amount)
-  maxAmount Float?                          // optional upper bound on abs(amount)
-  priority  Int    @default(0)             // lower number = higher priority
+  id              Int     @id @default(autoincrement())
+  pattern         String                          // no longer unique — multiple vendors can share a pattern
+  matchType       String  @default("contains")    // "contains" | "starts-with" | "ends-with" | "exact" | "regex"
+  vendor          String                          // display name to set on the transaction
+  category        String                          // must match a Category.name
+  direction       String  @default("either")      // "either" | "debit" | "credit"  — input gate
+  transactionType String?                         // if set, overrides the inferred type: "credit" | "debit" | "transfer"
+  minAmount       Float?                          // optional lower bound on abs(amount)
+  maxAmount       Float?                          // optional upper bound on abs(amount)
+  priority        Int     @default(0)             // lower number = higher priority
 }

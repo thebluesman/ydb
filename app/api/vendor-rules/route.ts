@@ -10,7 +10,7 @@ export async function GET() {
     prisma.vendorRule.findMany({ orderBy: [{ priority: 'asc' }, { vendor: 'asc' }] }),
     prisma.transaction.findMany({
       where: { status: { in: ['committed', 'reconciled'] } },
-      select: { description: true, amount: true },
+      select: { description: true, originalDescription: true, amount: true },
     }),
   ])
   const withCounts = rules.map((r) => ({
@@ -20,11 +20,14 @@ export async function GET() {
   return NextResponse.json(withCounts)
 }
 
+const VALID_TRANSACTION_TYPES = ['credit', 'debit', 'transfer']
+
 export async function POST(request: Request) {
   const body = await request.json()
   const { pattern, vendor, category } = body
   const matchType: string = body.matchType ?? 'contains'
   const direction: string = body.direction ?? 'either'
+  const transactionType: string | null = body.transactionType ?? null
   const minAmount: number | null = body.minAmount ?? null
   const maxAmount: number | null = body.maxAmount ?? null
   const priority: number = body.priority ?? 0
@@ -39,13 +42,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'invalid matchType' }, { status: 400 })
   if (!VALID_DIRECTIONS.includes(direction))
     return NextResponse.json({ error: 'invalid direction' }, { status: 400 })
+  if (transactionType !== null && !VALID_TRANSACTION_TYPES.includes(transactionType))
+    return NextResponse.json({ error: 'invalid transactionType' }, { status: 400 })
   if (matchType === 'regex') {
     try { new RegExp(pattern) }
     catch { return NextResponse.json({ error: 'Invalid regex pattern' }, { status: 400 }) }
   }
 
   const rule = await prisma.vendorRule.create({
-    data: { pattern, matchType, vendor, category, direction, minAmount, maxAmount, priority },
+    data: { pattern, matchType, vendor, category, direction, transactionType, minAmount, maxAmount, priority },
   })
   return NextResponse.json({ ...rule, matchCount: 0 })
 }
@@ -68,14 +73,15 @@ export async function PATCH(request: Request) {
   }
 
   const data: Record<string, unknown> = {}
-  if (body.pattern   !== undefined) data.pattern   = body.pattern
-  if (body.matchType !== undefined) data.matchType = body.matchType
-  if (body.vendor    !== undefined) data.vendor    = body.vendor
-  if (body.category  !== undefined) data.category  = body.category
-  if (body.direction !== undefined) data.direction = body.direction
-  if (body.minAmount !== undefined) data.minAmount = body.minAmount
-  if (body.maxAmount !== undefined) data.maxAmount = body.maxAmount
-  if (body.priority  !== undefined) data.priority  = body.priority
+  if (body.pattern         !== undefined) data.pattern         = body.pattern
+  if (body.matchType       !== undefined) data.matchType       = body.matchType
+  if (body.vendor          !== undefined) data.vendor          = body.vendor
+  if (body.category        !== undefined) data.category        = body.category
+  if (body.direction       !== undefined) data.direction       = body.direction
+  if (body.transactionType !== undefined) data.transactionType = body.transactionType || null
+  if (body.minAmount       !== undefined) data.minAmount       = body.minAmount
+  if (body.maxAmount       !== undefined) data.maxAmount       = body.maxAmount
+  if (body.priority        !== undefined) data.priority        = body.priority
 
   const rule = await prisma.vendorRule.update({ where: { id }, data })
   return NextResponse.json(rule)

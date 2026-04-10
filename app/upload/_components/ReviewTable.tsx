@@ -6,8 +6,8 @@ import { X, ChevronDown, Plus } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
 
 export type DraftTransaction = {
-  _id: string; date: string; description: string; amount: number
-  category: string; accountId: number; notes: string; rawSource: string
+  _id: string; date: string; description: string; originalDescription: string; amount: number
+  transactionType: string; category: string; accountId: number; notes: string; rawSource: string
 }
 
 type Account = { id: number; name: string; currency: string }
@@ -15,8 +15,8 @@ type Category = { id: number; name: string; color: string }
 
 const inputCls = 'w-full px-2 py-1 text-xs rounded-[6px] outline-none transition-colors duration-150'
 
-const amountColor = (amt: number, category?: string) =>
-  category === 'Transfer' ? '#F59E0B' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-tertiary)'
+const amountColor = (amt: number, transactionType?: string) =>
+  transactionType === 'transfer' ? '#F59E0B' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-tertiary)'
 
 const inputStyle = { border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }
 const selectContent: React.CSSProperties = {
@@ -454,8 +454,9 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
   const addRow = () => onChange([...drafts, {
     _id: crypto.randomUUID(),
     date: new Date().toISOString().split('T')[0],
-    description: '', amount: 0,
-    category: categories[0]?.name ?? 'Other',
+    description: '', originalDescription: '', amount: 0,
+    transactionType: 'debit',
+    category: categories[0]?.name ?? '',
     accountId: accounts[0]?.id ?? 0,
     notes: '', rawSource: '',
   }])
@@ -504,7 +505,7 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
         <table className="w-full text-xs">
           <thead style={{ backgroundColor: 'var(--bg-table-head)' }}>
             <tr>
-              {['Date', 'Description', 'Amount', 'Category', 'Account', 'Notes', ''].map((h) => (
+              {['Date', 'Description', 'Amount', 'Type', 'Category', 'Account', 'Notes', ''].map((h) => (
                 <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap" style={{ color: 'var(--tx-secondary)' }}>{h}</th>
               ))}
             </tr>
@@ -525,7 +526,14 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                   </td>
                   <td className="px-2 py-1.5 min-w-[200px]">
                     <div className="flex items-center gap-1.5">
-                      <input type="text" value={d.description} onChange={(e) => update(d._id, 'description', e.target.value)} className={inputCls} style={inputStyle} />
+                      <div className="flex-1 min-w-0">
+                        <input type="text" value={d.description} onChange={(e) => update(d._id, 'description', e.target.value)} className={inputCls} style={inputStyle} />
+                        {d.originalDescription && d.originalDescription !== d.description && (
+                          <div className="text-[10px] truncate mt-0.5 px-1" style={{ color: 'var(--tx-faint)' }} title={d.originalDescription}>
+                            {d.originalDescription}
+                          </div>
+                        )}
+                      </div>
                       {isDuplicate && (
                         <span
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] whitespace-nowrap cursor-pointer flex-none"
@@ -538,11 +546,24 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                       )}
                     </div>
                   </td>
+
                   <td className="px-2 py-1.5 min-w-[100px]">
                     <input type="number" step="0.01" value={d.amount}
                       onChange={(e) => update(d._id, 'amount', parseFloat(e.target.value) || 0)}
                       className={`${inputCls} font-mono`}
-                      style={{ ...inputStyle, color: amountColor(d.amount, d.category) }} />
+                      style={{ ...inputStyle, color: amountColor(d.amount, d.transactionType) }} />
+                  </td>
+                  <td className="px-2 py-1.5 min-w-[100px]">
+                    <select
+                      value={d.transactionType}
+                      onChange={(e) => update(d._id, 'transactionType', e.target.value)}
+                      className={inputCls}
+                      style={inputStyle}
+                    >
+                      <option value="debit">Debit</option>
+                      <option value="credit">Credit</option>
+                      <option value="transfer">Transfer</option>
+                    </select>
                   </td>
                   <td className="px-2 py-1.5 min-w-[130px]">
                     <CategorySelect

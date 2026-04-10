@@ -91,7 +91,7 @@ export default async function DashboardPage({
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
-    if (t.category === 'Transfer') continue
+    if (t.transactionType === 'transfer') continue
     if (t.amount >= 0) continue
     const cur = catMap.get(t.category) ?? { total: 0, count: 0 }
     catMap.set(t.category, { total: cur.total + Math.abs(t.amount), count: cur.count + 1 })
@@ -110,7 +110,7 @@ export default async function DashboardPage({
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
-    if (t.category === 'Transfer') continue
+    if (t.transactionType === 'transfer') continue
     const key = monthKey(d)
     const m = monthMap.get(key)
     if (!m) continue
@@ -129,7 +129,7 @@ export default async function DashboardPage({
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
-    if (t.category === 'Transfer') continue
+    if (t.transactionType === 'transfer') continue
     txCount++
     if (t.amount > 0) totalIncome += t.amount
     else totalExpenses += Math.abs(t.amount)
@@ -184,7 +184,7 @@ export default async function DashboardPage({
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
-    if (t.category === 'Transfer' || t.amount >= 0) continue
+    if (t.transactionType === 'transfer' || t.amount >= 0) continue
     if (!trendCatSet.has(t.category)) {
       trendCatSet.add(t.category)
       const dbCat = dbCategories.find((c) => c.name === t.category)
@@ -202,7 +202,7 @@ export default async function DashboardPage({
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
-    if (t.category === 'Transfer' || t.amount >= 0) continue
+    if (t.transactionType === 'transfer' || t.amount >= 0) continue
     const key = monthKey(d)
     const row = trendMonthMap.get(key)
     if (row) row[t.category] = (row[t.category] ?? 0) + Math.abs(t.amount)
@@ -218,7 +218,7 @@ export default async function DashboardPage({
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < currentMonthStart || d > now) continue
-    if (t.category === 'Transfer' || t.amount >= 0) continue
+    if (t.transactionType === 'transfer' || t.amount >= 0) continue
     currentMonthCatMap.set(t.category, (currentMonthCatMap.get(t.category) ?? 0) + Math.abs(t.amount))
   }
   const budgetData: BudgetData[] = budgets.map((b) => ({

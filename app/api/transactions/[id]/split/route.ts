@@ -34,6 +34,7 @@ export async function POST(
       date: parent.date,
       amount: l.amount,
       description: l.description ?? parent.description,
+      transactionType: parent.transactionType,
       category: l.category,
       accountId: parent.accountId,
       status: parent.status,

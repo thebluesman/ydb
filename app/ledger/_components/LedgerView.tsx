@@ -8,8 +8,8 @@ import { LedgerRow } from './LedgerRow'
 type SplitLeg = { id: number; amount: number; category: string; description: string }
 
 type Transaction = {
-  id: number; date: string | Date; amount: number; description: string
-  category: string; accountId: number; status: string; notes: string | null
+  id: number; date: string | Date; amount: number; description: string; originalDescription: string | null
+  transactionType: string; category: string; accountId: number; status: string; notes: string | null
   linkedTransferId: number | null
   parentTransactionId: number | null
   splitLegs?: SplitLeg[]
@@ -22,7 +22,7 @@ type Transaction = {
 type Account = { id: number; name: string; currency: string }
 type Category = { id: number; name: string; color: string }
 
-type SortKey = 'date' | 'amount' | 'description' | 'category'
+type SortKey = 'date' | 'amount' | 'description' | 'category' | 'transactionType'
 
 const PAGE_SIZE = 50
 
@@ -38,6 +38,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
 }) {
   const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions)
   const [accountFilter, setAccountFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -50,7 +51,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
   const [addDate, setAddDate]               = useState(() => new Date().toISOString().split('T')[0])
   const [addDescription, setAddDescription] = useState('')
   const [addAmount, setAddAmount]           = useState('')
-  const [addIsExpense, setAddIsExpense]     = useState(true)
+  const [addType, setAddType]               = useState<'debit' | 'credit' | 'transfer'>('debit')
   const [addAccountId, setAddAccountId]     = useState(() => String(accounts[0]?.id ?? ''))
   const [addCategory, setAddCategory]       = useState('')
   const [addStatus, setAddStatus]           = useState('committed')
@@ -71,7 +72,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     setPage(1)
   }
 
-  useEffect(() => { setPage(1) }, [accountFilter, categoryFilter, statusFilter, search, sortKey, sortDir, showPendingOnly])
+  useEffect(() => { setPage(1) }, [accountFilter, typeFilter, categoryFilter, statusFilter, search, sortKey, sortDir, showPendingOnly])
 
   const pendingReimbursements = useMemo(
     () => transactions.filter((t) => t.reimbursableFor && !t.reimbursementTxId && !t.parentTransactionId),
@@ -82,25 +83,29 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     if (t.parentTransactionId !== null) return false // hide split legs from main list
     if (showPendingOnly && !(t.reimbursableFor && !t.reimbursementTxId)) return false
     if (accountFilter !== 'all' && t.accountId !== parseInt(accountFilter)) return false
+    if (typeFilter !== 'all' && t.transactionType !== typeFilter) return false
     if (categoryFilter !== 'all' && t.category !== categoryFilter) return false
     if (statusFilter !== 'all' && t.status !== statusFilter) return false
-    if (search && !t.description.toLowerCase().includes(search.toLowerCase())) return false
+    if (search) {
+      const q = search.toLowerCase()
+      if (!t.description.toLowerCase().includes(q) && !(t.originalDescription ?? '').toLowerCase().includes(q)) return false
+    }
     return true
-  }), [transactions, accountFilter, categoryFilter, statusFilter, search, showPendingOnly])
+  }), [transactions, accountFilter, typeFilter, categoryFilter, statusFilter, search, showPendingOnly])
 
   const allCategories = useMemo(() => {
-    const all = [...new Set([...categories.map((c) => c.name), 'Transfer', 'Income', 'Other', ...transactions.map((t) => t.category)])]
+    const all = [...new Set([...categories.map((c) => c.name), ...transactions.map((t) => t.category).filter(Boolean)])]
     return all.sort()
   }, [transactions, categories])
 
   const stats = useMemo(() => {
-    const nonTransfer = filtered.filter((t) => t.category !== 'Transfer')
-    const income = nonTransfer.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0)
-    const expenses = nonTransfer.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0)
+    const nonTransfer = filtered.filter((t) => t.transactionType !== 'transfer')
+    const income = nonTransfer.filter((t) => t.transactionType === 'credit').reduce((s, t) => s + t.amount, 0)
+    const expenses = nonTransfer.filter((t) => t.transactionType === 'debit').reduce((s, t) => s + t.amount, 0)
     return {
-      income, expenses, net: income + expenses,
-      incomeCount: nonTransfer.filter((t) => t.amount > 0).length,
-      expenseCount: nonTransfer.filter((t) => t.amount < 0).length,
+      income, expenses: Math.abs(expenses), net: income - Math.abs(expenses),
+      incomeCount: nonTransfer.filter((t) => t.transactionType === 'credit').length,
+      expenseCount: nonTransfer.filter((t) => t.transactionType === 'debit').length,
     }
   }, [filtered])
 
@@ -118,7 +123,8 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
         case 'date':        return dir * (new Date(a.date).getTime() - new Date(b.date).getTime())
         case 'amount':      return dir * (a.amount - b.amount)
         case 'description': return dir * a.description.localeCompare(b.description)
-        case 'category':    return dir * a.category.localeCompare(b.category)
+        case 'category':         return dir * a.category.localeCompare(b.category)
+        case 'transactionType':  return dir * a.transactionType.localeCompare(b.transactionType)
       }
     })
   }, [filtered, sortKey, sortDir])
@@ -128,7 +134,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     [sorted, page]
   )
 
-  const hasFilters = accountFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || search || showPendingOnly
+  const hasFilters = accountFilter !== 'all' || typeFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || search || showPendingOnly
 
   const handleUpdate = (updated: Transaction) =>
     setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
@@ -160,10 +166,12 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
   }
 
   const handleExport = () => {
-    const headers = ['Date', 'Description', 'Amount', 'Category', 'Account', 'Status', 'Notes']
+    const headers = ['Date', 'Description', 'Original Description', 'Type', 'Amount', 'Category', 'Account', 'Status', 'Notes']
     const rows = sorted.map((t) => [
       new Date(t.date).toISOString().split('T')[0],
       `"${(t.description ?? '').replace(/"/g, '""')}"`,
+      `"${(t.originalDescription ?? '').replace(/"/g, '""')}"`,
+      t.transactionType,
       t.amount.toFixed(2),
       t.category,
       t.account.name,
@@ -223,8 +231,9 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
         body: JSON.stringify({
           date: addDate,
           description: desc,
-          amount: addIsExpense ? -amt : amt,
-          category: addCategory || 'Other',
+          amount: addType === 'debit' ? -amt : amt,
+          transactionType: addType,
+          category: addCategory || '',
           accountId: parseInt(addAccountId),
           notes: addNotes.trim() || undefined,
           status: addStatus,
@@ -239,7 +248,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       // Reset form
       setAddDescription(''); setAddAmount(''); setAddNotes('')
       setAddDate(new Date().toISOString().split('T')[0])
-      setAddCategory(''); setAddIsExpense(true)
+      setAddCategory(''); setAddType('debit')
       setShowAddForm(false)
     } catch (e) {
       setAddError(String(e instanceof Error ? e.message : e))
@@ -276,8 +285,8 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: 'Income',   value: `+${currency} ${stats.income.toFixed(2)}`,             sub: `${stats.incomeCount} transaction${stats.incomeCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
-          { label: 'Expenses', value: `−${currency} ${Math.abs(stats.expenses).toFixed(2)}`, sub: `${stats.expenseCount} transaction${stats.expenseCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
+          { label: 'Income',   value: `+${currency} ${stats.income.toFixed(2)}`,   sub: `${stats.incomeCount} transaction${stats.incomeCount !== 1 ? 's' : ''}`,   bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
+          { label: 'Expenses', value: `−${currency} ${stats.expenses.toFixed(2)}`, sub: `${stats.expenseCount} transaction${stats.expenseCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
           { label: 'Net',      value: `${stats.net >= 0 ? '+' : '−'}${currency} ${Math.abs(stats.net).toFixed(2)}`, sub: `${filtered.length} shown`, bg: 'var(--bg-stat-net)', tx: stats.net >= 0 ? 'var(--tx-stat-net-pos)' : 'var(--tx-stat-net-neg)' },
         ].map(({ label, value, sub, bg, tx }) => (
           <div key={label} className="card-hover p-5 rounded-[8px]" style={{ backgroundColor: bg, border: '1px solid var(--border-warm)' }}>
@@ -323,6 +332,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
           />
           {[
             { value: accountFilter, onChange: setAccountFilter, options: [{ value: 'all', label: 'All accounts' }, ...accounts.map((a) => ({ value: String(a.id), label: a.name }))] },
+            { value: typeFilter,    onChange: setTypeFilter,    options: [{ value: 'all', label: 'All types' }, { value: 'debit', label: 'Debit' }, { value: 'credit', label: 'Credit' }, { value: 'transfer', label: 'Transfer' }] },
             { value: statusFilter,  onChange: setStatusFilter,  options: [{ value: 'all', label: 'All statuses' }, { value: 'committed', label: 'Committed' }, { value: 'reconciled', label: 'Reconciled' }, { value: 'review', label: 'Review' }] },
           ].map(({ value, onChange, options }, i) => (
             <FilterSelect key={i} value={value} onChange={onChange} options={options} />
@@ -378,7 +388,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
             </Select.Portal>
           </Select.Root>
           {hasFilters && (
-            <button onClick={() => { setAccountFilter('all'); setCategoryFilter('all'); setStatusFilter('all'); setSearch(''); setShowPendingOnly(false) }}
+            <button onClick={() => { setAccountFilter('all'); setTypeFilter('all'); setCategoryFilter('all'); setStatusFilter('all'); setSearch(''); setShowPendingOnly(false) }}
               className="text-sm transition-colors duration-150 hover:text-error" style={{ color: 'var(--tx-secondary)' }}>
               Clear
             </button>
@@ -425,29 +435,38 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
               />
             </div>
             <div>
-              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Amount</label>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setAddIsExpense((v) => !v)}
-                  className="px-2 py-1.5 text-sm rounded-[6px] font-mono w-8 text-center shrink-0"
-                  style={{
-                    border: '1px solid var(--border-warm)',
-                    backgroundColor: addIsExpense ? 'var(--bg-stat-expense)' : 'var(--bg-stat-income)',
-                    color: addIsExpense ? 'var(--tx-stat-expense)' : 'var(--tx-stat-income)',
-                  }}
-                  title="Toggle expense/income"
-                >
-                  {addIsExpense ? '−' : '+'}
-                </button>
-                <input
-                  type="number" min="0" step="0.01" value={addAmount}
-                  onChange={(e) => { setAddAmount(e.target.value); setAddError('') }}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddTransaction()}
-                  placeholder="0.00"
-                  className="w-24 px-2 py-1.5 text-sm rounded-[6px] outline-none font-mono"
-                  style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-                />
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Type</label>
+              <div className="flex rounded-[6px] overflow-hidden" style={{ border: '1px solid var(--border-warm)' }}>
+                {(['debit', 'credit', 'transfer'] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setAddType(t)}
+                    className="px-2.5 py-1.5 text-xs capitalize"
+                    style={{
+                      backgroundColor: addType === t
+                        ? t === 'debit' ? 'var(--bg-stat-expense)' : t === 'credit' ? 'var(--bg-stat-income)' : 'rgba(245,158,11,0.15)'
+                        : 'var(--bg-input)',
+                      color: addType === t
+                        ? t === 'debit' ? 'var(--tx-stat-expense)' : t === 'credit' ? 'var(--tx-stat-income)' : '#F59E0B'
+                        : 'var(--tx-secondary)',
+                      borderRight: t !== 'transfer' ? '1px solid var(--border-warm)' : undefined,
+                    }}
+                  >
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </button>
+                ))}
               </div>
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Amount</label>
+              <input
+                type="number" min="0" step="0.01" value={addAmount}
+                onChange={(e) => { setAddAmount(e.target.value); setAddError('') }}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddTransaction()}
+                placeholder="0.00"
+                className="w-24 px-2 py-1.5 text-sm rounded-[6px] outline-none font-mono"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              />
             </div>
             <div>
               <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Account</label>
@@ -530,14 +549,15 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
                     />
                   </th>
                   {([
-                    { key: 'date',        label: 'Date',        sortable: true  },
-                    { key: 'description', label: 'Description', sortable: true  },
-                    { key: 'amount',      label: 'Amount',      sortable: true  },
-                    { key: 'category',    label: 'Category',    sortable: true  },
-                    { key: 'account',     label: 'Account',     sortable: false },
-                    { key: 'status',      label: 'Status',      sortable: false },
-                    { key: 'notes',       label: 'Notes',       sortable: false },
-                    { key: 'actions',     label: '',            sortable: false },
+                    { key: 'date',            label: 'Date',        sortable: true  },
+                    { key: 'description',     label: 'Description', sortable: true  },
+                    { key: 'amount',          label: 'Amount',      sortable: true  },
+                    { key: 'transactionType', label: 'Type',        sortable: true  },
+                    { key: 'category',        label: 'Category',    sortable: true  },
+                    { key: 'account',         label: 'Account',     sortable: false },
+                    { key: 'status',          label: 'Status',      sortable: false },
+                    { key: 'notes',           label: 'Notes',       sortable: false },
+                    { key: 'actions',         label: '',            sortable: false },
                   ] as const).map(({ key, label, sortable }) =>
                     sortable ? (
                       <th key={key}

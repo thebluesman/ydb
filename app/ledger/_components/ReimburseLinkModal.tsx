@@ -9,6 +9,7 @@ type TxSummary = {
   date: string | Date
   amount: number
   description: string
+  transactionType: string
   reimbursedExpense: { id: number } | null
   account: { name: string; currency: string }
 }
@@ -41,7 +42,7 @@ export function ReimburseLinkModal({
       .then((all: TxSummary[]) => {
         const filtered = all.filter((t) => {
           if (t.id === expenseId) return false
-          if (t.amount <= 0) return false                     // only credits
+          if (t.transactionType !== 'credit') return false     // only credits
           if (t.reimbursedExpense !== null) return false      // already used
           return true
         })

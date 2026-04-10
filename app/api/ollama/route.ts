@@ -9,14 +9,14 @@ async function buildSystemPrompt(formatHint?: string): Promise<string> {
     // Top 60 most-recently-committed distinct description→category pairs
     prisma.transaction.findMany({
       where: { status: 'committed' },
-      select: { description: true, category: true },
+      select: { description: true, originalDescription: true, category: true },
       orderBy: { updatedAt: 'desc' },
       take: 200,
     }),
   ])
 
   const categoryNames = [
-    ...new Set([...dbCategories.map((c) => c.name), 'Transfer', 'Income', 'Other']),
+    ...new Set([...dbCategories.map((c) => c.name), 'Income', 'Other']),
   ].join(', ')
 
   // Build explicit vendor dictionary from VendorRule table
@@ -40,10 +40,11 @@ async function buildSystemPrompt(formatHint?: string): Promise<string> {
   const seen = new Set(vendorRules.map((r) => r.pattern.toLowerCase()))
   const learnedLines: string[] = []
   for (const t of learnedTxns) {
-    const key = t.description.toLowerCase()
+    const raw = t.originalDescription ?? t.description
+    const key = raw.toLowerCase()
     if (!seen.has(key)) {
       seen.add(key)
-      learnedLines.push(`  - "${t.description}" → ${t.category}`)
+      learnedLines.push(`  - "${raw}" → ${t.category}`)
       if (learnedLines.length >= 60) break
     }
   }
@@ -62,8 +63,8 @@ Categories must be one of: ${categoryNames}${dictionary}`
 This is a CREDIT CARD statement with a single Amount column.
 - Plain positive numbers are EXPENSES: output as NEGATIVE amounts (e.g. 46.01 → -46.01).
 - Numbers with a "CR" suffix are credits/payments: output as POSITIVE amounts (e.g. 1730.00CR → 1730.00).
-- "PAYMENT RECEIVED" or "TRANSFER PAYMENT RECEIVED" → category: Transfer (not Income).
-- "Profit earned" or "Discretionary Reward" → category: Income.
+- "PAYMENT RECEIVED" or "TRANSFER PAYMENT RECEIVED" → output as POSITIVE amount, any category.
+- "Profit earned" or "Discretionary Reward" → category: Income, output as POSITIVE amount.
 - SKIP entirely (do not include in output): OPENING BALANCE, PREVIOUS BALANCE, END OF STATEMENT, and any footer summary rows.`
   }
 
@@ -73,8 +74,8 @@ This is a CREDIT CARD statement with a single Amount column.
 This is a BANK ACCOUNT statement with separate Debit and Credit columns.
 - Amount in the Debit column = money leaving the account → output as NEGATIVE amount.
 - Amount in the Credit column = money entering the account → output as POSITIVE amount.
-- "CREDIT CARD PAYMENT" → category: Transfer.
-- "BANKNET TRANSFER" → category: Transfer.
+- "CREDIT CARD PAYMENT" → any category.
+- "BANKNET TRANSFER" → any category.
 - SKIP entirely: BROUGHT FORWARD, CARRIED FORWARD.`
   }
 

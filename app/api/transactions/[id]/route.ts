@@ -14,6 +14,8 @@ export async function PATCH(
       ...(body.date !== undefined && { date: new Date(body.date) }),
       ...(body.amount !== undefined && { amount: body.amount }),
       ...(body.description !== undefined && { description: body.description }),
+      ...(body.originalDescription !== undefined && { originalDescription: body.originalDescription }),
+      ...(body.transactionType !== undefined && { transactionType: body.transactionType }),
       ...(body.category !== undefined && { category: body.category }),
       ...(body.accountId !== undefined && { accountId: body.accountId }),
       ...(body.status !== undefined && { status: body.status }),

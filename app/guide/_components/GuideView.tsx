@@ -230,19 +230,20 @@ function CategoryPillsDemo() {
   )
 }
 
-function VendorRuleDemo() {
+function PatternDemo() {
   const rows = [
-    { vendor: 'Netflix',  pattern: 'NETFLIX',      match: '~',  matchLabel: 'contains',    direction: null,     category: 'Entertainment', color: '#1D4ED8' },
-    { vendor: 'Tesco',    pattern: '^TESCO',        match: '^',  matchLabel: 'starts-with', direction: null,     category: 'Groceries',     color: '#15803D' },
-    { vendor: 'Amazon',   pattern: 'AMAZON',        match: '~',  matchLabel: 'contains',    direction: '↓debit', category: 'Shopping',      color: '#B45309' },
-    { vendor: 'Amazon',   pattern: 'AMAZON RETURN', match: '=',  matchLabel: 'exact',       direction: '↑credit',category: 'Shopping',      color: '#B45309' },
+    { raw: 'NFLX*123456789',       display: 'Netflix',    match: '~',  matchLabel: 'contains',    direction: null,      category: 'Entertainment', setType: null,       color: '#1D4ED8' },
+    { raw: 'TESCO EXTRA LONDON',   display: 'Tesco',      match: '^',  matchLabel: 'starts-with', direction: null,      category: 'Groceries',     setType: null,       color: '#15803D' },
+    { raw: 'CAREEM EATS',          display: 'Careem',     match: '~',  matchLabel: 'contains',    direction: '↓debit',  category: 'Dining',        setType: null,       color: '#B45309' },
+    { raw: 'CAREEM RIDE',          display: 'Careem',     match: '~',  matchLabel: 'contains',    direction: '↓debit',  category: 'Transport',     setType: null,       color: '#B45309' },
+    { raw: 'CREDIT CARD PAYMENT',  display: 'CC Payment', match: '~',  matchLabel: 'contains',    direction: null,      category: 'Transfers',     setType: 'transfer', color: '#6750A4' },
   ]
   return (
     <div className="rounded-[8px] overflow-hidden w-full" style={{ border: '1px solid var(--border-warm)' }}>
       <table className="w-full text-sm">
         <thead>
           <tr style={{ background: 'var(--bg-card-alt)', borderBottom: '1px solid var(--border-warm)' }}>
-            {['Vendor', 'Pattern', 'Match', 'Direction', 'Category'].map((h) => (
+            {['Raw text', 'Display name', 'Match', 'Direction', 'Category', 'Set type'].map((h) => (
               <th key={h} className="px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--tx-tertiary)' }}>
                 {h}
               </th>
@@ -252,8 +253,8 @@ function VendorRuleDemo() {
         <tbody>
           {rows.map((r, i) => (
             <tr key={i} style={{ borderTop: i > 0 ? '1px solid var(--border-warm)' : 'none' }}>
-              <td className="px-3 py-2.5 font-medium" style={{ color: 'var(--tx-primary)' }}>{r.vendor}</td>
-              <td className="px-3 py-2.5 font-mono text-xs" style={{ color: 'var(--tx-secondary)' }}>{r.pattern}</td>
+              <td className="px-3 py-2.5 font-mono text-xs" style={{ color: 'var(--tx-faint)' }}>{r.raw}</td>
+              <td className="px-3 py-2.5 font-medium" style={{ color: 'var(--tx-primary)' }}>{r.display}</td>
               <td className="px-3 py-2.5">
                 <span
                   className="text-[10px] px-1.5 py-0.5 rounded-[4px] font-mono"
@@ -270,6 +271,9 @@ function VendorRuleDemo() {
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: r.color, color: '#fff' }}>
                   {r.category}
                 </span>
+              </td>
+              <td className="px-3 py-2.5 text-xs" style={{ color: r.setType ? 'var(--tx-primary)' : 'var(--tx-faint)' }}>
+                {r.setType ?? '—'}
               </td>
             </tr>
           ))}
@@ -893,9 +897,10 @@ export function GuideView({ currency }: { currency: string }) {
               <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
                 {[
                   ['Amounts', 'Expenses should be negative, income positive. Credits (payments into account) are positive.'],
-                  ['Categories', 'Qwen assigns categories based on your vendor rules and past transactions. Correct any that are wrong.'],
+                  ['Type', 'Each transaction is classified as Debit, Credit, or Transfer. Patterns can set this automatically; you can also change it inline.'],
+                  ['Descriptions', 'If a pattern matched, the display name is already set and the raw bank text appears faintly below it. You can edit the display name freely.'],
+                  ['Categories', 'Qwen assigns categories based on your patterns and past transactions. Correct any that are wrong.'],
                   ['Duplicates', 'If you upload the same statement twice, duplicate transactions will appear. Delete the extras.'],
-                  ['Descriptions', 'The raw bank description is preserved. You can edit it if needed.'],
                 ].map(([label, desc]) => (
                   <div key={label} className="flex gap-3">
                     <span className="w-28 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
@@ -963,12 +968,14 @@ export function GuideView({ currency }: { currency: string }) {
               <BodyText>
                 Click the <Download size={13} style={{ display: 'inline', verticalAlign: 'middle' }} />{' '}
                 <strong>Export</strong> button in the filter bar to download the current filtered view as a CSV.
-                All columns are included — date, description, amount, category, account, status, notes.
+                All columns are included — date, description, raw description, amount, type, category, account, status, notes.
               </BodyText>
 
               <Tip>
-                Transfer transactions (moving money between your own accounts) use the{' '}
-                <strong>Transfer</strong> category and are excluded from income/expense totals on the dashboard.
+                Transfer transactions (moving money between your own accounts) have type{' '}
+                <strong>Transfer</strong> and are excluded from income/expense totals on the dashboard.
+                Use the link icon to pair both sides of a transfer, or set a pattern to automatically
+                stamp the type at import time.
               </Tip>
             </Section>
 
@@ -988,24 +995,28 @@ export function GuideView({ currency }: { currency: string }) {
                 <CategoryPillsDemo />
               </DemoShell>
 
-              <SubHeading>Vendor rules — teaching Qwen</SubHeading>
+              <SubHeading>Patterns — teaching Qwen</SubHeading>
               <BodyText>
-                Vendor rules are explicit pattern-to-category mappings. When a transaction description
-                matches a rule, Qwen always assigns the mapped category — overriding its own guesses.
-                Rules support five match types, optional direction scoping, amount bounds, and
-                a priority system to resolve conflicts.
+                Patterns are rules that match raw bank statement text and apply a set of outputs: a
+                human-readable <strong>display name</strong>, a <strong>category</strong>, and optionally
+                a <strong>transaction type</strong> override. They run at import time — before the review
+                table — so you see friendly names immediately. Patterns take priority over Qwen's guesses.
               </BodyText>
-              <DemoShell label="Vendor rules — pattern types and direction">
-                <div className="w-full"><VendorRuleDemo /></div>
+              <BodyText>
+                The raw bank text is always preserved as a secondary line beneath the display name,
+                so you can still search by it and audit what was matched.
+              </BodyText>
+              <DemoShell label="Patterns — raw text → display name, category, and type">
+                <div className="w-full"><PatternDemo /></div>
               </DemoShell>
 
               <SubHeading>Match types</SubHeading>
               <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
                 {[
-                  ['~ contains',    'Pattern appears anywhere in the description. Default. Case-insensitive.'],
-                  ['^ starts-with', 'Description must begin with the pattern. Useful when banks prefix with a code.'],
-                  ['$ ends-with',   'Description must end with the pattern.'],
-                  ['= exact',       'Full description must equal the pattern exactly (case-insensitive).'],
+                  ['~ contains',    'Pattern appears anywhere in the raw bank text. Default. Case-insensitive.'],
+                  ['^ starts-with', 'Raw text must begin with the pattern. Useful when banks prefix with a code.'],
+                  ['$ ends-with',   'Raw text must end with the pattern.'],
+                  ['= exact',       'Full raw text must equal the pattern exactly (case-insensitive).'],
                   ['.* regex',      'Pattern is a regular expression. Use for complex cases. Validated on save.'],
                 ].map(([label, desc]) => (
                   <div key={label} className="flex gap-3">
@@ -1017,14 +1028,22 @@ export function GuideView({ currency }: { currency: string }) {
 
               <SubHeading>Direction &amp; amount filters</SubHeading>
               <BodyText>
-                Scope a rule to <strong>debit-only</strong> (expenses) or <strong>credit-only</strong> (income/refunds) so the
-                same description string maps to different categories depending on which way money flows.
-                For example: <em>AMAZON</em> debit → Shopping, <em>AMAZON RETURN</em> credit → Shopping (refund).
+                <strong>Direction</strong> is an input gate — scope a pattern to <strong>debit-only</strong> or <strong>credit-only</strong> so the
+                same raw text maps differently depending on which way money flows.
+                For example: <em>AMAZON</em> debit → Shopping, <em>AMAZON RETURN</em> credit → Refunds.
               </BodyText>
               <BodyText>
-                Amount bounds (<strong>min</strong> / <strong>max</strong>) narrow a rule to a specific size range.
-                Add them under <strong>Advanced options</strong> when creating a rule.
+                Amount bounds (<strong>min</strong> / <strong>max</strong>) narrow a pattern to a specific size range.
+                Add them under <strong>Advanced options</strong> when creating a pattern.
                 Example: <em>AMAZON</em> debit, max 500 → Shopping; <em>AMAZON</em> debit, min 500 → Electronics.
+              </BodyText>
+
+              <SubHeading>Set type</SubHeading>
+              <BodyText>
+                <strong>Set type</strong> is an output assignment — when a pattern matches, the transaction's
+                type is stamped as Debit, Credit, or Transfer. Use this for transactions whose type
+                is always known from the description, e.g. <em>CREDIT CARD PAYMENT</em> → Transfer.
+                If left as "Don't override", the type is inferred from the amount sign.
               </BodyText>
 
               <SubHeading>Priority</SubHeading>
@@ -1037,39 +1056,45 @@ export function GuideView({ currency }: { currency: string }) {
 
               <SubHeading>Multiple patterns per vendor</SubHeading>
               <BodyText>
-                Banks render the same merchant inconsistently across statement types — NETFLIX.COM,
-                NFLX*SERVICE, NETFLIX INTL. Add all variants under one vendor name: rules with the
-                same vendor name are grouped together in Settings. Click <strong>+ Add pattern</strong>{' '}
-                on a vendor group to attach another pattern without retyping the name and category.
+                Banks render the same merchant inconsistently — NETFLIX.COM, NFLX*SERVICE, NETFLIX INTL.
+                Add all variants under the same display name: patterns sharing a name are grouped
+                together in Settings. Click <strong>+ Add pattern</strong> on a group to attach
+                another raw-text variant without retyping the name and category.
+              </BodyText>
+              <BodyText>
+                You can also use multiple patterns per vendor for granular category splits — e.g. Careem
+                with <em>CAREEM EATS</em> → Dining and <em>CAREEM RIDE</em> → Transport. Each pattern
+                can have its own direction, amount bounds, category, and type override.
               </BodyText>
 
-              <SubHeading>Testing rules</SubHeading>
+              <SubHeading>Testing patterns</SubHeading>
               <BodyText>
-                Hover any rule row and click the <FlaskConical size={12} style={{ display: 'inline', verticalAlign: 'middle', marginInline: 2 }} />{' '}
-                icon to run a live test against your committed transactions. A panel shows every
-                matching transaction — useful before enabling a broad pattern to check it won't
-                mis-categorise anything.
+                Hover any pattern row and click the <FlaskConical size={12} style={{ display: 'inline', verticalAlign: 'middle', marginInline: 2 }} />{' '}
+                icon to run a live test against your committed transactions. The test panel matches
+                against the raw bank text (<em>originalDescription</em>) — the same field patterns
+                use at import time — and shows a secondary line with the raw text for each hit.
               </BodyText>
 
               <SubHeading>Auto-suggestions</SubHeading>
               <BodyText>
                 After you save a category edit in the Ledger, ydb checks whether the transaction
-                matches any existing rule (including direction and amount). If nothing matches, a
-                suggestion banner appears pre-filled with the description as the pattern, the saved
-                category, and a <strong>match type selector</strong> so you can pick the right type
-                before clicking <strong>Add Rule</strong>. Direction is inferred automatically from
-                the transaction amount — debits create debit-scoped rules, credits create credit-scoped ones.
+                matches any existing pattern (using the raw bank text, direction, and amount). If
+                nothing matches, a suggestion banner appears pre-filled with the raw text as the
+                pattern, the saved category, and a <strong>match type selector</strong>. Direction
+                is inferred automatically — debits create debit-scoped patterns, credits create
+                credit-scoped ones.
               </BodyText>
 
               <SubHeading>Learned patterns</SubHeading>
               <BodyText>
-                Beyond explicit rules, Qwen also learns from your committed transactions. The more
+                Beyond explicit patterns, Qwen also learns from your committed transactions. The more
                 you commit and correct, the better its categorisation gets — automatically.
               </BodyText>
 
               <Tip>
                 Start with your most frequent vendors (supermarkets, subscriptions, transport) as
-                explicit rules. Let learned patterns fill in the rest over time.
+                explicit patterns. Use <strong>Set type</strong> for anything that's always a Transfer
+                (credit card payments, inter-account moves). Let learned patterns fill in the rest over time.
               </Tip>
             </Section>
 

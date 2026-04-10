@@ -30,7 +30,7 @@ export default async function SettingsPage() {
     }),
     prisma.transaction.findMany({
       where: { status: { in: ['committed', 'reconciled'] } },
-      select: { description: true, amount: true },
+      select: { description: true, originalDescription: true, amount: true },
     }),
   ])
   const vendorRules = rawVendorRules.map((r) => ({

@@ -12,6 +12,7 @@ type VendorRule = {
   vendor: string
   category: string
   direction: string
+  transactionType: string | null
   minAmount: number | null
   maxAmount: number | null
   priority: number
@@ -20,7 +21,7 @@ type VendorRule = {
 
 type Category = { id: number; name: string; color: string }
 
-type TestRow = { id: number; date: string; description: string; amount: number; category: string }
+type TestRow = { id: number; date: string; description: string; originalDescription: string | null; amount: number; category: string }
 
 const MATCH_TYPES = [
   { value: 'contains',    label: 'Contains',    badge: '~' },
@@ -112,6 +113,7 @@ export function VendorRuleManager({
   const [addCategory, setAddCategory]     = useState('')
   const [addMatchType, setAddMatchType]   = useState('contains')
   const [addDirection, setAddDirection]   = useState('either')
+  const [addTransactionType, setAddTransactionType] = useState('none')
   const [addMinAmount, setAddMinAmount]   = useState('')
   const [addMaxAmount, setAddMaxAmount]   = useState('')
   const [showAdvanced, setShowAdvanced]   = useState(false)
@@ -131,7 +133,7 @@ export function VendorRuleManager({
   // Collapsed vendor groups
   const [collapsed, setCollapsed]         = useState<Set<string>>(new Set())
 
-  const allCategories = [...new Set([...categories.map((c) => c.name), 'Transfer', 'Income', 'Other'])]
+  const allCategories = [...new Set([...categories.map((c) => c.name), 'Income', 'Other'])]
 
   // Group rules by vendor, sorted by priority then id
   const groups = useMemo<[string, VendorRule[]][]>(() => {
@@ -151,7 +153,7 @@ export function VendorRuleManager({
   const handleAdd = async () => {
     const v = addVendor.trim()
     const p = addPattern.trim()
-    if (!v) { setAddError('Vendor name required'); return }
+    if (!v) { setAddError('Display name required'); return }
     if (!p) { setAddError('Pattern required'); return }
     if (!addCategory) { setAddError('Category required'); return }
 
@@ -163,6 +165,7 @@ export function VendorRuleManager({
         body: JSON.stringify({
           vendor: v, pattern: p, category: addCategory,
           matchType: addMatchType, direction: addDirection,
+          transactionType: addTransactionType === 'none' ? null : addTransactionType,
           minAmount: addMinAmount ? parseFloat(addMinAmount) : null,
           maxAmount: addMaxAmount ? parseFloat(addMaxAmount) : null,
           priority: 0,
@@ -176,6 +179,7 @@ export function VendorRuleManager({
       setList((prev) => [...prev, rule])
       setAddVendor(''); setAddPattern(''); setAddCategory('')
       setAddMatchType('contains'); setAddDirection('either')
+      setAddTransactionType('')
       setAddMinAmount(''); setAddMaxAmount('')
       setShowAdvanced(false)
     } catch (e) {
@@ -297,11 +301,11 @@ export function VendorRuleManager({
   return (
     <div className="space-y-4">
       <p className="text-xs" style={{ color: 'var(--tx-secondary)' }}>
-        Rules are evaluated in priority order (lowest number first). The first match wins. Explicit rules override learned patterns.
+        Patterns are evaluated in priority order (lowest number first). The first match wins and sets the display name and category.
       </p>
 
       {list.length === 0 && (
-        <p className="text-sm" style={{ color: 'var(--tx-faint)' }}>No rules yet.</p>
+        <p className="text-sm" style={{ color: 'var(--tx-faint)' }}>No patterns yet.</p>
       )}
 
       {groups.length > 0 && (
@@ -408,6 +412,17 @@ export function VendorRuleManager({
                             {rule.direction === 'debit' ? '↓ debit' : '↑ credit'}
                           </span>
                         )}
+                        {rule.transactionType && (
+                          <span
+                            className="text-[10px] px-1.5 py-0.5 rounded-[4px] shrink-0 font-medium"
+                            style={{
+                              backgroundColor: rule.transactionType === 'transfer' ? 'rgba(245,158,11,0.15)' : rule.transactionType === 'credit' ? 'var(--bg-stat-income)' : 'var(--bg-stat-expense)',
+                              color: rule.transactionType === 'transfer' ? '#F59E0B' : rule.transactionType === 'credit' ? 'var(--tx-stat-income)' : 'var(--tx-stat-expense)',
+                            }}
+                          >
+                            → {rule.transactionType}
+                          </span>
+                        )}
                         {amtLabel(rule) && (
                           <span className="text-[10px] shrink-0" style={{ color: 'var(--tx-faint)' }}>
                             {amtLabel(rule)}
@@ -512,6 +527,20 @@ export function VendorRuleManager({
                               width="130px"
                             />
                           </div>
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Set type</label>
+                            <SimpleSelect
+                              value={editDraft.transactionType ?? rule.transactionType ?? 'none'}
+                              onChange={(v) => setEditDraft((d) => ({ ...d, transactionType: v === 'none' ? null : v }))}
+                              options={[
+                                { value: 'none', label: 'Don\'t override' },
+                                { value: 'debit', label: 'Debit' },
+                                { value: 'credit', label: 'Credit' },
+                                { value: 'transfer', label: 'Transfer' },
+                              ]}
+                              width="140px"
+                            />
+                          </div>
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -561,7 +590,12 @@ export function VendorRuleManager({
                                     style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
                                   >
                                     <span className="font-mono shrink-0" style={{ color: 'var(--tx-tertiary)' }}>{tx.date}</span>
-                                    <span className="flex-1 truncate" style={{ color: 'var(--tx-primary)' }}>{tx.description}</span>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="truncate" style={{ color: 'var(--tx-primary)' }}>{tx.description}</div>
+                                      {tx.originalDescription && tx.originalDescription !== tx.description && (
+                                        <div className="truncate text-[10px]" style={{ color: 'var(--tx-faint)' }}>{tx.originalDescription}</div>
+                                      )}
+                                    </div>
                                     <span
                                       className="font-mono shrink-0"
                                       style={{ color: tx.amount < 0 ? 'var(--tx-error)' : 'var(--tx-success)' }}
@@ -595,7 +629,7 @@ export function VendorRuleManager({
         <div className="flex items-end gap-2 flex-wrap">
           <div className="flex-1 min-w-[130px]">
             <label className="block text-[11px] font-medium uppercase tracking-wide mb-1" style={{ color: 'var(--tx-secondary)' }}>
-              Vendor Name
+              Display Name
             </label>
             <input
               type="text"
@@ -704,6 +738,20 @@ export function VendorRuleManager({
                 onChange={setAddDirection}
                 options={DIRECTIONS}
                 width="160px"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Set type</label>
+              <SimpleSelect
+                value={addTransactionType}
+                onChange={setAddTransactionType}
+                options={[
+                  { value: 'none', label: 'Don\'t override' },
+                  { value: 'debit', label: 'Debit' },
+                  { value: 'credit', label: 'Credit' },
+                  { value: 'transfer', label: 'Transfer' },
+                ]}
+                width="140px"
               />
             </div>
             <div>

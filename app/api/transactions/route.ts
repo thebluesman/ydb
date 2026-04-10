@@ -19,6 +19,8 @@ export async function POST(request: Request) {
     date: string
     amount: number
     description: string
+    originalDescription?: string
+    transactionType: string
     category: string
     accountId: number
     notes?: string
@@ -35,7 +37,9 @@ export async function POST(request: Request) {
       date: new Date(t.date),
       amount: t.amount,
       description: t.description,
-      category: t.category,
+      originalDescription: t.originalDescription ?? null,
+      transactionType: t.transactionType ?? (t.amount >= 0 ? 'credit' : 'debit'),
+      category: t.category ?? '',
       accountId: t.accountId,
       notes: t.notes ?? null,
       rawSource: t.rawSource ?? null,

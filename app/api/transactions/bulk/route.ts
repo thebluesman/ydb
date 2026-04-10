@@ -12,6 +12,7 @@ export async function PATCH(request: Request) {
   }
 
   const data: Record<string, unknown> = {}
+  if (update.transactionType !== undefined) data.transactionType = update.transactionType
   if (update.category !== undefined) data.category = update.category
   if (update.status !== undefined) data.status = update.status
 

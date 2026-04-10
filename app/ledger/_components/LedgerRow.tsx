@@ -13,6 +13,8 @@ type Transaction = {
   date: string | Date
   amount: number
   description: string
+  originalDescription: string | null
+  transactionType: string
   category: string
   accountId: number
   status: string
@@ -97,6 +99,7 @@ export function LedgerRow({
     date: formatDate(transaction.date),
     description: transaction.description,
     amount: transaction.amount,
+    transactionType: transaction.transactionType,
     category: transaction.category,
     accountId: transaction.accountId,
     status: transaction.status,
@@ -120,13 +123,14 @@ export function LedgerRow({
       onUpdate(await res.json())
       setEditing(false)
       // Non-blocking vendor rule suggestion check
-      fetch(`/api/vendor-rules/check?description=${encodeURIComponent(draft.description)}&amount=${draft.amount}`)
+      const rawDesc = transaction.originalDescription ?? draft.description
+      fetch(`/api/vendor-rules/check?description=${encodeURIComponent(rawDesc)}&amount=${draft.amount}`)
         .then((r) => r.json())
         .then(({ matched }) => {
           if (!matched) {
             setRuleSuggestion({ description: draft.description, category: draft.category })
-            setRulePattern(draft.description)
-            setRuleVendor(draft.description.split(' ').slice(0, 3).join(' '))
+            setRulePattern(rawDesc)
+            setRuleVendor(draft.description)
           }
         })
         .catch(() => { /* non-critical */ })
@@ -152,6 +156,7 @@ export function LedgerRow({
       date: formatDate(transaction.date),
       description: transaction.description,
       amount: transaction.amount,
+      transactionType: transaction.transactionType,
       category: transaction.category,
       accountId: transaction.accountId,
       status: transaction.status,
@@ -216,7 +221,7 @@ export function LedgerRow({
     }
   }
 
-  const isTransfer = transaction.category === 'Transfer'
+  const isTransfer = transaction.transactionType === 'transfer'
   const amtColor = (amt: number) =>
     isTransfer ? '#F59E0B' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-faint)'
 
@@ -248,6 +253,13 @@ export function LedgerRow({
               className={`${inputCls} font-mono`}
               style={{ ...inputStyle, color: amtColor(draft.amount) }}
             />
+          </td>
+          <td className="px-2 py-2 min-w-[100px]">
+            <select value={draft.transactionType} onChange={(e) => set('transactionType', e.target.value)} className={inputCls} style={inputStyle}>
+              <option value="debit">Debit</option>
+              <option value="credit">Credit</option>
+              <option value="transfer">Transfer</option>
+            </select>
           </td>
           <td className="px-2 py-2 min-w-[130px]">
             <select value={draft.category} onChange={(e) => set('category', e.target.value)} className={inputCls} style={inputStyle}>
@@ -324,7 +336,7 @@ export function LedgerRow({
         </tr>
         {error && (
           <tr>
-            <td colSpan={9} className="px-3 py-1 text-xs" style={{ color: 'var(--tx-notify-error)', backgroundColor: 'var(--bg-notify-error)' }}>
+            <td colSpan={10} className="px-3 py-1 text-xs" style={{ color: 'var(--tx-notify-error)', backgroundColor: 'var(--bg-notify-error)' }}>
               {error}
             </td>
           </tr>
@@ -335,7 +347,7 @@ export function LedgerRow({
 
   const suggestionBanner = ruleSuggestion && !editing ? (
     <tr>
-      <td colSpan={9} className="px-3 py-2" style={{ backgroundColor: 'var(--bg-badge-review)', borderTop: '1px solid var(--border-warm)' }}>
+      <td colSpan={10} className="px-3 py-2" style={{ backgroundColor: 'var(--bg-badge-review)', borderTop: '1px solid var(--border-warm)' }}>
         <div className="flex items-center gap-2 flex-wrap text-xs">
           <span style={{ color: 'var(--tx-badge-review)' }}>No vendor rule matches this description. Create one?</span>
           <input
@@ -402,7 +414,14 @@ export function LedgerRow({
       </td>
       <td className="px-3 py-2.5 text-sm max-w-xs" style={{ color: 'var(--tx-primary)' }}>
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="truncate">{transaction.description}</span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate">{transaction.description}</div>
+            {transaction.originalDescription && transaction.originalDescription !== transaction.description && (
+              <div className="text-[10px] truncate" style={{ color: 'var(--tx-faint)' }} title={transaction.originalDescription}>
+                {transaction.originalDescription}
+              </div>
+            )}
+          </div>
           {transaction.linkedTransferId && (
             <span title="Linked transfer"><Link2 size={11} style={{ color: 'var(--tx-faint)', flexShrink: 0 }} /></span>
           )}
@@ -561,7 +580,7 @@ export function LedgerRow({
         <td className="px-3 py-2 text-xs" style={{ color: 'var(--tx-faint)' }}>
           {leg.category}
         </td>
-        <td colSpan={4} />
+        <td colSpan={5} />
       </tr>
     ))}
     {suggestionBanner}
