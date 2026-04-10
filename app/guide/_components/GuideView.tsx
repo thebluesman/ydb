@@ -899,7 +899,7 @@ export function GuideView({ currency }: { currency: string }) {
                   ['Amounts', 'Expenses should be negative, income positive. Credits (payments into account) are positive.'],
                   ['Type', 'Each transaction is classified as Debit, Credit, or Transfer. Patterns can set this automatically; you can also change it inline.'],
                   ['Descriptions', 'If a pattern matched, the display name is already set and the raw bank text appears faintly below it. You can edit the display name freely.'],
-                  ['Categories', 'Qwen assigns categories based on your patterns and past transactions. Correct any that are wrong.'],
+                  ['Categories', 'Qwen assigns categories based on your patterns and past transactions. Correct any that are wrong. Changing a category triggers a "Save as pattern?" strip at the bottom of the card — a quick way to lock in that mapping for future imports.'],
                   ['Duplicates', 'If you upload the same statement twice, duplicate transactions will appear. Delete the extras.'],
                 ].map(([label, desc]) => (
                   <div key={label} className="flex gap-3">
@@ -1077,12 +1077,14 @@ export function GuideView({ currency }: { currency: string }) {
 
               <SubHeading>Auto-suggestions</SubHeading>
               <BodyText>
-                After you save a category edit in the Ledger, ydb checks whether the transaction
-                matches any existing pattern (using the raw bank text, direction, and amount). If
-                nothing matches, a suggestion banner appears pre-filled with the raw text as the
-                pattern, the saved category, and a <strong>match type selector</strong>. Direction
-                is inferred automatically — debits create debit-scoped patterns, credits create
-                credit-scoped ones.
+                Whenever you change a category — in the Review table or the Ledger — a{' '}
+                <strong>Save as pattern?</strong> strip appears at the bottom of the row. It is
+                pre-filled with the raw bank text as the pattern and your chosen category. Edit the
+                pattern or vendor name if needed, pick a match type, then hit{' '}
+                <strong>Save Pattern</strong>. The strip can be dismissed with ×; once dismissed it
+                won&apos;t re-appear for that row in the same session. Direction is inferred
+                automatically from the transaction amount — debits create debit-scoped patterns,
+                credits create credit-scoped ones.
               </BodyText>
 
               <SubHeading>Learned patterns</SubHeading>

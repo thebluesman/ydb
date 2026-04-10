@@ -41,13 +41,6 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
     let ocrText = ''
 
     try {
-      const { createWorker } = await import('tesseract.js')
-      const worker = await createWorker('eng', 1, {
-        logger: (m: { status: string; progress: number }) => {
-          if (m.status === 'recognizing text') setOcrProgress(Math.round(m.progress * 100))
-        },
-      })
-
       if (file.type === 'application/pdf') {
         const pdfjsLib = await import('pdfjs-dist')
         pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.mjs', import.meta.url).toString()
@@ -58,7 +51,6 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
             password: pdfPassword || undefined,
           }).promise
         } catch (e) {
-          await worker.terminate()
           const isPasswordErr = e !== null && typeof e === 'object' && 'name' in e &&
             (e as { name: string }).name === 'PasswordException'
           if (isPasswordErr) {
@@ -69,20 +61,53 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
           throw e
         }
         setOcrPage({ current: 0, total: pdf.numPages })
+
+        // Lazy-initialised Tesseract worker — only created if a scanned page is found
+        let ocrWorker: { recognize: (canvas: HTMLCanvasElement) => Promise<{ data: { text: string } }>; terminate: () => Promise<void> } | null = null
+
         for (let i = 1; i <= pdf.numPages; i++) {
           setOcrPage({ current: i, total: pdf.numPages }); setOcrProgress(0)
           const page = await pdf.getPage(i)
           const viewport = page.getViewport({ scale: 2 })
-          const canvas = document.createElement('canvas')
-          canvas.width = viewport.width; canvas.height = viewport.height
-          await page.render({ canvas, viewport }).promise
-          ocrText += (await worker.recognize(canvas)).data.text + '\n'
+
+          // Prefer native text extraction — produces clean, compact text and uses far fewer tokens.
+          // Fall back to Tesseract OCR only for scanned (image-only) pages.
+          const textContent = await page.getTextContent()
+          type TextItem = { str: string; hasEOL: boolean }
+          const textItems = (textContent.items as (TextItem | object)[])
+            .filter((item): item is TextItem => 'str' in item && typeof (item as TextItem).str === 'string' && (item as TextItem).str.trim() !== '')
+
+          if (textItems.length > 0) {
+            // Native text — join items with spaces; EOL items append a newline
+            ocrText += textItems.map(item => item.str + (item.hasEOL ? '\n' : ' ')).join('') + '\n'
+          } else {
+            // Scanned page — fall back to Tesseract OCR
+            if (!ocrWorker) {
+              const { createWorker } = await import('tesseract.js')
+              ocrWorker = await createWorker('eng', 1, {
+                logger: (m: { status: string; progress: number }) => {
+                  if (m.status === 'recognizing text') setOcrProgress(Math.round(m.progress * 100))
+                },
+              })
+            }
+            const canvas = document.createElement('canvas')
+            canvas.width = viewport.width; canvas.height = viewport.height
+            await page.render({ canvas, viewport }).promise
+            ocrText += (await ocrWorker.recognize(canvas)).data.text + '\n'
+          }
         }
+        if (ocrWorker) await ocrWorker.terminate()
       } else {
         setOcrPage({ current: 1, total: 1 })
+        const { createWorker } = await import('tesseract.js')
+        const worker = await createWorker('eng', 1, {
+          logger: (m: { status: string; progress: number }) => {
+            if (m.status === 'recognizing text') setOcrProgress(Math.round(m.progress * 100))
+          },
+        })
         ocrText = (await worker.recognize(file)).data.text
+        await worker.terminate()
       }
-      await worker.terminate()
     } catch (e) {
       setError(`OCR failed: ${String(e)}`); setPhase('idle'); return
     }

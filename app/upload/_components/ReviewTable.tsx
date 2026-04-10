@@ -12,8 +12,9 @@ export type DraftTransaction = {
 
 type Account = { id: number; name: string; currency: string }
 type Category = { id: number; name: string; color: string }
+type RuleSuggestion = { pattern: string; vendor: string; category: string; matchType: string }
 
-const inputCls = 'w-full px-2 py-1 text-xs rounded-[6px] outline-none transition-colors duration-150'
+const inputCls = 'w-full px-2 py-1.5 text-sm rounded-[6px] outline-none transition-colors duration-150'
 
 const amountColor = (amt: number, transactionType?: string) =>
   transactionType === 'transfer' ? '#F59E0B' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-tertiary)'
@@ -142,18 +143,17 @@ function CategorySelect({
     onChange(v)
   }
 
-  // If current value isn't in categories list, include it as an option
   const hasValue = categories.some((c) => c.name === value)
 
   return (
     <Select.Root value={value} onValueChange={handleChange}>
       <Select.Trigger
-        className="flex items-center gap-1.5 w-full px-2 py-1 text-xs rounded-[6px] outline-none"
+        className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
         style={inputStyle}
       >
         <Select.Value />
         <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-          <ChevronDown size={11} />
+          <ChevronDown size={12} />
         </Select.Icon>
       </Select.Trigger>
       <Select.Portal>
@@ -162,7 +162,7 @@ function CategorySelect({
             {!hasValue && (
               <Select.Item
                 value={value}
-                className="px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
+                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
                 style={{ color: 'var(--tx-primary)' }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
@@ -173,7 +173,7 @@ function CategorySelect({
             {categories.map((c) => (
               <Select.Item
                 key={c.id} value={c.name}
-                className="px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
+                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
                 style={{ color: 'var(--tx-primary)' }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
@@ -184,12 +184,12 @@ function CategorySelect({
             <Select.Separator style={{ height: '1px', backgroundColor: 'var(--border-warm)', margin: '4px 0' }} />
             <Select.Item
               value={ADD_NEW_SENTINEL}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
               style={{ color: 'var(--tx-secondary)' }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
             >
-              <Plus size={11} />
+              <Plus size={12} />
               <Select.ItemText>Add new category</Select.ItemText>
             </Select.Item>
           </Select.Viewport>
@@ -362,12 +362,12 @@ function AccountSelect({
   return (
     <Select.Root value={String(value)} onValueChange={handleChange}>
       <Select.Trigger
-        className="flex items-center gap-1.5 w-full px-2 py-1 text-xs rounded-[6px] outline-none"
+        className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
         style={inputStyle}
       >
         <Select.Value />
         <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-          <ChevronDown size={11} />
+          <ChevronDown size={12} />
         </Select.Icon>
       </Select.Trigger>
       <Select.Portal>
@@ -376,7 +376,7 @@ function AccountSelect({
             {accounts.map((a) => (
               <Select.Item
                 key={a.id} value={String(a.id)}
-                className="px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
+                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
                 style={{ color: 'var(--tx-primary)' }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
@@ -387,18 +387,51 @@ function AccountSelect({
             <Select.Separator style={{ height: '1px', backgroundColor: 'var(--border-warm)', margin: '4px 0' }} />
             <Select.Item
               value={ADD_NEW_ACCOUNT_SENTINEL}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
               style={{ color: 'var(--tx-secondary)' }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
             >
-              <Plus size={11} />
+              <Plus size={12} />
               <Select.ItemText>Add new account</Select.ItemText>
             </Select.Item>
           </Select.Viewport>
         </Select.Content>
       </Select.Portal>
     </Select.Root>
+  )
+}
+
+// ── Type Segmented Button ─────────────────────────────────────────────────────
+
+const TYPE_OPTIONS: { value: string; label: string; activeBg: string; activeColor: string }[] = [
+  { value: 'debit',    label: 'Debit',    activeBg: 'var(--bg-stat-expense)',  activeColor: 'var(--tx-stat-expense)' },
+  { value: 'credit',   label: 'Credit',   activeBg: 'var(--bg-stat-income)',   activeColor: 'var(--tx-stat-income)' },
+  { value: 'transfer', label: 'Transfer', activeBg: 'rgba(245,158,11,0.15)',   activeColor: '#F59E0B' },
+]
+
+function TypeSegmented({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div
+      className="flex rounded-[6px] overflow-hidden w-full"
+      style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)' }}
+    >
+      {TYPE_OPTIONS.map((opt, i) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className="flex-1 py-1.5 text-xs font-medium transition-colors duration-100"
+          style={{
+            backgroundColor: value === opt.value ? opt.activeBg : 'transparent',
+            color: value === opt.value ? opt.activeColor : 'var(--tx-tertiary)',
+            borderRight: i < TYPE_OPTIONS.length - 1 ? '1px solid var(--border-warm)' : undefined,
+          }}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -417,14 +450,14 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
   const [duplicateIds, setDuplicateIds] = useState<Set<string>>(new Set())
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
 
-  // Local category list — starts from prop, can grow via "Add new"
   const [categories, setCategories] = useState<Category[]>(initialCategories)
-  // Local account list — starts from prop, can grow via "Add new"
   const [accounts, setAccounts] = useState<Account[]>(initialAccounts)
-  // Which row's _id triggered the Add Category modal (null = closed)
   const [addCategoryForRow, setAddCategoryForRow] = useState<string | null>(null)
-  // Which row's _id triggered the Add Account modal (null = closed)
   const [addAccountForRow, setAddAccountForRow] = useState<string | null>(null)
+
+  const [ruleSuggestions, setRuleSuggestions] = useState<Map<string, RuleSuggestion>>(new Map())
+  const [dismissedRules, setDismissedRules] = useState<Set<string>>(new Set())
+  const [savingRuleId, setSavingRuleId] = useState<string | null>(null)
 
   useEffect(() => {
     if (drafts.length === 0) return
@@ -470,6 +503,57 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
   const dismissDuplicate = (id: string) =>
     setDismissedIds((prev) => new Set([...prev, id]))
 
+  const handleCategoryChange = (id: string, newCategory: string) => {
+    update(id, 'category', newCategory)
+    if (dismissedRules.has(id)) return
+    const draft = drafts.find((d) => d._id === id)
+    const rawText = (draft?.originalDescription || draft?.description || '').trim()
+    const displayName = (draft?.description || '').trim()
+    if (!rawText) return
+    setRuleSuggestions((prev) => new Map(prev).set(id, {
+      pattern: rawText,
+      vendor: displayName || rawText,
+      category: newCategory,
+      matchType: 'contains',
+    }))
+  }
+
+  const updateRuleSuggestion = (id: string, field: keyof RuleSuggestion, value: string) =>
+    setRuleSuggestions((prev) => {
+      const existing = prev.get(id)
+      if (!existing) return prev
+      return new Map(prev).set(id, { ...existing, [field]: value })
+    })
+
+  const dismissRuleSuggestion = (id: string) => {
+    setRuleSuggestions((prev) => { const n = new Map(prev); n.delete(id); return n })
+    setDismissedRules((prev) => new Set([...prev, id]))
+  }
+
+  const handleSaveRule = async (id: string) => {
+    const suggestion = ruleSuggestions.get(id)
+    if (!suggestion) return
+    const draft = drafts.find((d) => d._id === id)
+    setSavingRuleId(id)
+    try {
+      const res = await fetch('/api/vendor-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pattern: suggestion.pattern,
+          vendor: suggestion.vendor,
+          category: suggestion.category,
+          matchType: suggestion.matchType,
+          direction: (draft?.amount ?? 0) < 0 ? 'debit' : (draft?.amount ?? 0) > 0 ? 'credit' : 'either',
+        }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      dismissRuleSuggestion(id)
+    } catch { /* silent */ } finally {
+      setSavingRuleId(null)
+    }
+  }
+
   const handleCategoryAdded = (cat: Category) => {
     setCategories((prev) => [...prev, cat].sort((a, b) => a.name.localeCompare(b.name)))
     if (addCategoryForRow) update(addCategoryForRow, 'category', cat.name)
@@ -501,104 +585,182 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
         </p>
       )}
 
-      <div className="overflow-x-auto rounded-[8px]" style={{ border: '1px solid var(--border-warm)' }}>
-        <table className="w-full text-xs">
-          <thead style={{ backgroundColor: 'var(--bg-table-head)' }}>
-            <tr>
-              {['Date', 'Description', 'Amount', 'Type', 'Category', 'Account', 'Notes', ''].map((h) => (
-                <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap" style={{ color: 'var(--tx-secondary)' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody style={{ backgroundColor: 'var(--bg-card)' }}>
-            {drafts.map((d) => {
-              const isDuplicate = duplicateIds.has(d._id) && !dismissedIds.has(d._id)
-              return (
-                <tr
-                  key={d._id}
-                  style={{
-                    borderTop: '1px solid var(--border-warm)',
-                    backgroundColor: isDuplicate ? 'var(--bg-badge-review)' : undefined,
-                  }}
-                >
-                  <td className="px-2 py-1.5 min-w-[120px]">
-                    <input type="date" value={d.date} onChange={(e) => update(d._id, 'date', e.target.value)} className={inputCls} style={inputStyle} />
-                  </td>
-                  <td className="px-2 py-1.5 min-w-[200px]">
-                    <div className="flex items-center gap-1.5">
-                      <div className="flex-1 min-w-0">
-                        <input type="text" value={d.description} onChange={(e) => update(d._id, 'description', e.target.value)} className={inputCls} style={inputStyle} />
-                        {d.originalDescription && d.originalDescription !== d.description && (
-                          <div className="text-[10px] truncate mt-0.5 px-1" style={{ color: 'var(--tx-faint)' }} title={d.originalDescription}>
-                            {d.originalDescription}
-                          </div>
-                        )}
-                      </div>
-                      {isDuplicate && (
-                        <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] whitespace-nowrap cursor-pointer flex-none"
-                          style={{ backgroundColor: 'var(--bg-badge-review)', color: 'var(--tx-badge-review)', border: '1px solid var(--border-warm)' }}
-                          title="Dismiss duplicate warning"
-                          onClick={() => dismissDuplicate(d._id)}
-                        >
-                          Possible duplicate ×
-                        </span>
-                      )}
-                    </div>
-                  </td>
+      <div className="rounded-[8px] overflow-hidden" style={{ border: '1px solid var(--border-warm)' }}>
+        {drafts.length === 0 ? (
+          <p className="text-sm text-center py-8" style={{ color: 'var(--tx-secondary)', backgroundColor: 'var(--bg-card)' }}>
+            All rows removed. Add one or discard.
+          </p>
+        ) : (
+          drafts.map((d, idx) => {
+            const isDuplicate = duplicateIds.has(d._id) && !dismissedIds.has(d._id)
+            const ruleSuggestion = ruleSuggestions.get(d._id) ?? null
+            return (
+              <div
+                key={d._id}
+                style={{
+                  borderTop: idx > 0 ? '1px solid var(--border-warm)' : undefined,
+                  backgroundColor: 'var(--bg-card)',
+                }}
+              >
+                {/* Duplicate warning strip */}
+                {isDuplicate && (
+                  <div
+                    className="flex items-center justify-between px-4 py-1.5"
+                    style={{ backgroundColor: 'var(--bg-badge-review)', borderBottom: '1px solid var(--border-warm)' }}
+                  >
+                    <span className="text-xs" style={{ color: 'var(--tx-badge-review)' }}>
+                      Possible duplicate — verify before committing
+                    </span>
+                    <button
+                      onClick={() => dismissDuplicate(d._id)}
+                      className="text-xs underline transition-opacity hover:opacity-70"
+                      style={{ color: 'var(--tx-badge-review)' }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
 
-                  <td className="px-2 py-1.5 min-w-[100px]">
-                    <input type="number" step="0.01" value={d.amount}
-                      onChange={(e) => update(d._id, 'amount', parseFloat(e.target.value) || 0)}
-                      className={`${inputCls} font-mono`}
-                      style={{ ...inputStyle, color: amountColor(d.amount, d.transactionType) }} />
-                  </td>
-                  <td className="px-2 py-1.5 min-w-[100px]">
-                    <select
-                      value={d.transactionType}
-                      onChange={(e) => update(d._id, 'transactionType', e.target.value)}
+                {/* Card body */}
+                <div className="flex gap-4 px-4 py-3 items-start">
+                  {/* Left: Date + Type */}
+                  <div className="shrink-0 space-y-2" style={{ width: 148 }}>
+                    <input
+                      type="date"
+                      value={d.date}
+                      onChange={(e) => update(d._id, 'date', e.target.value)}
                       className={inputCls}
                       style={inputStyle}
-                    >
-                      <option value="debit">Debit</option>
-                      <option value="credit">Credit</option>
-                      <option value="transfer">Transfer</option>
-                    </select>
-                  </td>
-                  <td className="px-2 py-1.5 min-w-[130px]">
+                    />
+                    <TypeSegmented
+                      value={d.transactionType}
+                      onChange={(v) => update(d._id, 'transactionType', v)}
+                    />
+                  </div>
+
+                  {/* Middle: Description + originalDescription + Notes */}
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <input
+                      type="text"
+                      value={d.description}
+                      onChange={(e) => update(d._id, 'description', e.target.value)}
+                      placeholder="Description"
+                      className={inputCls}
+                      style={inputStyle}
+                    />
+                    {d.originalDescription && d.originalDescription !== d.description && (
+                      <div
+                        className="text-[11px] truncate px-0.5"
+                        style={{ color: 'var(--tx-faint)' }}
+                        title={d.originalDescription}
+                      >
+                        {d.originalDescription}
+                      </div>
+                    )}
+                    <input
+                      type="text"
+                      value={d.notes}
+                      onChange={(e) => update(d._id, 'notes', e.target.value)}
+                      placeholder="Notes (optional)"
+                      className={inputCls}
+                      style={{ ...inputStyle, fontStyle: 'italic' }}
+                    />
+                  </div>
+
+                  {/* Right: Amount + Category + Account */}
+                  <div className="shrink-0 space-y-2" style={{ width: 176 }}>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={d.amount}
+                      onChange={(e) => update(d._id, 'amount', parseFloat(e.target.value) || 0)}
+                      className={`${inputCls} font-mono text-right`}
+                      style={{ ...inputStyle, color: amountColor(d.amount, d.transactionType) }}
+                    />
                     <CategorySelect
                       value={d.category}
                       categories={categories}
-                      onChange={(v) => update(d._id, 'category', v)}
+                      onChange={(v) => handleCategoryChange(d._id, v)}
                       onAddNew={() => setAddCategoryForRow(d._id)}
                     />
-                  </td>
-                  <td className="px-2 py-1.5 min-w-[140px]">
                     <AccountSelect
                       value={d.accountId}
                       accounts={accounts}
                       onChange={(id) => update(d._id, 'accountId', id)}
                       onAddNew={() => setAddAccountForRow(d._id)}
                     />
-                  </td>
-                  <td className="px-2 py-1.5 min-w-[160px]">
-                    <input type="text" value={d.notes} placeholder="Optional" onChange={(e) => update(d._id, 'notes', e.target.value)} className={inputCls} style={inputStyle} />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <button onClick={() => remove(d._id)} className="transition-colors duration-150 hover:text-error" style={{ color: 'var(--tx-tertiary)' }} aria-label="Remove row"><X size={14} /></button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+                  </div>
 
-      {drafts.length === 0 && (
-        <p className="text-sm text-center py-4" style={{ color: 'var(--tx-secondary)' }}>
-          All rows removed. Add one or discard.
-        </p>
-      )}
+                  {/* Delete */}
+                  <button
+                    onClick={() => remove(d._id)}
+                    className="shrink-0 mt-0.5 transition-opacity hover:opacity-60"
+                    style={{ color: 'var(--tx-tertiary)' }}
+                    aria-label="Remove row"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+
+                {/* Rule suggestion strip */}
+                {ruleSuggestion && (
+                  <div
+                    className="flex items-center gap-2 flex-wrap px-4 py-2"
+                    style={{ borderTop: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-card-alt)' }}
+                  >
+                    <span className="text-xs font-medium shrink-0" style={{ color: 'var(--tx-secondary)' }}>
+                      Save as pattern?
+                    </span>
+                    <input
+                      type="text"
+                      value={ruleSuggestion.pattern}
+                      onChange={(e) => updateRuleSuggestion(d._id, 'pattern', e.target.value)}
+                      placeholder="Pattern"
+                      className="px-2 py-0.5 text-xs rounded-[4px] outline-none"
+                      style={{ ...inputStyle, width: 180 }}
+                    />
+                    <input
+                      type="text"
+                      value={ruleSuggestion.vendor}
+                      onChange={(e) => updateRuleSuggestion(d._id, 'vendor', e.target.value)}
+                      placeholder="Vendor name"
+                      className="px-2 py-0.5 text-xs rounded-[4px] outline-none"
+                      style={{ ...inputStyle, width: 130 }}
+                    />
+                    <select
+                      value={ruleSuggestion.matchType}
+                      onChange={(e) => updateRuleSuggestion(d._id, 'matchType', e.target.value)}
+                      className="px-1.5 py-0.5 text-xs rounded-[4px] outline-none"
+                      style={inputStyle}
+                    >
+                      <option value="contains">contains</option>
+                      <option value="starts-with">starts-with</option>
+                      <option value="ends-with">ends-with</option>
+                      <option value="exact">exact</option>
+                      <option value="regex">regex</option>
+                    </select>
+                    <button
+                      onClick={() => handleSaveRule(d._id)}
+                      disabled={savingRuleId === d._id}
+                      className="px-2.5 py-0.5 text-xs rounded-[4px] font-medium disabled:opacity-40"
+                      style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+                    >
+                      {savingRuleId === d._id ? '…' : 'Save Pattern'}
+                    </button>
+                    <button
+                      onClick={() => dismissRuleSuggestion(d._id)}
+                      className="ml-auto transition-opacity hover:opacity-60"
+                      style={{ color: 'var(--tx-tertiary)' }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })
+        )}
+      </div>
 
       {error && (
         <p className="text-sm px-4 py-2 rounded-[8px]" style={{ backgroundColor: 'var(--bg-notify-error)', color: 'var(--tx-notify-error)' }}>
@@ -607,17 +769,26 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
       )}
 
       <div className="flex items-center gap-3 pt-2">
-        <button onClick={addRow} className="px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150 hover:text-error"
-          style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-card)', color: 'var(--tx-primary)' }}>
+        <button
+          onClick={addRow}
+          className="px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150"
+          style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-card)', color: 'var(--tx-primary)' }}
+        >
           + Add row
         </button>
-        <button onClick={onDiscard} className="px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150 hover:text-error"
-          style={{ color: 'var(--tx-secondary)' }}>
+        <button
+          onClick={onDiscard}
+          className="px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150"
+          style={{ color: 'var(--tx-secondary)' }}
+        >
           Discard
         </button>
-        <button onClick={handleCommit} disabled={committing || drafts.length === 0}
-          className="ml-auto px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 hover:text-error disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
+        <button
+          onClick={handleCommit}
+          disabled={committing || drafts.length === 0}
+          className="ml-auto px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+        >
           {committing ? 'Saving…' : `Commit ${drafts.length} transaction${drafts.length !== 1 ? 's' : ''}`}
         </button>
       </div>

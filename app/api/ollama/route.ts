@@ -107,6 +107,7 @@ export async function POST(request: Request) {
         system: systemPrompt,
         prompt: `Extract all transactions from this bank statement text:\n\n${text}`,
         stream: true,
+        options: { num_ctx: 16384 },
       }),
     })
   } catch {

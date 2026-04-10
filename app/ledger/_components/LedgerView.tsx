@@ -539,7 +539,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
             <table className="w-full text-sm">
               <thead style={{ backgroundColor: 'var(--bg-table-head)' }}>
                 <tr>
-                  <th className="px-3 py-2.5 w-8">
+                  <th className="px-3 py-3 w-10">
                     <input
                       type="checkbox"
                       checked={allPageSelected}
@@ -549,19 +549,17 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
                     />
                   </th>
                   {([
-                    { key: 'date',            label: 'Date',        sortable: true  },
-                    { key: 'description',     label: 'Description', sortable: true  },
-                    { key: 'amount',          label: 'Amount',      sortable: true  },
-                    { key: 'transactionType', label: 'Type',        sortable: true  },
-                    { key: 'category',        label: 'Category',    sortable: true  },
-                    { key: 'account',         label: 'Account',     sortable: false },
-                    { key: 'status',          label: 'Status',      sortable: false },
-                    { key: 'notes',           label: 'Notes',       sortable: false },
-                    { key: 'actions',         label: '',            sortable: false },
+                    { key: 'date',        label: 'Date',        sortable: true  },
+                    { key: 'description', label: 'Description', sortable: true  },
+                    { key: 'amount',      label: 'Amount',      sortable: true  },
+                    { key: 'category',    label: 'Category',    sortable: true  },
+                    { key: 'account',     label: 'Account',     sortable: false },
+                    { key: 'status',      label: 'Status',      sortable: false },
+                    { key: 'actions',     label: '',            sortable: false },
                   ] as const).map(({ key, label, sortable }) =>
                     sortable ? (
                       <th key={key}
-                        className="px-3 py-2.5 text-left text-xs font-medium whitespace-nowrap cursor-pointer select-none"
+                        className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap cursor-pointer select-none"
                         style={{ color: 'var(--tx-secondary)' }}
                         onClick={() => toggleSort(key as SortKey)}>
                         {label}
@@ -569,7 +567,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
                       </th>
                     ) : (
                       <th key={key}
-                        className="px-3 py-2.5 text-left text-xs font-medium whitespace-nowrap"
+                        className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap"
                         style={{ color: 'var(--tx-secondary)' }}>
                         {label}
                       </th>
