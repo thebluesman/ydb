@@ -33,6 +33,7 @@ export async function POST(request: Request) {
       splitLegs: { select: { id: true, amount: true, category: true, description: true } },
       reimbursementTx: { select: { id: true, amount: true, description: true } },
       reimbursedExpense: { select: { id: true, description: true } },
+      transferCounterpartAccount: { select: { id: true, name: true } },
     },
   })
 

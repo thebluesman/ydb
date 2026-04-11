@@ -18,6 +18,8 @@ type Transaction = {
   reimbursementTxId: number | null
   reimbursementTx: { id: number; amount: number; description: string } | null
   reimbursedExpense: { id: number; description: string } | null
+  transferCounterpartAccountId: number | null
+  transferCounterpartAccount: { id: number; name: string } | null
 }
 type Account = { id: number; name: string; currency: string }
 type Category = { id: number; name: string; color: string }

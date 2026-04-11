@@ -14,6 +14,7 @@ export default async function LedgerPage() {
         splitLegs: { select: { id: true, amount: true, category: true, description: true } },
         reimbursementTx: { select: { id: true, amount: true, description: true } },
         reimbursedExpense: { select: { id: true, description: true } },
+        transferCounterpartAccount: { select: { id: true, name: true } },
       },
     }),
     prisma.account.findMany({ where: { isActive: true }, orderBy: { id: 'asc' } }),

@@ -8,6 +8,7 @@ import * as Select from '@radix-ui/react-select'
 export type DraftTransaction = {
   _id: string; date: string; description: string; originalDescription: string; amount: number
   transactionType: string; category: string; accountId: number; notes: string; rawSource: string
+  transferCounterpartAccountId?: number | null
 }
 
 type Account = { id: number; name: string; currency: string }
@@ -402,36 +403,50 @@ function AccountSelect({
   )
 }
 
-// ── Type Segmented Button ─────────────────────────────────────────────────────
+// ── Type Select ───────────────────────────────────────────────────────────────
 
-const TYPE_OPTIONS: { value: string; label: string; activeBg: string; activeColor: string }[] = [
-  { value: 'debit',    label: 'Debit',    activeBg: 'var(--bg-stat-expense)',  activeColor: 'var(--tx-stat-expense)' },
-  { value: 'credit',   label: 'Credit',   activeBg: 'var(--bg-stat-income)',   activeColor: 'var(--tx-stat-income)' },
-  { value: 'transfer', label: 'Transfer', activeBg: 'rgba(245,158,11,0.15)',   activeColor: '#F59E0B' },
+const TYPE_OPTIONS = [
+  { value: 'debit',    label: 'Debit',    dot: 'var(--tx-stat-expense)', color: 'var(--tx-stat-expense)' },
+  { value: 'credit',   label: 'Credit',   dot: 'var(--tx-stat-income)',  color: 'var(--tx-stat-income)' },
+  { value: 'transfer', label: 'Transfer', dot: '#F59E0B',                color: '#F59E0B' },
 ]
 
-function TypeSegmented({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function TypeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const current = TYPE_OPTIONS.find((o) => o.value === value) ?? TYPE_OPTIONS[0]
   return (
-    <div
-      className="flex rounded-[6px] overflow-hidden w-full"
-      style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)' }}
-    >
-      {TYPE_OPTIONS.map((opt, i) => (
-        <button
-          key={opt.value}
-          type="button"
-          onClick={() => onChange(opt.value)}
-          className="flex-1 py-1.5 text-xs font-medium transition-colors duration-100"
-          style={{
-            backgroundColor: value === opt.value ? opt.activeBg : 'transparent',
-            color: value === opt.value ? opt.activeColor : 'var(--tx-tertiary)',
-            borderRight: i < TYPE_OPTIONS.length - 1 ? '1px solid var(--border-warm)' : undefined,
-          }}
+    <Select.Root value={value} onValueChange={onChange}>
+      <Select.Trigger
+        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
+        style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: current.color }}
+      >
+        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: current.dot }} />
+        <Select.Value />
+        <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+          <ChevronDown size={12} />
+        </Select.Icon>
+      </Select.Trigger>
+      <Select.Portal>
+        <Select.Content
+          position="popper" sideOffset={4}
+          style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}
         >
-          {opt.label}
-        </button>
-      ))}
-    </div>
+          <Select.Viewport className="p-1">
+            {TYPE_OPTIONS.map((opt) => (
+              <Select.Item
+                key={opt.value} value={opt.value}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                style={{ color: 'var(--tx-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: opt.dot }} />
+                <Select.ItemText>{opt.label}</Select.ItemText>
+              </Select.Item>
+            ))}
+          </Select.Viewport>
+        </Select.Content>
+      </Select.Portal>
+    </Select.Root>
   )
 }
 
@@ -459,6 +474,27 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
   const [dismissedRules, setDismissedRules] = useState<Set<string>>(new Set())
   const [savingRuleId, setSavingRuleId] = useState<string | null>(null)
 
+  // Collapsible notes: pre-expand rows that already have notes
+  const [expandedNotes, setExpandedNotes] = useState<Set<string>>(
+    () => new Set(drafts.filter((d) => d.notes).map((d) => d._id))
+  )
+
+  // Transfer direction per row: 'out' = negative (money leaving), 'in' = positive
+  const [transferDirections, setTransferDirections] = useState<Map<string, 'in' | 'out'>>(
+    () => new Map(drafts.map((d) => [d._id, d.amount >= 0 ? 'in' : 'out'] as [string, 'in' | 'out']))
+  )
+  const setTransferDirection = (id: string, dir: 'in' | 'out') =>
+    setTransferDirections((prev) => new Map(prev).set(id, dir))
+  const getTransferDirection = (d: DraftTransaction): 'in' | 'out' =>
+    transferDirections.get(d._id) ?? (d.amount >= 0 ? 'in' : 'out')
+
+  const computeSignedAmount = (d: DraftTransaction): number => {
+    const abs = Math.abs(d.amount)
+    if (d.transactionType === 'debit') return -abs
+    if (d.transactionType === 'credit') return abs
+    return getTransferDirection(d) === 'in' ? abs : -abs
+  }
+
   useEffect(() => {
     if (drafts.length === 0) return
     const candidates = drafts.map((d) => ({
@@ -475,13 +511,15 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
       .catch(() => { /* silent */ })
   }, [drafts.length])
 
-  const update = (id: string, field: keyof DraftTransaction, value: string | number) =>
+  const update = (id: string, field: keyof DraftTransaction, value: string | number | null) =>
     onChange(drafts.map((d) => (d._id === id ? { ...d, [field]: value } : d)))
 
   const remove = (id: string) => {
     onChange(drafts.filter((d) => d._id !== id))
     setDuplicateIds((prev) => { const n = new Set(prev); n.delete(id); return n })
     setDismissedIds((prev) => { const n = new Set(prev); n.delete(id); return n })
+    setExpandedNotes((prev) => { const n = new Set(prev); n.delete(id); return n })
+    setTransferDirections((prev) => { const n = new Map(prev); n.delete(id); return n })
   }
 
   const addRow = () => onChange([...drafts, {
@@ -556,7 +594,7 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
 
   const handleCategoryAdded = (cat: Category) => {
     setCategories((prev) => [...prev, cat].sort((a, b) => a.name.localeCompare(b.name)))
-    if (addCategoryForRow) update(addCategoryForRow, 'category', cat.name)
+    if (addCategoryForRow) handleCategoryChange(addCategoryForRow, cat.name)
     setAddCategoryForRow(null)
   }
 
@@ -632,9 +670,22 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                       className={inputCls}
                       style={inputStyle}
                     />
-                    <TypeSegmented
+                    <TypeSelect
                       value={d.transactionType}
-                      onChange={(v) => update(d._id, 'transactionType', v)}
+                      onChange={(v) => {
+                        update(d._id, 'transactionType', v)
+                        // Re-sign the amount when type changes
+                        const abs = Math.abs(d.amount)
+                        if (v === 'debit') update(d._id, 'amount', -abs)
+                        else if (v === 'credit') update(d._id, 'amount', abs)
+                        // transfer: preserve existing direction
+                        else {
+                          const dir = getTransferDirection(d)
+                          update(d._id, 'amount', dir === 'in' ? abs : -abs)
+                        }
+                        // Clear counterpart when switching away from transfer
+                        if (v !== 'transfer') update(d._id, 'transferCounterpartAccountId', null)
+                      }}
                     />
                   </div>
 
@@ -657,26 +708,82 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                         {d.originalDescription}
                       </div>
                     )}
-                    <input
-                      type="text"
-                      value={d.notes}
-                      onChange={(e) => update(d._id, 'notes', e.target.value)}
-                      placeholder="Notes (optional)"
-                      className={inputCls}
-                      style={{ ...inputStyle, fontStyle: 'italic' }}
-                    />
+                    {expandedNotes.has(d._id) ? (
+                      <input
+                        type="text"
+                        value={d.notes}
+                        onChange={(e) => update(d._id, 'notes', e.target.value)}
+                        placeholder="Notes (optional)"
+                        className={inputCls}
+                        style={{ ...inputStyle, fontStyle: 'italic' }}
+                        autoFocus={!d.notes}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setExpandedNotes((prev) => new Set([...prev, d._id]))}
+                        className="text-xs py-0.5 text-left transition-opacity duration-100 hover:opacity-80"
+                        style={{ color: 'var(--tx-faint)' }}
+                      >
+                        + Add note
+                      </button>
+                    )}
                   </div>
 
-                  {/* Right: Amount + Category + Account */}
+                  {/* Right: Amount + Direction (transfer) + Category + Account + Counterpart (transfer) */}
                   <div className="shrink-0 space-y-2" style={{ width: 176 }}>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={d.amount}
-                      onChange={(e) => update(d._id, 'amount', parseFloat(e.target.value) || 0)}
-                      className={`${inputCls} font-mono text-right`}
-                      style={{ ...inputStyle, color: amountColor(d.amount, d.transactionType) }}
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={Math.abs(d.amount)}
+                        onChange={(e) => {
+                          const abs = Math.abs(parseFloat(e.target.value) || 0)
+                          const signed = computeSignedAmount({ ...d, amount: abs })
+                          update(d._id, 'amount', signed)
+                        }}
+                        className={`${inputCls} font-mono text-right`}
+                        style={{ ...inputStyle, color: amountColor(d.amount, d.transactionType) }}
+                      />
+                    </div>
+                    {d.transactionType === 'transfer' && (
+                      <Select.Root
+                        value={getTransferDirection(d)}
+                        onValueChange={(dir) => {
+                          setTransferDirection(d._id, dir as 'in' | 'out')
+                          const abs = Math.abs(d.amount)
+                          update(d._id, 'amount', dir === 'in' ? abs : -abs)
+                        }}
+                      >
+                        <Select.Trigger
+                          className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                          style={inputStyle}
+                        >
+                          <Select.Value />
+                          <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+                            <ChevronDown size={12} />
+                          </Select.Icon>
+                        </Select.Trigger>
+                        <Select.Portal>
+                          <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
+                            <Select.Viewport className="p-1">
+                              {[{ value: 'out', label: '↑ Out' }, { value: 'in', label: '↓ In' }].map((opt) => (
+                                <Select.Item
+                                  key={opt.value} value={opt.value}
+                                  className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                                  style={{ color: 'var(--tx-primary)' }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                                >
+                                  <Select.ItemText>{opt.label}</Select.ItemText>
+                                </Select.Item>
+                              ))}
+                            </Select.Viewport>
+                          </Select.Content>
+                        </Select.Portal>
+                      </Select.Root>
+                    )}
                     <CategorySelect
                       value={d.category}
                       categories={categories}
@@ -689,6 +796,50 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                       onChange={(id) => update(d._id, 'accountId', id)}
                       onAddNew={() => setAddAccountForRow(d._id)}
                     />
+                    {d.transactionType === 'transfer' && (
+                      <Select.Root
+                        value={String(d.transferCounterpartAccountId ?? '__none__')}
+                        onValueChange={(v) => update(d._id, 'transferCounterpartAccountId', v === '__none__' ? null : parseInt(v))}
+                      >
+                        <Select.Trigger
+                          className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                          style={inputStyle}
+                        >
+                          <Select.Value placeholder={getTransferDirection(d) === 'out' ? 'To account…' : 'From account…'} />
+                          <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+                            <ChevronDown size={12} />
+                          </Select.Icon>
+                        </Select.Trigger>
+                        <Select.Portal>
+                          <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
+                            <Select.Viewport className="p-1">
+                              <Select.Item
+                                value="__none__"
+                                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                                style={{ color: 'var(--tx-faint)' }}
+                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                              >
+                                <Select.ItemText>— none —</Select.ItemText>
+                              </Select.Item>
+                              {accounts
+                                .filter((a) => a.id !== d.accountId)
+                                .map((a) => (
+                                  <Select.Item
+                                    key={a.id} value={String(a.id)}
+                                    className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                                    style={{ color: 'var(--tx-primary)' }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                                  >
+                                    <Select.ItemText>{a.name}</Select.ItemText>
+                                  </Select.Item>
+                                ))}
+                            </Select.Viewport>
+                          </Select.Content>
+                        </Select.Portal>
+                      </Select.Root>
+                    )}
                   </div>
 
                   {/* Delete */}
@@ -705,55 +856,85 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                 {/* Rule suggestion strip */}
                 {ruleSuggestion && (
                   <div
-                    className="flex items-center gap-2 flex-wrap px-4 py-2"
+                    className="px-4 py-2.5 space-y-2"
                     style={{ borderTop: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-card-alt)' }}
                   >
-                    <span className="text-xs font-medium shrink-0" style={{ color: 'var(--tx-secondary)' }}>
-                      Save as pattern?
-                    </span>
-                    <input
-                      type="text"
-                      value={ruleSuggestion.pattern}
-                      onChange={(e) => updateRuleSuggestion(d._id, 'pattern', e.target.value)}
-                      placeholder="Pattern"
-                      className="px-2 py-0.5 text-xs rounded-[4px] outline-none"
-                      style={{ ...inputStyle, width: 180 }}
-                    />
-                    <input
-                      type="text"
-                      value={ruleSuggestion.vendor}
-                      onChange={(e) => updateRuleSuggestion(d._id, 'vendor', e.target.value)}
-                      placeholder="Vendor name"
-                      className="px-2 py-0.5 text-xs rounded-[4px] outline-none"
-                      style={{ ...inputStyle, width: 130 }}
-                    />
-                    <select
-                      value={ruleSuggestion.matchType}
-                      onChange={(e) => updateRuleSuggestion(d._id, 'matchType', e.target.value)}
-                      className="px-1.5 py-0.5 text-xs rounded-[4px] outline-none"
-                      style={inputStyle}
-                    >
-                      <option value="contains">contains</option>
-                      <option value="starts-with">starts-with</option>
-                      <option value="ends-with">ends-with</option>
-                      <option value="exact">exact</option>
-                      <option value="regex">regex</option>
-                    </select>
-                    <button
-                      onClick={() => handleSaveRule(d._id)}
-                      disabled={savingRuleId === d._id}
-                      className="px-2.5 py-0.5 text-xs rounded-[4px] font-medium disabled:opacity-40"
-                      style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-                    >
-                      {savingRuleId === d._id ? '…' : 'Save Pattern'}
-                    </button>
-                    <button
-                      onClick={() => dismissRuleSuggestion(d._id)}
-                      className="ml-auto transition-opacity hover:opacity-60"
-                      style={{ color: 'var(--tx-tertiary)' }}
-                    >
-                      <X size={12} />
-                    </button>
+                    {/* Row 1: summary + actions */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium" style={{ color: 'var(--tx-secondary)' }}>
+                        Save vendor rule
+                      </span>
+                      <span className="text-xs px-1.5 py-0.5 rounded-[4px]" style={{ backgroundColor: 'var(--bg-badge-committed)', color: 'var(--tx-badge-committed)' }}>
+                        {ruleSuggestion.category}
+                      </span>
+                      <div className="ml-auto flex items-center gap-2">
+                        <button
+                          onClick={() => handleSaveRule(d._id)}
+                          disabled={savingRuleId === d._id}
+                          className="px-2.5 py-0.5 text-xs rounded-[4px] font-medium disabled:opacity-40"
+                          style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+                        >
+                          {savingRuleId === d._id ? '…' : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => dismissRuleSuggestion(d._id)}
+                          className="transition-opacity hover:opacity-60"
+                          style={{ color: 'var(--tx-tertiary)' }}
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    </div>
+                    {/* Row 2: editable fields */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input
+                        type="text"
+                        value={ruleSuggestion.pattern}
+                        onChange={(e) => updateRuleSuggestion(d._id, 'pattern', e.target.value)}
+                        placeholder="Pattern"
+                        className="flex-1 min-w-0 px-2 py-1 text-xs rounded-[4px] outline-none font-mono"
+                        style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+                        title="Text pattern to match against transaction descriptions"
+                      />
+                      <input
+                        type="text"
+                        value={ruleSuggestion.vendor}
+                        onChange={(e) => updateRuleSuggestion(d._id, 'vendor', e.target.value)}
+                        placeholder="Vendor name"
+                        className="w-32 px-2 py-1 text-xs rounded-[4px] outline-none"
+                        style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+                        title="Display name for this vendor"
+                      />
+                      <Select.Root value={ruleSuggestion.matchType} onValueChange={(v) => updateRuleSuggestion(d._id, 'matchType', v)}>
+                        <Select.Trigger
+                          className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-[4px] outline-none whitespace-nowrap"
+                          style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+                          title="How to match the pattern"
+                        >
+                          <Select.Value />
+                          <Select.Icon className="ml-1 shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+                            <ChevronDown size={10} />
+                          </Select.Icon>
+                        </Select.Trigger>
+                        <Select.Portal>
+                          <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
+                            <Select.Viewport className="p-1">
+                              {['contains', 'starts-with', 'ends-with', 'exact', 'regex'].map((mt) => (
+                                <Select.Item
+                                  key={mt} value={mt}
+                                  className="px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
+                                  style={{ color: 'var(--tx-primary)' }}
+                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                                >
+                                  <Select.ItemText>{mt}</Select.ItemText>
+                                </Select.Item>
+                              ))}
+                            </Select.Viewport>
+                          </Select.Content>
+                        </Select.Portal>
+                      </Select.Root>
+                    </div>
                   </div>
                 )}
               </div>

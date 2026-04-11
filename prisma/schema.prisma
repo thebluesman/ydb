@@ -19,6 +19,7 @@ model Account {
   updatedAt          DateTime       @updatedAt
   transactions       Transaction[]
   importRecords      ImportRecord[]
+  incomingTransfers  Transaction[]  @relation("TransferCounterpart")
 }
 
 model ImportRecord {
@@ -52,9 +53,11 @@ model Transaction {
   reimbursableFor     String?                           // who owes the money back (e.g. "Insurance")
   reimbursementTxId   Int?          @unique             // settlement transaction id (one-to-one)
   reimbursementTx     Transaction?  @relation("ReimbursementLink", fields: [reimbursementTxId], references: [id], onDelete: SetNull)
-  reimbursedExpense   Transaction?  @relation("ReimbursementLink")
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  reimbursedExpense                Transaction?  @relation("ReimbursementLink")
+  transferCounterpartAccountId     Int?
+  transferCounterpartAccount       Account?      @relation("TransferCounterpart", fields: [transferCounterpartAccountId], references: [id], onDelete: SetNull)
+  createdAt                        DateTime      @default(now())
+  updatedAt                        DateTime      @updatedAt
 }
 
 model ChatSession {

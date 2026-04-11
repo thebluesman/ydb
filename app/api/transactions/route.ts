@@ -9,6 +9,7 @@ export async function GET() {
       splitLegs: { select: { id: true, amount: true, category: true, description: true } },
       reimbursementTx: { select: { id: true, amount: true, description: true } },
       reimbursedExpense: { select: { id: true, description: true } },
+      transferCounterpartAccount: { select: { id: true, name: true } },
     },
   })
   return NextResponse.json(transactions)
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
     notes?: string
     rawSource?: string
     status?: string
+    transferCounterpartAccountId?: number | null
   }> = await request.json()
 
   if (!Array.isArray(body) || body.length === 0) {
@@ -44,6 +46,7 @@ export async function POST(request: Request) {
       notes: t.notes ?? null,
       rawSource: t.rawSource ?? null,
       status: t.status ?? 'committed',
+      transferCounterpartAccountId: t.transferCounterpartAccountId ?? null,
     })),
   })
 

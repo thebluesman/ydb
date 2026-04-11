@@ -564,6 +564,30 @@ function TransferLinkDemo({ currency }: { currency: string }) {
   )
 }
 
+function TransferDirectionDemo({ currency }: { currency: string }) {
+  const rows = [
+    { account: 'Barclays Current', direction: '↑ out', counterpart: 'Cash Wallet', amount: `−${currency} 200.00`, color: '#f87171' },
+    { account: 'Cash Wallet',      direction: '↓ in',  counterpart: 'Barclays Current', amount: `+${currency} 200.00`, color: '#34d399' },
+  ]
+  return (
+    <div className="w-full space-y-1.5 text-xs">
+      {rows.map(({ account, direction, counterpart, amount, color }) => (
+        <div key={account} className="flex items-center gap-3 px-3 py-2.5 rounded-[6px]" style={{ background: 'var(--bg-card-alt)', border: '1px solid var(--border-warm)' }}>
+          <span className="w-36 shrink-0 font-medium" style={{ color: 'var(--tx-secondary)' }}>{account}</span>
+          <span
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] shrink-0"
+            style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#92400E' }}
+          >
+            {direction} · {counterpart}
+          </span>
+          <span className="flex-1" />
+          <span className="font-mono" style={{ color, letterSpacing: '-0.275px' }}>{amount}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function SplitDemoRows({ currency }: { currency: string }) {
   return (
     <div className="w-full space-y-1 font-mono text-xs">
@@ -896,14 +920,15 @@ export function GuideView({ currency }: { currency: string }) {
               <SubHeading>What to check</SubHeading>
               <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
                 {[
-                  ['Amounts', 'Expenses should be negative, income positive. Credits (payments into account) are positive.'],
-                  ['Type', 'Each transaction is classified as Debit, Credit, or Transfer. Patterns can set this automatically; you can also change it inline.'],
+                  ['Amounts', 'The amount field always shows a positive number — the sign is determined by the transaction type. Debit = expense (negative), Credit = income (positive), Transfer = depends on direction.'],
+                  ['Type', 'Each transaction is classified as Debit, Credit, or Transfer using a dropdown. Patterns can set this automatically; you can change it per-row. Selecting Transfer reveals two additional fields (see below).'],
+                  ['Direction & counterpart', 'When type is Transfer, choose a direction — ↑ Out (money leaving this account) or ↓ In (money arriving). You can also pick a counterpart account from your other accounts so both sides of the move are labelled clearly.'],
                   ['Descriptions', 'If a pattern matched, the display name is already set and the raw bank text appears faintly below it. You can edit the display name freely.'],
                   ['Categories', 'Qwen assigns categories based on your patterns and past transactions. Correct any that are wrong. Changing a category triggers a "Save as pattern?" strip at the bottom of the card — a quick way to lock in that mapping for future imports.'],
                   ['Duplicates', 'If you upload the same statement twice, duplicate transactions will appear. Delete the extras.'],
                 ].map(([label, desc]) => (
                   <div key={label} className="flex gap-3">
-                    <span className="w-28 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
+                    <span className="w-36 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
                     <span>{desc}</span>
                   </div>
                 ))}
@@ -931,7 +956,10 @@ export function GuideView({ currency }: { currency: string }) {
 
               <SubHeading>Editing & reverting</SubHeading>
               <BodyText>
-                Click the pencil icon on any row to edit the category, amount, date, or description.
+                Click <strong>Edit</strong> on any row to open an inline edit form. The amount field always
+                shows a positive number — the sign is derived from the transaction type. For transfers,
+                a <strong>Direction</strong> dropdown (↑ Out / ↓ In) and a <strong>counterpart account</strong>{' '}
+                picker also appear so you can record which account the money moved to or from.
                 You can also revert a committed transaction back to Review status if something needs correcting.
               </BodyText>
 
@@ -941,12 +969,22 @@ export function GuideView({ currency }: { currency: string }) {
                 The row count updates live.
               </BodyText>
 
-              <SubHeading>Transfer linking</SubHeading>
+              <SubHeading>Transfers</SubHeading>
               <BodyText>
                 When money moves between two of your own accounts (e.g. an ATM withdrawal from Current to Cash,
-                or a credit card payment), you can link both sides of the transfer so they appear as a matched pair.
-                Click the <strong>link icon</strong> on either transaction row — ydb will suggest candidates with
-                a matching amount and nearby date. Once linked, a chain badge appears on both rows.
+                or a credit card payment), set the transaction type to <strong>Transfer</strong>. The edit form
+                then shows two extra fields: <strong>Direction</strong> (↑ Out for money leaving, ↓ In for money
+                arriving) and a <strong>counterpart account</strong> dropdown listing your other accounts.
+                Setting both makes every transfer self-documenting — the row chip shows{' '}
+                <em>↑ out · Account Name</em> or <em>↓ in · Account Name</em> at a glance.
+              </BodyText>
+              <DemoShell label="Transfer direction chip — how it looks in the ledger">
+                <TransferDirectionDemo currency={currency} />
+              </DemoShell>
+              <BodyText>
+                You can also hard-link both sides of the same move using the <strong>link icon</strong> on
+                either row — ydb will suggest candidates with a matching amount and nearby date. Once linked,
+                a chain badge appears on both rows.
               </BodyText>
               <DemoShell label="Linked transfer pair">
                 <TransferLinkDemo currency={currency} />
@@ -974,8 +1012,9 @@ export function GuideView({ currency }: { currency: string }) {
               <Tip>
                 Transfer transactions (moving money between your own accounts) have type{' '}
                 <strong>Transfer</strong> and are excluded from income/expense totals on the dashboard.
-                Use the link icon to pair both sides of a transfer, or set a pattern to automatically
-                stamp the type at import time.
+                Set the direction and counterpart account on each transfer so you can see at a glance
+                where money went. Use a pattern to automatically stamp the type at import time,
+                then fine-tune direction and counterpart in the edit form.
               </Tip>
             </Section>
 
