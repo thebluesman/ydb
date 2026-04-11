@@ -9,6 +9,9 @@ export async function POST(
 ) {
   const { id } = await params
   const parentId = parseInt(id)
+  if (isNaN(parentId)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
+  }
   const { legs }: { legs: Leg[] } = await request.json()
 
   if (!Array.isArray(legs) || legs.length < 2) {
@@ -57,9 +60,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  await prisma.transaction.deleteMany({ where: { parentTransactionId: parseInt(id) } })
+  const parentId = parseInt(id)
+  if (isNaN(parentId)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
+  }
+  await prisma.transaction.deleteMany({ where: { parentTransactionId: parentId } })
   const updated = await prisma.transaction.findUnique({
-    where: { id: parseInt(id) },
+    where: { id: parentId },
     include: {
       account: { select: { name: true, currency: true } },
       splitLegs: { select: { id: true, amount: true, category: true, description: true } },

@@ -32,14 +32,12 @@ type VendorRule = {
 export function SettingsCategoryBridge({
   initialAccounts,
   initialCategories,
-  baseCurrency,
   rules,
   currency,
   preferencesSlot,
 }: {
   initialAccounts: Account[]
   initialCategories: Category[]
-  baseCurrency: string
   rules: VendorRule[]
   currency: string
   preferencesSlot?: ReactNode
@@ -51,7 +49,7 @@ export function SettingsCategoryBridge({
       <AccountsForm
         initialAccounts={initialAccounts}
         initialCategories={categories}
-        baseCurrency={baseCurrency}
+        baseCurrency={currency}
         onCategoriesChange={setCategories}
       />
       {preferencesSlot}

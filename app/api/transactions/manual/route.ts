@@ -11,6 +11,7 @@ export async function POST(request: Request) {
     accountId: number
     notes?: string
     status?: string
+    transferCounterpartAccountId?: number | null
   } = await request.json()
 
   if (!body.date || body.amount === undefined || !body.description || !body.accountId) {
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
       accountId: body.accountId,
       notes: body.notes ?? null,
       status: body.status ?? 'committed',
+      transferCounterpartAccountId: body.transferCounterpartAccountId ?? null,
     },
     include: {
       account: { select: { name: true, currency: true } },

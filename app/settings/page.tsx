@@ -31,6 +31,8 @@ export default async function SettingsPage() {
     prisma.transaction.findMany({
       where: { status: { in: ['committed', 'reconciled'] } },
       select: { description: true, originalDescription: true, amount: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 5000,
     }),
   ])
   const vendorRules = rawVendorRules.map((r) => ({
@@ -73,7 +75,6 @@ export default async function SettingsPage() {
               : '',
           }))}
           initialCategories={categories}
-          baseCurrency={settings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'}
           rules={vendorRules}
           currency={settings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'}
           preferencesSlot={<PreferencesForm initialSettings={settings} />}

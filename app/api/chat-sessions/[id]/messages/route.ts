@@ -6,12 +6,16 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
+  const sessionId = parseInt(id)
+  if (isNaN(sessionId)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
+  }
   const { role, text, sql } = await request.json()
   const message = await prisma.chatMessage.create({
-    data: { sessionId: parseInt(id), role, text, sql: sql ?? null },
+    data: { sessionId, role, text, sql: sql ?? null },
   })
   await prisma.chatSession.update({
-    where: { id: parseInt(id) },
+    where: { id: sessionId },
     data: { updatedAt: new Date() },
   })
   return NextResponse.json(message)

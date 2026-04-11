@@ -160,9 +160,18 @@ export default async function DashboardPage({
   )
 
   // ── Cash flow statement (month by month, in date range) ────────────────────
+  const preRangeSum = await prisma.transaction.aggregate({
+    where: {
+      accountId: { in: accountIds },
+      status: { in: ['committed', 'reconciled'] },
+      date: { lt: startDate },
+    },
+    _sum: { amount: true },
+  })
   const cashFlowData: CashFlowRow[] = []
   {
     const seedBalance = accountsForCurrency.reduce((sum, a) => sum + a.openingBalance, 0)
+      + (preRangeSum._sum.amount ?? 0)
     let runningBalance = seedBalance
     for (const [key, { income, expenses }] of monthMap.entries()) {
       cashFlowData.push({

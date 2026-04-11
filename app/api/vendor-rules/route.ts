@@ -11,6 +11,8 @@ export async function GET() {
     prisma.transaction.findMany({
       where: { status: { in: ['committed', 'reconciled'] } },
       select: { description: true, originalDescription: true, amount: true },
+      orderBy: { updatedAt: 'desc' },
+      take: 5000,
     }),
   ])
   const withCounts = rules.map((r) => ({

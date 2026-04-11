@@ -1,3 +1,6 @@
+// TODO: migrate monetary fields (amount, openingBalance, creditLimit, monthlyLimit)
+// from Float to Int (store cents) to avoid floating point rounding errors in summations.
+
 datasource db {
   provider = "sqlite"
 }

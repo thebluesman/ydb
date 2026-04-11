@@ -6,10 +6,14 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
+  const txId = parseInt(id)
+  if (isNaN(txId)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
+  }
   const body = await request.json()
 
   const updated = await prisma.transaction.update({
-    where: { id: parseInt(id) },
+    where: { id: txId },
     data: {
       ...(body.date !== undefined && { date: new Date(body.date) }),
       ...(body.amount !== undefined && { amount: body.amount }),
@@ -19,7 +23,7 @@ export async function PATCH(
       ...(body.category !== undefined && { category: body.category }),
       ...(body.accountId !== undefined && { accountId: body.accountId }),
       ...(body.status !== undefined && { status: body.status }),
-      notes: body.notes ?? null,
+      ...(body.notes !== undefined && { notes: body.notes ?? null }),
       ...(body.reimbursableFor !== undefined && { reimbursableFor: body.reimbursableFor }),
       ...(body.transferCounterpartAccountId !== undefined && { transferCounterpartAccountId: body.transferCounterpartAccountId }),
     },
@@ -40,6 +44,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  await prisma.transaction.delete({ where: { id: parseInt(id) } })
+  const txId = parseInt(id)
+  if (isNaN(txId)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
+  }
+  await prisma.transaction.delete({ where: { id: txId } })
   return NextResponse.json({ ok: true })
 }

@@ -1,6 +1,6 @@
 export const runtime = 'nodejs'
 
-import { prisma } from '@/lib/prisma'
+import { prisma, executeReadonlyQuery } from '@/lib/prisma'
 
 const SQL_SYSTEM_PROMPT = `You are a SQLite query generator. Output ONLY a single raw SQL SELECT statement -- no markdown, no explanation, no code fences, no backticks.
 
@@ -100,14 +100,10 @@ export async function POST(request: Request) {
     )
   }
 
-  // Execute the SQL
+  // Execute the SQL on a read-only connection to prevent mutations
   let rows: unknown[]
   try {
-    const raw = await prisma.$queryRawUnsafe(sql)
-    // $queryRawUnsafe returns COUNT(*) etc. as BigInt — convert to plain numbers
-    rows = JSON.parse(JSON.stringify(raw, (_key, val) =>
-      typeof val === 'bigint' ? Number(val) : val
-    ))
+    rows = executeReadonlyQuery(sql)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return new Response(

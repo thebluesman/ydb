@@ -16,6 +16,9 @@ export async function POST(
   const { targetId } = await request.json()
   const expenseId = parseInt(id)
   const settlementId = parseInt(targetId)
+  if (isNaN(expenseId) || isNaN(settlementId)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
+  }
 
   await prisma.transaction.update({
     where: { id: expenseId },
@@ -35,6 +38,9 @@ export async function DELETE(
 ) {
   const { id } = await params
   const expenseId = parseInt(id)
+  if (isNaN(expenseId)) {
+    return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
+  }
 
   await prisma.transaction.update({
     where: { id: expenseId },
