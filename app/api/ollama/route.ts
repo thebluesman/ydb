@@ -55,7 +55,12 @@ async function buildSystemPrompt(formatHint?: string): Promise<string> {
   const base = `You are a data extraction specialist for financial transactions.
 Output ONLY a valid JSON array of objects. Do not include markdown code blocks, explanations, or conversational filler.
 Each object must have exactly these fields: { "date": "YYYY-MM-DD", "description": string, "amount": number, "category": string }
-Categories must be one of: ${categoryNames}${dictionary}`
+Categories must be one of: ${categoryNames}
+
+Description extraction rules:
+- A transaction's description may span multiple consecutive lines in the source document. Concatenate all lines that belong to a single transaction into one description string (space-separated). Do not truncate at the first line.
+- Include reference numbers, merchant details, and any supplementary text that appears as part of the same transaction entry.
+- Strip leading/trailing whitespace and normalise internal whitespace to single spaces.${dictionary}`
 
   if (formatHint === 'credit-card') {
     return base + `

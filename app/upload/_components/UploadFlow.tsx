@@ -73,13 +73,36 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
           // Prefer native text extraction — produces clean, compact text and uses far fewer tokens.
           // Fall back to Tesseract OCR only for scanned (image-only) pages.
           const textContent = await page.getTextContent()
-          type TextItem = { str: string; hasEOL: boolean }
+          type TextItem = { str: string; hasEOL: boolean; transform: number[] }
           const textItems = (textContent.items as (TextItem | object)[])
             .filter((item): item is TextItem => 'str' in item && typeof (item as TextItem).str === 'string' && (item as TextItem).str.trim() !== '')
 
           if (textItems.length > 0) {
-            // Native text — join items with spaces; EOL items append a newline
-            ocrText += textItems.map(item => item.str + (item.hasEOL ? '\n' : ' ')).join('') + '\n'
+            // Reconstruct visual lines using y-coordinates rather than hasEOL.
+            // hasEOL is unreliable — many PDFs set it on every item, which splits
+            // multi-word descriptions across lines and confuses the LLM.
+            // PDF y-coordinates increase upward, so top-of-page items have the
+            // largest y. We sort into reading order and group by y-proximity.
+            const LINE_Y_TOLERANCE = 3
+            const sorted = [...textItems].sort((a, b) => {
+              const yDiff = b.transform[5] - a.transform[5]
+              if (Math.abs(yDiff) > LINE_Y_TOLERANCE) return yDiff  // different lines: top first
+              return a.transform[4] - b.transform[4]                 // same line: left-to-right
+            })
+            const lines: string[][] = []
+            let currentLine: string[] = []
+            let prevY = sorted[0].transform[5]
+            for (const item of sorted) {
+              const y = item.transform[5]
+              if (Math.abs(y - prevY) > LINE_Y_TOLERANCE) {
+                if (currentLine.length > 0) lines.push(currentLine)
+                currentLine = []
+                prevY = y
+              }
+              currentLine.push(item.str)
+            }
+            if (currentLine.length > 0) lines.push(currentLine)
+            ocrText += lines.map(l => l.join(' ').replace(/\s+/g, ' ').trim()).join('\n') + '\n'
           } else {
             // Scanned page — fall back to Tesseract OCR
             if (!ocrWorker) {
