@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, ArrowRight, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RefreshCw, Target, RotateCcw, CheckCircle2, FlaskConical } from 'lucide-react'
+import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, ArrowRight, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RefreshCw, Target, RotateCcw, CheckCircle2, FlaskConical, AlertTriangle, History, Settings } from 'lucide-react'
 
 const SECTIONS = [
   { id: 'overview',        label: 'Overview',        num: '00' },
@@ -17,6 +17,7 @@ const SECTIONS = [
   { id: 'chat',            label: 'Chat',             num: '09' },
   { id: 'reimbursements',  label: 'Reimbursements',   num: '10' },
   { id: 'backups',         label: 'Backups',          num: '11' },
+  { id: 'settings',        label: 'Settings',         num: '12' },
 ]
 
 // ── Inline demo components ────────────────────────────────────────────────────
@@ -963,6 +964,16 @@ export function GuideView({ currency }: { currency: string }) {
                 You can also revert a committed transaction back to Review status if something needs correcting.
               </BodyText>
 
+              <SubHeading>Manual transactions</SubHeading>
+              <BodyText>
+                Not everything comes from a PDF. Cash spending, manual corrections, or one-off entries
+                can be added directly from the Ledger. Click the <strong>+ New transaction</strong> button
+                in the filter bar — a compact form appears with fields for date, description, amount, type,
+                category, account, and status. Hit <strong>Add</strong> or press Enter to save it directly
+                to the ledger (bypassing the review table). This is the primary way to log expenses on a
+                Cash account.
+              </BodyText>
+
               <SubHeading>Filtering</SubHeading>
               <BodyText>
                 Filter by account, date range, category, or status using the controls at the top of the ledger.
@@ -1411,6 +1422,64 @@ export function GuideView({ currency }: { currency: string }) {
                 Backups are excluded from git. Store downloaded snapshots somewhere safe — cloud
                 storage, an external drive — if you want longer-term coverage beyond the 14-backup
                 window.
+              </Tip>
+            </Section>
+
+            {/* 12 — Settings */}
+            <Section id="settings" num="12" title="Settings">
+              <BodyText>
+                <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>{' '}
+                is the control panel for everything that isn't a transaction. Accounts, categories, patterns,
+                budgets, backups, and preferences all live here — along with a few housekeeping tools.
+              </BodyText>
+
+              <SubHeading>Preferences</SubHeading>
+              <BodyText>
+                Set your <strong>base currency</strong> — the currency used across dashboard totals,
+                the chat interface, and any display that shows a single aggregate figure. If you have
+                accounts in multiple currencies, this determines which one drives the summary views.
+                Individual account balances always display in their own currency.
+              </BodyText>
+
+              <SubHeading>Import history</SubHeading>
+              <BodyText>
+                Every PDF upload is logged: filename, account, transaction count, and timestamp.
+                The log is read-only — use it to check when you last imported a statement or verify
+                that a particular file was processed. It does not record individual transactions,
+                only the batch-level event.
+              </BodyText>
+
+              <SubHeading>Danger Zone</SubHeading>
+              <BodyText>
+                The Danger Zone lets you selectively wipe data — useful when starting fresh after a
+                test import, or clearing out a specific data type without touching the rest.
+                Each option is scoped precisely:
+              </BodyText>
+              <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                {[
+                  ['Transactions',    'Removes all ledger entries. Accounts, categories, and patterns are untouched.'],
+                  ['Import History',  'Clears the upload log only. Transactions already committed to the ledger are kept.'],
+                  ['Accounts',        'Removes all accounts — and, because transactions belong to accounts, also clears all transactions and import history.'],
+                  ['Categories',      'Removes all categories and their associated budget targets.'],
+                  ['Patterns',        'Removes all vendor rules. Past transactions are unaffected; future imports will not match.'],
+                  ['Chat History',    'Deletes all AI assistant conversations. Transaction data is untouched.'],
+                ].map(([label, desc]) => (
+                  <div key={label} className="flex gap-3">
+                    <span className="w-36 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
+                    <span>{desc}</span>
+                  </div>
+                ))}
+              </div>
+              <BodyText>
+                All Danger Zone actions require you to type <strong>CONFIRM</strong> before proceeding.
+                They are irreversible — make sure you have a recent backup first.
+              </BodyText>
+
+              <Tip>
+                <AlertTriangle size={13} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4, color: '#f54e00' }} />
+                The Accounts option is the most destructive — it cascades to transactions and import history.
+                Use it only when you want to start completely fresh. For a less drastic reset, clear
+                transactions only and keep your account structure intact.
               </Tip>
             </Section>
 
