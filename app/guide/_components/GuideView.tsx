@@ -1268,7 +1268,7 @@ export function GuideView({ currency }: { currency: string }) {
               <SubHeading>How it works</SubHeading>
               <BodyText>
                 Under the hood, Chat uses a two-step process. Your question is sent to a local AI model
-                (Gemma by default), which writes a SQL query against your local database. That query runs
+                (Qwen by default), which writes a SQL query against your local database. That query runs
                 on a read-only database connection — it can never modify your data. The results are then
                 narrated back as a plain-English answer. No data leaves your device at any point.
               </BodyText>

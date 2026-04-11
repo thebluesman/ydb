@@ -48,7 +48,7 @@ export async function POST(request: Request) {
   const baseCurrency = baseCurrencySetting?.value ?? 'USD'
 
   const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434'
-  const chatModel = process.env.CHAT_MODEL ?? 'gemma3:12b'
+  const chatModel = process.env.CHAT_MODEL ?? 'qwen2.5:32b'
 
   // Build SQL prompt with prior conversation context so follow-up references resolve correctly
   const sqlPrompt = Array.isArray(history) && history.length > 0
