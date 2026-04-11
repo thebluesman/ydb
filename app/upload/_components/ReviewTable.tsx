@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ChevronDown, Plus } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
+import { DatePicker } from '@/app/_components/DatePicker'
 
 export type DraftTransaction = {
   _id: string; date: string; description: string; originalDescription: string; amount: number
@@ -663,12 +664,10 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                 <div className="flex gap-4 px-4 py-3 items-start">
                   {/* Left: Date + Type */}
                   <div className="shrink-0 space-y-2" style={{ width: 148 }}>
-                    <input
-                      type="date"
+                    <DatePicker
                       value={d.date}
-                      onChange={(e) => update(d._id, 'date', e.target.value)}
-                      className={inputCls}
-                      style={inputStyle}
+                      onChange={(v) => update(d._id, 'date', v)}
+                      style={{ width: '100%' }}
                     />
                     <TypeSelect
                       value={d.transactionType}

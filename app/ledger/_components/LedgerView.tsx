@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
+import { DatePicker } from '@/app/_components/DatePicker'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
 
@@ -420,11 +421,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
           <div className="flex flex-wrap gap-3 items-end">
             <div>
               <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Date</label>
-              <input
-                type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)}
-                className="px-2 py-1.5 text-sm rounded-[6px] outline-none"
-                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-              />
+              <DatePicker value={addDate} onChange={setAddDate} />
             </div>
             <div className="flex-1 min-w-[180px]">
               <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Description</label>

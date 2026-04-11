@@ -20,6 +20,7 @@ import { TopTransactionsPanel } from './TopTransactionsPanel'
 import { BudgetWidget } from './BudgetWidget'
 import { NetWorthWidget } from './NetWorthWidget'
 import type { AccountBalance, CashFlowRow, TopTransaction, TrendCategory, BudgetData } from '../page'
+import { DatePicker } from '@/app/_components/DatePicker'
 
 type CategoryBreakdown = { category: string; total: number; count: number }
 type MonthlyData = { month: string; income: number; expenses: number; net: number }
@@ -170,21 +171,9 @@ export function DashboardView({
           <span className="text-[11px] font-medium uppercase tracking-[0.048px]" style={{ color: 'var(--tx-secondary)' }}>
             Period
           </span>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="px-2 py-1 text-xs rounded-[6px] outline-none"
-            style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-          />
+          <DatePicker value={startDate} onChange={setStartDate} size="sm" />
           <span className="text-xs" style={{ color: 'var(--tx-faint)' }}>to</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="px-2 py-1 text-xs rounded-[6px] outline-none"
-            style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-          />
+          <DatePicker value={endDate} onChange={setEndDate} size="sm" />
           <button
             onClick={handleApplyDates}
             className="px-3 py-1 text-xs rounded-[6px] transition-colors duration-150"

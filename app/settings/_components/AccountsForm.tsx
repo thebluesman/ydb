@@ -6,6 +6,7 @@ import * as Label from '@radix-ui/react-label'
 import * as Select from '@radix-ui/react-select'
 import { Check, ChevronDown } from 'lucide-react'
 import { CategoryManager } from './CategoryManager'
+import { DatePicker } from '@/app/_components/DatePicker'
 
 type Account = {
   id?: number
@@ -348,15 +349,10 @@ export function AccountsForm({
                 <Label.Root htmlFor={`acc-obd-${i}`} className={labelCls} style={{ color: 'var(--tx-secondary)' }}>
                   As of Date
                 </Label.Root>
-                <input
-                  id={`acc-obd-${i}`}
-                  type="date"
+                <DatePicker
                   value={account.openingBalanceDate}
-                  onChange={(e) => updateAccount(i, 'openingBalanceDate', e.target.value)}
-                  onBlur={(e) => handleTextBlur(i, 'openingBalanceDate', e.target.value)}
-                  className="px-3 py-2 text-sm rounded-[8px] outline-none transition-colors duration-150"
-                  style={inputStyle}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
+                  onChange={(v) => { updateAccount(i, 'openingBalanceDate', v); handleTextBlur(i, 'openingBalanceDate', v) }}
+                  style={{ width: '100%', borderRadius: 8, padding: '7px 10px', fontSize: 14 }}
                 />
               </div>
 

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { X, Link2, Unlink, Scissors, ChevronDown, ChevronRight, RotateCcw, CheckCircle2 } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
+import { DatePicker } from '@/app/_components/DatePicker'
 import { TransferLinkModal } from './TransferLinkModal'
 import { ReimburseLinkModal } from './ReimburseLinkModal'
 import { SplitForm } from './SplitForm'
@@ -435,11 +436,10 @@ export function LedgerRow({
               <div className="flex flex-wrap gap-3 items-end">
                 <div style={{ minWidth: '130px' }}>
                   <label className={labelCls} style={{ color: 'var(--tx-tertiary)' }}>Date</label>
-                  <input
-                    type="date" value={draft.date}
-                    onChange={(e) => set('date', e.target.value)}
-                    className={fieldInputCls}
-                    style={inputStyle}
+                  <DatePicker
+                    value={draft.date}
+                    onChange={(v) => set('date', v)}
+                    style={{ width: '100%' }}
                   />
                 </div>
                 <div className="flex-1" style={{ minWidth: '220px' }}>
