@@ -1456,20 +1456,30 @@ export function GuideView({ currency }: { currency: string }) {
                 test import, or clearing out a specific data type without touching the rest.
                 Each option is scoped precisely:
               </BodyText>
-              <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
-                {[
-                  ['Transactions',    'Removes all ledger entries. Accounts, categories, and patterns are untouched.'],
-                  ['Import History',  'Clears the upload log only. Transactions already committed to the ledger are kept.'],
-                  ['Accounts',        'Removes all accounts — and, because transactions belong to accounts, also clears all transactions and import history.'],
-                  ['Categories',      'Removes all categories and their associated budget targets.'],
-                  ['Patterns',        'Removes all vendor rules. Past transactions are unaffected; future imports will not match.'],
-                  ['Chat History',    'Deletes all AI assistant conversations. Transaction data is untouched.'],
-                ].map(([label, desc]) => (
-                  <div key={label} className="flex gap-3">
-                    <span className="w-36 shrink-0 font-medium" style={{ color: 'var(--tx-primary)' }}>{label}</span>
-                    <span>{desc}</span>
-                  </div>
-                ))}
+              <div className="mt-2 rounded-[8px] overflow-hidden" style={{ border: '1px solid var(--border-warm)' }}>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ background: 'var(--bg-card-alt)', borderBottom: '1px solid var(--border-warm)' }}>
+                      <th className="text-left px-4 py-2.5 font-medium w-36" style={{ color: 'var(--tx-secondary)' }}>Option</th>
+                      <th className="text-left px-4 py-2.5 font-medium" style={{ color: 'var(--tx-secondary)' }}>What gets removed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      ['Transactions',    'Removes all ledger entries. Accounts, categories, and patterns are untouched.'],
+                      ['Import History',  'Clears the upload log only. Transactions already committed to the ledger are kept.'],
+                      ['Accounts',        'Removes all accounts — and, because transactions belong to accounts, also clears all transactions and import history.'],
+                      ['Categories',      'Removes all categories and their associated budget targets.'],
+                      ['Patterns',        'Removes all vendor rules. Past transactions are unaffected; future imports will not match.'],
+                      ['Chat History',    'Deletes all AI assistant conversations. Transaction data is untouched.'],
+                    ].map(([label, desc], i, arr) => (
+                      <tr key={label} style={{ borderTop: '1px solid var(--border-warm)' }}>
+                        <td className="px-4 py-2.5 font-medium align-top" style={{ color: 'var(--tx-primary)' }}>{label}</td>
+                        <td className="px-4 py-2.5 align-top" style={{ color: 'var(--tx-secondary)' }}>{desc}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
               <BodyText>
                 All Danger Zone actions require you to type <strong>DELETE</strong> before proceeding.
