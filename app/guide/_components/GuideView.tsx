@@ -526,9 +526,9 @@ function Section({ id, num, title, children }: { id: string; num: string; title:
   )
 }
 
-function BodyText({ children }: { children: React.ReactNode }) {
+function BodyText({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
-    <p className="text-[15px] leading-relaxed mb-0" style={{ color: 'var(--tx-secondary)' }}>
+    <p className="text-[15px] leading-relaxed mb-0" style={{ color: 'var(--tx-secondary)', ...style }}>
       {children}
     </p>
   )
@@ -1481,7 +1481,7 @@ export function GuideView({ currency }: { currency: string }) {
                   </tbody>
                 </table>
               </div>
-              <BodyText>
+              <BodyText style={{ marginTop: '1.25rem' }}>
                 All Danger Zone actions require you to type <strong>DELETE</strong> before proceeding.
                 They are irreversible — make sure you have a recent backup first.
               </BodyText>
