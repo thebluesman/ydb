@@ -20,9 +20,9 @@ export function ThinkingLoader() {
     const S = (SIZE * DPR) / 100
 
     const cfg = {
-      roseA: 9.2, roseABoost: 0.6, roseBreathBase: 0.72, roseBreathBoost: 0.28, roseScale: 3.25,
-      particleCount: 78, trailSpan: 0.32,
-      durationMs: 5400, rotationDurationMs: 28000, pulseDurationMs: 4500,
+      roseA: 5, roseABoost: 2, roseBreathBase: 0.72, roseBreathBoost: 0.28, roseScale: 5,
+      particleCount: 140, trailSpan: 0.32,
+      durationMs: 3000, rotationDurationMs: 28000, pulseDurationMs: 10000,
     }
 
     function pt(progress: number, ds: number) {
