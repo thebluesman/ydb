@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { CheckCircle } from 'lucide-react'
 import { ThinkingLoader } from '@/app/_components/ThinkingLoader'
 import { FileDropzone } from './FileDropzone'
@@ -29,6 +29,8 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
   const [committedCount, setCommittedCount] = useState(0)
   const [pdfPassword, setPdfPassword] = useState('')
   const [passwordPhase, setPasswordPhase] = useState<'none' | 'needed' | 'wrong'>('none')
+  const abortRef = React.useRef<AbortController | null>(null)
+  const [parseLog, setParseLog] = useState<string>('')
 
   const reset = () => {
     setPhase('idle'); setFile(null); setOcrProgress(0)
@@ -66,6 +68,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
         // Lazy-initialised Tesseract worker — only created if a scanned page is found
         let ocrWorker: { recognize: (canvas: HTMLCanvasElement) => Promise<{ data: { text: string } }>; terminate: () => Promise<void> } | null = null
 
+        console.log(`[ocr] PDF has ${pdf.numPages} page(s)`)
         for (let i = 1; i <= pdf.numPages; i++) {
           setOcrPage({ current: i, total: pdf.numPages }); setOcrProgress(0)
           const page = await pdf.getPage(i)
@@ -103,7 +106,9 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
               currentLine.push(item.str)
             }
             if (currentLine.length > 0) lines.push(currentLine)
-            ocrText += lines.map(l => l.join(' ').replace(/\s+/g, ' ').trim()).join('\n') + '\n'
+            const pageText = lines.map(l => l.join(' ').replace(/\s+/g, ' ').trim()).join('\n') + '\n'
+            console.log(`[ocr] page ${i}: native text, ${pageText.length} chars, ${lines.length} lines`)
+            ocrText += pageText
           } else {
             // Scanned page — fall back to Tesseract OCR
             if (!ocrWorker) {
@@ -143,20 +148,31 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
     const fmt: StatementFormat = detectFormat(ocrText)
     setPasswordPhase('none')
     setPhase('parsing')
+    setParseLog('Starting…')
     let accumulated = ''
+    const abort = new AbortController()
+    abortRef.current = abort
+    const parseStart = performance.now()
 
     try {
+      setParseLog(`Sending ${(ocrText.length / 1024).toFixed(1)} KB of text to Ollama…`)
+      console.log('[ollama] request start — text length:', ocrText.length, 'chars, format:', fmt.type)
       const res = await fetch('/api/ollama', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: ocrText, formatHint: fmt.type }),
+        signal: abort.signal,
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }))
         throw new Error(err.error ?? 'Ollama request failed')
       }
+      console.log('[ollama] stream started')
+      setParseLog('Receiving tokens…')
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let tokenCount = 0
+      let lastLogAt = 0
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -164,15 +180,30 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
         const lines = buffer.split('\n'); buffer = lines.pop() ?? ''
         for (const line of lines) {
           if (!line.trim()) continue
-          try { accumulated += JSON.parse(line).response ?? '' } catch { /* skip */ }
+          try {
+            const chunk = JSON.parse(line).message?.content ?? ''
+            accumulated += chunk
+            tokenCount++
+            const elapsed = ((performance.now() - parseStart) / 1000).toFixed(1)
+            if (tokenCount - lastLogAt >= 100) {
+              lastLogAt = tokenCount
+              console.log(`[ollama] ${tokenCount} tokens, ${accumulated.length} chars, ${elapsed}s`)
+              setParseLog(`${tokenCount} tokens · ${accumulated.length} chars · ${elapsed}s`)
+            }
+          } catch { /* skip */ }
         }
       }
+      const elapsed = ((performance.now() - parseStart) / 1000).toFixed(1)
+      console.log(`[ollama] stream done — ${tokenCount} tokens, ${accumulated.length} chars, ${elapsed}s`)
+      setParseLog(`Done — ${tokenCount} tokens in ${elapsed}s`)
     } catch (e) {
+      if ((e as { name?: string }).name === 'AbortError') { setPhase('idle'); setParseLog(''); return }
       setError(`Parsing failed: ${String(e)}`); setPhase('idle'); return
     }
 
     try {
-      const clean = accumulated.replace(/```json|```/g, '').trim()
+      // The prompt ends with '[' to prime JSON array output, so prepend it back
+      const clean = ('[' + accumulated).replace(/```json|```/g, '').trim()
       const start = clean.indexOf('['); const end = clean.lastIndexOf(']')
       if (start === -1 || end === -1) throw new Error('No JSON array found')
       const parsed: Array<{ date: string; description: string; amount: number; category: string }> =
@@ -201,7 +232,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
           originalDescription: rawDesc,
           amount: amt,
           transactionType: (match?.transactionType) ?? t.transactionType,
-          category: match ? match.category : (t.category ?? ''),
+          category: match ? match.category : (t.category || 'Other'),
           accountId: selectedAccountId,
           notes: '',
           rawSource: ocrText.slice(0, 2000),
@@ -310,9 +341,23 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
         )}
 
         {phase === 'parsing' && (
-          <div className="flex items-center gap-3 text-sm" style={{ color: 'var(--tx-secondary)' }}>
-            <ThinkingLoader />
-            Qwen is thinking…
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                <ThinkingLoader />
+                Qwen is thinking…
+              </div>
+              <button
+                onClick={() => { abortRef.current?.abort(); setPhase('idle') }}
+                className="text-sm px-3 py-1 rounded-[6px] transition-colors"
+                style={{ color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }}
+              >
+                Cancel
+              </button>
+            </div>
+            {parseLog && (
+              <p className="text-xs font-mono" style={{ color: 'var(--tx-tertiary)' }}>{parseLog}</p>
+            )}
           </div>
         )}
 

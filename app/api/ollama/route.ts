@@ -104,15 +104,18 @@ export async function POST(request: Request) {
 
   let ollamaResponse: Response
   try {
-    ollamaResponse = await fetch(`${ollamaUrl}/api/generate`, {
+    ollamaResponse = await fetch(`${ollamaUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        system: systemPrompt,
-        prompt: `Extract all transactions from this bank statement text:\n\n${text}`,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Extract all transactions from this bank statement text:\n\n${text}` },
+          { role: 'assistant', content: '[' },
+        ],
         stream: true,
-        options: { num_ctx: 16384 },
+        options: { num_ctx: 32768, num_predict: -1 },
       }),
     })
   } catch {

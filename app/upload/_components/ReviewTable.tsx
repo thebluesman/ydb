@@ -210,7 +210,7 @@ function CategorySelect({
             />
           </div>
           <Select.Viewport className="p-1" style={{ maxHeight: 220, overflowY: 'auto' }}>
-            {!hasValue && !q && (
+            {!hasValue && !q && !!value && (
               <Select.Item
                 value={value}
                 className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none hover:bg-[var(--bg-card-alt)]"
