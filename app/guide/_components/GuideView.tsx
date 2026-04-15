@@ -925,7 +925,7 @@ export function GuideView({ currency }: { currency: string }) {
                   ['Type', 'Each transaction is classified as Debit, Credit, or Transfer using a dropdown. Patterns can set this automatically; you can change it per-row. Selecting Transfer reveals two additional fields (see below).'],
                   ['Direction & counterpart', 'When type is Transfer, choose a direction — ↑ Out (money leaving this account) or ↓ In (money arriving). You can also pick a counterpart account from your other accounts so both sides of the move are labelled clearly.'],
                   ['Descriptions', 'If a pattern matched, the display name is already set and the raw bank text appears faintly below it. You can edit the display name freely.'],
-                  ['Categories', 'Qwen assigns categories based on your patterns and past transactions. Correct any that are wrong. Changing a category triggers a "Save as pattern?" strip at the bottom of the card — a quick way to lock in that mapping for future imports.'],
+                  ['Categories', 'Qwen assigns categories based on your patterns and past transactions. Correct any that are wrong. The category dropdown is searchable — type to filter the list. A checkmark marks the currently selected category. Changing a category triggers a "Save as pattern?" strip at the bottom of the card — a quick way to lock in that mapping for future imports.'],
                   ['Duplicates', 'If you upload the same statement twice, duplicate transactions will appear. Delete the extras.'],
                 ].map(([label, desc]) => (
                   <div key={label} className="flex gap-3">

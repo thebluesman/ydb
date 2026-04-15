@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { X, ChevronDown, Plus } from 'lucide-react'
+import { X, ChevronDown, Plus, Check } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
 import { DatePicker } from '@/app/_components/DatePicker'
 
@@ -28,6 +28,29 @@ const selectContent: React.CSSProperties = {
   boxShadow: 'var(--shadow-card)',
   borderRadius: '8px',
   zIndex: 9999,
+}
+
+// ── Row Text Input (local state to avoid full-table re-renders on each keystroke) ──
+
+function RowTextInput({ value, onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { value: string; onChange: (v: string) => void }) {
+  const [local, setLocal] = useState(value)
+  const externalRef = useRef(value)
+  // Sync if the value was changed from outside (e.g. reset)
+  if (externalRef.current !== value && local !== value) {
+    externalRef.current = value
+    setLocal(value)
+  }
+  return (
+    <input
+      {...props}
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={(e) => {
+        onChange(local)
+        props.onBlur?.(e)
+      }}
+    />
+  )
 }
 
 // ── Add Category Modal ────────────────────────────────────────────────────────
@@ -140,56 +163,83 @@ function CategorySelect({
   onChange: (v: string) => void
   onAddNew: () => void
 }) {
+  const [search, setSearch] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
   const handleChange = (v: string) => {
     if (v === ADD_NEW_SENTINEL) { onAddNew(); return }
     onChange(v)
   }
 
   const hasValue = categories.some((c) => c.name === value)
+  const q = search.toLowerCase()
+  const filtered = q ? categories.filter((c) => c.name.toLowerCase().includes(q)) : categories
 
   return (
-    <Select.Root value={value} onValueChange={handleChange}>
+    <Select.Root
+      value={value}
+      onValueChange={handleChange}
+      onOpenChange={(open) => { if (!open) setSearch('') }}
+    >
       <Select.Trigger
         className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
         style={inputStyle}
       >
-        <Select.Value />
+        <span className="flex-1 truncate text-left">{value}</span>
         <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
           <ChevronDown size={12} />
         </Select.Icon>
       </Select.Trigger>
       <Select.Portal>
-        <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
-          <Select.Viewport className="p-1">
-            {!hasValue && (
+        <Select.Content
+          position="popper" sideOffset={4}
+          style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}
+          onAnimationStart={() => searchRef.current?.focus()}
+        >
+          {/* Search box — stopPropagation prevents Radix typeahead from stealing keystrokes */}
+          <div className="px-2 pt-2 pb-1">
+            <input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder="Search…"
+              className="w-full px-2 py-1 text-sm rounded-[4px] outline-none"
+              style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+            />
+          </div>
+          <Select.Viewport className="p-1" style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {!hasValue && !q && (
               <Select.Item
                 value={value}
-                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none hover:bg-[var(--bg-card-alt)]"
                 style={{ color: 'var(--tx-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
+                <Check size={12} style={{ flexShrink: 0, color: 'var(--tx-secondary)' }} />
                 <Select.ItemText>{value}</Select.ItemText>
               </Select.Item>
             )}
-            {categories.map((c) => (
+            {filtered.map((c) => (
               <Select.Item
                 key={c.id} value={c.name}
-                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none hover:bg-[var(--bg-card-alt)]"
                 style={{ color: 'var(--tx-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
+                <span style={{ width: 12, flexShrink: 0 }}>
+                  {c.name === value && <Check size={12} style={{ color: 'var(--tx-secondary)' }} />}
+                </span>
                 <Select.ItemText>{c.name}</Select.ItemText>
               </Select.Item>
             ))}
+            {filtered.length === 0 && (
+              <div className="px-3 py-2 text-sm" style={{ color: 'var(--tx-tertiary)' }}>No matches</div>
+            )}
             <Select.Separator style={{ height: '1px', backgroundColor: 'var(--border-warm)', margin: '4px 0' }} />
             <Select.Item
               value={ADD_NEW_SENTINEL}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none hover:bg-[var(--bg-card-alt)]"
               style={{ color: 'var(--tx-secondary)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
             >
               <Plus size={12} />
               <Select.ItemText>Add new category</Select.ItemText>
@@ -515,6 +565,9 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
   const update = (id: string, field: keyof DraftTransaction, value: string | number | null) =>
     onChange(drafts.map((d) => (d._id === id ? { ...d, [field]: value } : d)))
 
+  const updateFields = (id: string, fields: Partial<DraftTransaction>) =>
+    onChange(drafts.map((d) => (d._id === id ? { ...d, ...fields } : d)))
+
   const remove = (id: string) => {
     onChange(drafts.filter((d) => d._id !== id))
     setDuplicateIds((prev) => { const n = new Set(prev); n.delete(id); return n })
@@ -672,28 +725,29 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                     <TypeSelect
                       value={d.transactionType}
                       onChange={(v) => {
-                        update(d._id, 'transactionType', v)
-                        // Re-sign the amount when type changes
                         const abs = Math.abs(d.amount)
-                        if (v === 'debit') update(d._id, 'amount', -abs)
-                        else if (v === 'credit') update(d._id, 'amount', abs)
-                        // transfer: preserve existing direction
+                        let newAmount: number
+                        if (v === 'debit') newAmount = -abs
+                        else if (v === 'credit') newAmount = abs
                         else {
                           const dir = getTransferDirection(d)
-                          update(d._id, 'amount', dir === 'in' ? abs : -abs)
+                          newAmount = dir === 'in' ? abs : -abs
                         }
-                        // Clear counterpart when switching away from transfer
-                        if (v !== 'transfer') update(d._id, 'transferCounterpartAccountId', null)
+                        updateFields(d._id, {
+                          transactionType: v,
+                          amount: newAmount,
+                          ...(v !== 'transfer' ? { transferCounterpartAccountId: null } : {}),
+                        })
                       }}
                     />
                   </div>
 
                   {/* Middle: Description + originalDescription + Notes */}
                   <div className="flex-1 min-w-0 space-y-2">
-                    <input
+                    <RowTextInput
                       type="text"
                       value={d.description}
-                      onChange={(e) => update(d._id, 'description', e.target.value)}
+                      onChange={(v) => update(d._id, 'description', v)}
                       placeholder="Description"
                       className={inputCls}
                       style={inputStyle}
@@ -708,10 +762,10 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
                       </div>
                     )}
                     {expandedNotes.has(d._id) ? (
-                      <input
+                      <RowTextInput
                         type="text"
                         value={d.notes}
-                        onChange={(e) => update(d._id, 'notes', e.target.value)}
+                        onChange={(v) => update(d._id, 'notes', v)}
                         placeholder="Notes (optional)"
                         className={inputCls}
                         style={{ ...inputStyle, fontStyle: 'italic' }}
