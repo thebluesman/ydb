@@ -59,6 +59,8 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
   const [addCategory, setAddCategory]       = useState('')
   const [addStatus, setAddStatus]           = useState('committed')
   const [addNotes, setAddNotes]             = useState('')
+  const [addTransferDirection, setAddTransferDirection] = useState<'in' | 'out'>('out')
+  const [addCounterpartId, setAddCounterpartId] = useState<string>('')
   const [addSaving, setAddSaving]           = useState(false)
   const [addError, setAddError]             = useState('')
 
@@ -102,11 +104,27 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
   }, [transactions, categories])
 
   const stats = useMemo(() => {
-    const nonTransfer = filtered.filter((t) => t.transactionType !== 'transfer')
-    const income = nonTransfer.filter((t) => t.transactionType === 'credit').reduce((s, t) => s + t.amount, 0)
-    const expenses = nonTransfer.filter((t) => t.transactionType === 'debit').reduce((s, t) => s + t.amount, 0)
+    // Exclude both sides of a matched reimbursement pair — they net to zero
+    // and otherwise inflate income and expenses equally. Mirrors the rule on
+    // the dashboard (see app/dashboard/page.tsx `hiddenTxIds`).
+    const settled = new Set<number>()
+    for (const t of filtered) {
+      if (t.reimbursementTxId != null) {
+        settled.add(t.id)
+        settled.add(t.reimbursementTxId)
+      }
+    }
+    const nonTransfer = filtered.filter(
+      (t) => t.transactionType !== 'transfer' && !settled.has(t.id),
+    )
+    const income = nonTransfer
+      .filter((t) => t.transactionType === 'credit')
+      .reduce((s, t) => s + Math.abs(t.amount), 0)
+    const expenses = nonTransfer
+      .filter((t) => t.transactionType === 'debit')
+      .reduce((s, t) => s + Math.abs(t.amount), 0)
     return {
-      income, expenses: Math.abs(expenses), net: income - Math.abs(expenses),
+      income, expenses, net: income - expenses,
       incomeCount: nonTransfer.filter((t) => t.transactionType === 'credit').length,
       expenseCount: nonTransfer.filter((t) => t.transactionType === 'debit').length,
     }
@@ -225,6 +243,19 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     const amt = parseFloat(addAmount)
     if (isNaN(amt) || amt <= 0) { setAddError('Enter a positive amount'); return }
     if (!addAccountId) { setAddError('Select an account'); return }
+    if (addType === 'transfer' && !addCounterpartId) {
+      setAddError('Pick the other account for this transfer'); return
+    }
+
+    // Amount sign rules (see lib/accounts.ts):
+    //   debit    → negative (money left the account)
+    //   credit   → positive (money entered the account)
+    //   transfer → signed by direction on the originating side; the API
+    //              creates the counterpart row with the opposite sign.
+    const signedAmount =
+      addType === 'debit' ? -amt
+      : addType === 'credit' ? amt
+      : addTransferDirection === 'out' ? -amt : amt
 
     setAddSaving(true); setAddError('')
     try {
@@ -234,12 +265,14 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
         body: JSON.stringify({
           date: addDate,
           description: desc,
-          amount: addType === 'debit' ? -amt : amt,
+          amount: signedAmount,
           transactionType: addType,
           category: addCategory || '',
           accountId: parseInt(addAccountId),
           notes: addNotes.trim() || undefined,
           status: addStatus,
+          transferCounterpartAccountId:
+            addType === 'transfer' ? parseInt(addCounterpartId) : null,
         }),
       })
       if (!res.ok) {
@@ -247,11 +280,19 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
         throw new Error(err.error ?? 'Failed to add')
       }
       const created = await res.json()
-      setTransactions((prev) => [created, ...prev])
+      // Transfer creates two rows — reload to pick up the counterpart side.
+      if (addType === 'transfer') {
+        const fresh = await fetch('/api/transactions').then((r) => r.json())
+        setTransactions(fresh)
+      } else {
+        setTransactions((prev) => [created, ...prev])
+      }
       // Reset form
       setAddDescription(''); setAddAmount(''); setAddNotes('')
       setAddDate(new Date().toISOString().split('T')[0])
       setAddCategory(''); setAddType('debit')
+      setAddCounterpartId('')
+      setAddTransferDirection('out')
       setShowAddForm(false)
     } catch (e) {
       setAddError(String(e instanceof Error ? e.message : e))
@@ -477,6 +518,38 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
+            {addType === 'transfer' && (
+              <>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Direction</label>
+                  <select
+                    value={addTransferDirection}
+                    onChange={(e) => setAddTransferDirection(e.target.value as 'in' | 'out')}
+                    className="px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                    style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+                  >
+                    <option value="out">↑ Out</option>
+                    <option value="in">↓ In</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>
+                    {addTransferDirection === 'out' ? 'To account' : 'From account'}
+                  </label>
+                  <select
+                    value={addCounterpartId}
+                    onChange={(e) => setAddCounterpartId(e.target.value)}
+                    className="px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                    style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+                  >
+                    <option value="">— pick —</option>
+                    {accounts
+                      .filter((a) => String(a.id) !== addAccountId)
+                      .map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
+              </>
+            )}
             <div>
               <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Category</label>
               <select

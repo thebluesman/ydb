@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { DashboardView } from './_components/DashboardView'
+import { computeBalance, isAsset } from '@/lib/accounts'
 
 export const metadata = { title: 'Dashboard — ydb' }
 
@@ -73,7 +74,8 @@ export default async function DashboardPage({
     ? new Date(params.startDate)
     : new Date(now.getFullYear(), now.getMonth() - 11, 1)
 
-  // Clamp endDate to end-of-day
+  // Always clamp endDate to end-of-day so the inclusive upper bound covers
+  // every transaction on the chosen end date (picker gives start-of-day).
   endDate.setHours(23, 59, 59, 999)
 
   // ── Fetch transactions ─────────────────────────────────────────────────────
@@ -86,13 +88,32 @@ export default async function DashboardPage({
     include: { account: { select: { name: true } } },
   })
 
+  // Rows to hide from aggregations:
+  //   - a split parent is a placeholder summary of its legs — if legs exist,
+  //     count the legs (their categories are more granular) and drop the parent.
+  //   - both sides of a linked reimbursement pair net to zero; leaving either
+  //     in inflates income and expenses equally. reimbursementTxId marks the
+  //     expense side; the settlement side appears as the target id.
+  const splitParentIds = new Set<number>()
+  const settlementIds = new Set<number>()
+  const reimbursedExpenseIds = new Set<number>()
+  for (const t of txs) {
+    if (t.parentTransactionId !== null) splitParentIds.add(t.parentTransactionId)
+    if (t.reimbursementTxId !== null) {
+      reimbursedExpenseIds.add(t.id)
+      settlementIds.add(t.reimbursementTxId)
+    }
+  }
+  const hiddenTxIds = new Set<number>([...splitParentIds, ...settlementIds, ...reimbursedExpenseIds])
+  const includeInTotals = (t: { id: number }) => !hiddenTxIds.has(t.id)
+
   // ── Category breakdown (expenses only, in date range, exclude Transfer) ────
   const catMap = new Map<string, { total: number; count: number }>()
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
-    if (t.transactionType === 'transfer') continue
-    if (t.amount >= 0) continue
+    if (t.transactionType !== 'debit') continue
+    if (!includeInTotals(t)) continue
     const cur = catMap.get(t.category) ?? { total: 0, count: 0 }
     catMap.set(t.category, { total: cur.total + Math.abs(t.amount), count: cur.count + 1 })
   }
@@ -111,11 +132,12 @@ export default async function DashboardPage({
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
     if (t.transactionType === 'transfer') continue
+    if (!includeInTotals(t)) continue
     const key = monthKey(d)
     const m = monthMap.get(key)
     if (!m) continue
-    if (t.amount > 0) m.income += t.amount
-    else m.expenses += Math.abs(t.amount)
+    if (t.transactionType === 'credit') m.income += Math.abs(t.amount)
+    else if (t.transactionType === 'debit') m.expenses += Math.abs(t.amount)
   }
   const monthlyData = Array.from(monthMap.entries()).map(([key, { income, expenses }]) => ({
     month: monthLabel(key),
@@ -125,25 +147,33 @@ export default async function DashboardPage({
   }))
 
   // ── Summary stats (in date range, exclude Transfer) ─────────────────────────
+  // Classify by transactionType (user's declared intent) rather than amount
+  // sign so Dashboard totals match Ledger totals on the same filter. Skip
+  // split parents (legs carry the real categories) and matched reimbursement
+  // pairs (they net to zero and otherwise inflate both sides).
   let totalIncome = 0, totalExpenses = 0, txCount = 0
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
     if (t.transactionType === 'transfer') continue
+    if (!includeInTotals(t)) continue
     txCount++
-    if (t.amount > 0) totalIncome += t.amount
-    else totalExpenses += Math.abs(t.amount)
+    if (t.transactionType === 'credit') totalIncome += Math.abs(t.amount)
+    else if (t.transactionType === 'debit') totalExpenses += Math.abs(t.amount)
   }
   const summaryStats = { totalIncome, totalExpenses, net: totalIncome - totalExpenses, txCount }
 
   // ── Account balances ────────────────────────────────────────────────────────
+  // Liability accounts flip the sign (see lib/accounts.ts): debt goes up when
+  // the user spends on the card (stored as −X) and down when they pay into it
+  // (stored as +X on the card statement).
   const accountBalances: AccountBalance[] = await Promise.all(
     accountsForCurrency.map(async (acc) => {
       const agg = await prisma.transaction.aggregate({
         where: { accountId: acc.id, status: { in: ['committed', 'reconciled'] } },
         _sum: { amount: true },
       })
-      const currentBalance = acc.openingBalance + (agg._sum.amount ?? 0)
+      const currentBalance = computeBalance(acc, agg._sum.amount ?? 0)
       return {
         id: acc.id,
         name: acc.name,
@@ -160,18 +190,24 @@ export default async function DashboardPage({
   )
 
   // ── Cash flow statement (month by month, in date range) ────────────────────
-  const preRangeSum = await prisma.transaction.aggregate({
-    where: {
-      accountId: { in: accountIds },
-      status: { in: ['committed', 'reconciled'] },
-      date: { lt: startDate },
-    },
-    _sum: { amount: true },
-  })
+  // Seed is liquid-cash only: summing loan/credit-card openings here would
+  // inflate the opening row by the outstanding debt (which is not cash).
+  const assetAccounts = accountsForCurrency.filter((a) => isAsset(a.accountType))
+  const assetAccountIds = assetAccounts.map((a) => a.id)
+  const preRangeAssetSum = assetAccountIds.length > 0
+    ? await prisma.transaction.aggregate({
+        where: {
+          accountId: { in: assetAccountIds },
+          status: { in: ['committed', 'reconciled'] },
+          date: { lt: startDate },
+        },
+        _sum: { amount: true },
+      })
+    : { _sum: { amount: 0 } }
   const cashFlowData: CashFlowRow[] = []
   {
-    const seedBalance = accountsForCurrency.reduce((sum, a) => sum + a.openingBalance, 0)
-      + (preRangeSum._sum.amount ?? 0)
+    const seedBalance = assetAccounts.reduce((sum, a) => sum + a.openingBalance, 0)
+      + (preRangeAssetSum._sum.amount ?? 0)
     let runningBalance = seedBalance
     for (const [key, { income, expenses }] of monthMap.entries()) {
       cashFlowData.push({
@@ -193,7 +229,8 @@ export default async function DashboardPage({
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
-    if (t.transactionType === 'transfer' || t.amount >= 0) continue
+    if (t.transactionType !== 'debit') continue
+    if (!includeInTotals(t)) continue
     if (!trendCatSet.has(t.category)) {
       trendCatSet.add(t.category)
       const dbCat = dbCategories.find((c) => c.name === t.category)
@@ -211,7 +248,8 @@ export default async function DashboardPage({
   for (const t of txs) {
     const d = new Date(t.date)
     if (d < startDate || d > endDate) continue
-    if (t.transactionType === 'transfer' || t.amount >= 0) continue
+    if (t.transactionType !== 'debit') continue
+    if (!includeInTotals(t)) continue
     const key = monthKey(d)
     const row = trendMonthMap.get(key)
     if (row) row[t.category] = (row[t.category] ?? 0) + Math.abs(t.amount)
@@ -221,48 +259,61 @@ export default async function DashboardPage({
     ...row,
   }))
 
-  // ── Budget data (current month actuals, independent of date range) ───────────
-  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const currentMonthCatMap = new Map<string, number>()
+  // ── Budget data (follows the dashboard date range) ───────────
+  // Actuals = category spend in the selected window. Budget scales by the
+  // number of months covered so a 3-month window compares against 3× the
+  // monthly limit, keeping the bar meaningful regardless of range.
+  const monthsInRange = Math.max(1, monthMap.size)
+  const rangeCatMap = new Map<string, number>()
   for (const t of txs) {
     const d = new Date(t.date)
-    if (d < currentMonthStart || d > now) continue
-    if (t.transactionType === 'transfer' || t.amount >= 0) continue
-    currentMonthCatMap.set(t.category, (currentMonthCatMap.get(t.category) ?? 0) + Math.abs(t.amount))
+    if (d < startDate || d > endDate) continue
+    if (t.transactionType !== 'debit') continue
+    if (!includeInTotals(t)) continue
+    rangeCatMap.set(t.category, (rangeCatMap.get(t.category) ?? 0) + Math.abs(t.amount))
   }
   const budgetData: BudgetData[] = budgets.map((b) => ({
     category: b.category,
-    budget: b.monthlyLimit,
-    actual: currentMonthCatMap.get(b.category) ?? 0,
+    budget: b.monthlyLimit * monthsInRange,
+    actual: rangeCatMap.get(b.category) ?? 0,
   }))
 
   // ── Top 10 transactions ──────────────────────────────────────────────────────
+  // Exclude transfers (movement between your own accounts isn't "spend" or
+  // "income") and split parents (their legs carry the real breakdown).
+  // Reimbursement-linked rows are excluded client-side since the inverse 1:1
+  // relation can't be filtered cleanly in a Prisma where clause.
   const [topPositive, topNegative] = await Promise.all([
     prisma.transaction.findMany({
       where: {
         accountId: { in: accountIds },
         status: { in: ['committed', 'reconciled'] },
+        transactionType: { not: 'transfer' },
+        parentTransactionId: null,
         amount: { gt: 0 },
         date: { gte: startDate, lte: endDate },
       },
       orderBy: { amount: 'desc' },
-      take: 10,
+      take: 20,
       include: { account: { select: { name: true } } },
     }),
     prisma.transaction.findMany({
       where: {
         accountId: { in: accountIds },
         status: { in: ['committed', 'reconciled'] },
+        transactionType: { not: 'transfer' },
+        parentTransactionId: null,
         amount: { lt: 0 },
         date: { gte: startDate, lte: endDate },
       },
       orderBy: { amount: 'asc' },
-      take: 10,
+      take: 20,
       include: { account: { select: { name: true } } },
     }),
   ])
 
   const topTransactions: TopTransaction[] = [...topPositive, ...topNegative]
+    .filter((t) => !hiddenTxIds.has(t.id))
     .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
     .slice(0, 10)
     .map((t) => ({

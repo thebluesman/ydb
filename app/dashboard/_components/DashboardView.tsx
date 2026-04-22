@@ -21,6 +21,7 @@ import { BudgetWidget } from './BudgetWidget'
 import { NetWorthWidget } from './NetWorthWidget'
 import type { AccountBalance, CashFlowRow, TopTransaction, TrendCategory, BudgetData } from '../page'
 import { DatePicker } from '@/app/_components/DatePicker'
+import { isLiability } from '@/lib/accounts'
 
 type CategoryBreakdown = { category: string; total: number; count: number }
 type MonthlyData = { month: string; income: number; expenses: number; net: number }
@@ -194,7 +195,9 @@ export function DashboardView({
             onScroll={updateBalScroll}
           >
             <style>{`.bal-scroll::-webkit-scrollbar{display:none}`}</style>
-          {accountBalances.map((acc) => (
+          {accountBalances.map((acc) => {
+            const liab = isLiability(acc.accountType)
+            return (
             <div
               key={acc.id}
               className="card-hover flex-none p-6 rounded-[8px]"
@@ -225,16 +228,17 @@ export function DashboardView({
                     : acc.accountType}
                 </span>
               </div>
-              {(acc.accountType === 'personal_loan' || acc.accountType === 'auto_loan') && (
-                <p className="text-[10px] mb-0.5" style={{ color: 'var(--tx-faint)' }}>outstanding</p>
+              {liab && (
+                <p className="text-[10px] mb-0.5" style={{ color: 'var(--tx-faint)' }}>
+                  {acc.accountType === 'credit' ? 'owed' : 'outstanding'}
+                </p>
               )}
               <p
                 className="text-lg font-mono font-medium"
                 style={{
-                  color:
-                    acc.accountType === 'personal_loan' || acc.accountType === 'auto_loan'
-                      ? 'var(--tx-stat-expense)'
-                      : acc.currentBalance >= 0 ? 'var(--tx-stat-income)' : 'var(--tx-stat-expense)',
+                  color: liab
+                    ? 'var(--tx-stat-expense)'
+                    : acc.currentBalance >= 0 ? 'var(--tx-stat-income)' : 'var(--tx-stat-expense)',
                   letterSpacing: '-0.5px',
                 }}
               >
@@ -242,15 +246,18 @@ export function DashboardView({
                 {Math.abs(acc.currentBalance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
               {acc.accountType === 'credit' && acc.creditLimit != null && (() => {
-                const used = Math.abs(acc.currentBalance)
+                // currentBalance is already the debt owed (positive). Clamp at
+                // zero in case the user has overpaid the card into a credit
+                // balance.
+                const used = Math.max(acc.currentBalance, 0)
                 const utilPct = Math.min(100, Math.round((used / acc.creditLimit) * 100))
-                const available = acc.creditLimit - used
+                const available = Math.max(acc.creditLimit - used, 0)
                 const barColor = utilPct >= 90 ? 'var(--tx-error)' : utilPct >= 30 ? 'var(--tx-badge-review)' : 'var(--tx-success)'
                 return (
                   <div className="mt-3 space-y-1">
                     <div className="flex justify-between text-[10px]" style={{ color: 'var(--tx-faint)' }}>
                       <span>{utilPct}% used</span>
-                      <span>{Math.abs(available).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} available</span>
+                      <span>{available.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} available</span>
                     </div>
                     <div className="rounded-full overflow-hidden" style={{ height: 4, backgroundColor: 'var(--border-warm-md)' }}>
                       <div style={{ width: `${utilPct}%`, height: '100%', backgroundColor: barColor, borderRadius: 9999, transition: 'width 0.3s' }} />
@@ -267,7 +274,7 @@ export function DashboardView({
                 </p>
               )}
             </div>
-          ))}
+          )})}
           </div>
           {/* Gradient fades */}
           {(() => {
@@ -307,9 +314,9 @@ export function DashboardView({
       {budgetData.length > 0 && (
         <div className="p-6 rounded-[8px]" style={cardStyle}>
           <p className="text-[11px] font-medium uppercase tracking-[0.048px] mb-1" style={{ color: 'var(--tx-secondary)' }}>
-            Monthly Budgets
+            Budgets
           </p>
-          <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>Current month · spend vs limit</p>
+          <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>Selected period · spend vs prorated limit</p>
           <BudgetWidget budgetData={budgetData} currency={currency} />
         </div>
       )}

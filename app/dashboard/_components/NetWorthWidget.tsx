@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from 'recharts'
 import type { AccountBalance, CashFlowRow } from '../page'
+import { isAsset, isLiability } from '@/lib/accounts'
 
 function fmtShort(v: number) {
   if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`
@@ -36,18 +37,15 @@ export function NetWorthWidget({
     return () => obs.disconnect()
   }, [])
 
+  // Under the canonical convention (lib/accounts.ts) currentBalance is cash
+  // for assets and debt owed for liabilities. Treat both sign-aligned.
   const assets = accountBalances
-    .filter((a) => a.accountType === 'current' || a.accountType === 'savings' || a.accountType === 'cash')
+    .filter((a) => isAsset(a.accountType))
     .reduce((s, a) => s + Math.max(a.currentBalance, 0), 0)
 
   const liabilities = accountBalances
-    .filter((a) => a.accountType === 'credit' || a.accountType === 'personal_loan' || a.accountType === 'auto_loan')
-    .reduce((s, a) => {
-      // Credit cards: negative balance = money owed
-      if (a.accountType === 'credit') return s + Math.max(-a.currentBalance, 0)
-      // Loans: positive balance = outstanding debt
-      return s + Math.max(a.currentBalance, 0)
-    }, 0)
+    .filter((a) => isLiability(a.accountType))
+    .reduce((s, a) => s + Math.max(a.currentBalance, 0), 0)
 
   const netWorth = assets - liabilities
 
