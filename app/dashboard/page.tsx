@@ -167,47 +167,68 @@ export default async function DashboardPage({
   // Liability accounts flip the sign (see lib/accounts.ts): debt goes up when
   // the user spends on the card (stored as −X) and down when they pay into it
   // (stored as +X on the card statement).
-  const accountBalances: AccountBalance[] = await Promise.all(
-    accountsForCurrency.map(async (acc) => {
-      const agg = await prisma.transaction.aggregate({
-        where: { accountId: acc.id, status: { in: ['committed', 'reconciled'] } },
-        _sum: { amount: true },
-      })
-      const currentBalance = computeBalance(acc, agg._sum.amount ?? 0)
-      return {
-        id: acc.id,
-        name: acc.name,
-        accountType: acc.accountType,
-        currency: acc.currency,
-        openingBalance: acc.openingBalance,
-        openingBalanceDate: acc.openingBalanceDate
-          ? acc.openingBalanceDate.toISOString().split('T')[0]
-          : null,
-        currentBalance,
-        creditLimit: acc.creditLimit,
-      }
-    })
-  )
+  // One groupBy instead of one aggregate per account — cuts N+1 at scale.
+  const sumRows = await prisma.transaction.groupBy({
+    by: ['accountId'],
+    where: { accountId: { in: accountIds }, status: { in: ['committed', 'reconciled'] } },
+    _sum: { amount: true },
+  })
+  const sumByAccount = new Map(sumRows.map((r) => [r.accountId, r._sum.amount ?? 0]))
+  const accountBalances: AccountBalance[] = accountsForCurrency.map((acc) => {
+    const currentBalance = computeBalance(acc, sumByAccount.get(acc.id) ?? 0)
+    return {
+      id: acc.id,
+      name: acc.name,
+      accountType: acc.accountType,
+      currency: acc.currency,
+      openingBalance: acc.openingBalance,
+      openingBalanceDate: acc.openingBalanceDate
+        ? acc.openingBalanceDate.toISOString().split('T')[0]
+        : null,
+      currentBalance,
+      creditLimit: acc.creditLimit,
+    }
+  })
 
   // ── Cash flow statement (month by month, in date range) ────────────────────
   // Seed is liquid-cash only: summing loan/credit-card openings here would
   // inflate the opening row by the outstanding debt (which is not cash).
+  //
+  // We must apply the same hiddenTxIds filter to pre-range rows as the main
+  // window — split parents and matched reimbursement pairs inflate the seed
+  // otherwise, so the opening row disagrees with the sum of live asset rows.
   const assetAccounts = accountsForCurrency.filter((a) => isAsset(a.accountType))
   const assetAccountIds = assetAccounts.map((a) => a.id)
-  const preRangeAssetSum = assetAccountIds.length > 0
-    ? await prisma.transaction.aggregate({
-        where: {
-          accountId: { in: assetAccountIds },
-          status: { in: ['committed', 'reconciled'] },
-          date: { lt: startDate },
-        },
-        _sum: { amount: true },
-      })
-    : { _sum: { amount: 0 } }
+  let preRangeAssetSum = 0
+  if (assetAccountIds.length > 0) {
+    const preRangeRows = await prisma.transaction.findMany({
+      where: {
+        accountId: { in: assetAccountIds },
+        status: { in: ['committed', 'reconciled'] },
+        date: { lt: startDate },
+      },
+      select: { id: true, amount: true, parentTransactionId: true, reimbursementTxId: true },
+    })
+    const preSplitParents = new Set<number>()
+    const preSettlements = new Set<number>()
+    const preReimbExpenses = new Set<number>()
+    for (const t of preRangeRows) {
+      if (t.parentTransactionId !== null) preSplitParents.add(t.parentTransactionId)
+      if (t.reimbursementTxId !== null) {
+        preReimbExpenses.add(t.id)
+        preSettlements.add(t.reimbursementTxId)
+      }
+    }
+    const preHidden = new Set<number>([...preSplitParents, ...preSettlements, ...preReimbExpenses])
+    for (const t of preRangeRows) {
+      if (preHidden.has(t.id)) continue
+      preRangeAssetSum += t.amount
+    }
+  }
   const cashFlowData: CashFlowRow[] = []
   {
     const seedBalance = assetAccounts.reduce((sum, a) => sum + a.openingBalance, 0)
-      + (preRangeAssetSum._sum.amount ?? 0)
+      + preRangeAssetSum
     let runningBalance = seedBalance
     for (const [key, { income, expenses }] of monthMap.entries()) {
       cashFlowData.push({

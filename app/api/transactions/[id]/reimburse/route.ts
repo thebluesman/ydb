@@ -19,6 +19,41 @@ export async function POST(
   if (isNaN(expenseId) || isNaN(settlementId)) {
     return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
   }
+  if (expenseId === settlementId) {
+    return NextResponse.json({ error: 'a transaction cannot reimburse itself' }, { status: 400 })
+  }
+
+  const [expense, settlement] = await Promise.all([
+    prisma.transaction.findUnique({ where: { id: expenseId } }),
+    prisma.transaction.findUnique({ where: { id: settlementId } }),
+  ])
+  if (!expense) return NextResponse.json({ error: 'expense not found' }, { status: 404 })
+  if (!settlement) return NextResponse.json({ error: 'settlement not found' }, { status: 404 })
+
+  if (expense.transactionType !== 'debit') {
+    return NextResponse.json(
+      { error: 'reimbursement target must be a debit (the out-of-pocket expense)' },
+      { status: 400 },
+    )
+  }
+  if (settlement.transactionType !== 'credit') {
+    return NextResponse.json(
+      { error: 'reimbursement settlement must be a credit (money received back)' },
+      { status: 400 },
+    )
+  }
+  // @unique on reimbursementTxId will catch this at write time; surface a
+  // friendlier 409 first so the UI can show a proper message.
+  const alreadyLinked = await prisma.transaction.findFirst({
+    where: { reimbursementTxId: settlementId, NOT: { id: expenseId } },
+    select: { id: true, description: true },
+  })
+  if (alreadyLinked) {
+    return NextResponse.json(
+      { error: `settlement is already reimbursing expense #${alreadyLinked.id} (${alreadyLinked.description})` },
+      { status: 409 },
+    )
+  }
 
   await prisma.transaction.update({
     where: { id: expenseId },

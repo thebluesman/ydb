@@ -21,10 +21,11 @@ export async function POST(
   const parent = await prisma.transaction.findUnique({ where: { id: parentId } })
   if (!parent) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  // Amounts are integer cents. Exact equality now; no float tolerance needed.
   const sum = legs.reduce((s, l) => s + l.amount, 0)
-  if (Math.abs(sum - parent.amount) > 0.01) {
+  if (sum !== parent.amount) {
     return NextResponse.json(
-      { error: `Leg amounts (${sum.toFixed(2)}) must sum to parent amount (${parent.amount.toFixed(2)})` },
+      { error: `Leg amounts (${(sum / 100).toFixed(2)}) must sum to parent amount (${(parent.amount / 100).toFixed(2)})` },
       { status: 400 }
     )
   }

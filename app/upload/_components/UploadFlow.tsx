@@ -7,6 +7,7 @@ import { FileDropzone } from './FileDropzone'
 import { ReviewTable, type DraftTransaction } from './ReviewTable'
 import { detectFormat, normalizeTransactions, type StatementFormat } from '@/lib/statementFormats'
 import { findMatchingRule } from '@/lib/vendor-rule-match'
+import { toCents } from '@/lib/money'
 
 type Account = { id: number; name: string; currency: string; accountType: string }
 type Category = { id: number; name: string; color: string }
@@ -65,8 +66,12 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
         }
         setOcrPage({ current: 0, total: pdf.numPages })
 
-        // Lazy-initialised Tesseract worker — only created if a scanned page is found
-        let ocrWorker: { recognize: (canvas: HTMLCanvasElement) => Promise<{ data: { text: string } }>; terminate: () => Promise<void> } | null = null
+        // Lazy-initialised Tesseract worker — only created if a scanned page is found.
+        type TesseractWorker = {
+          recognize: (canvas: HTMLCanvasElement) => Promise<{ data: { text: string } }>
+          terminate: () => Promise<unknown>
+        }
+        let ocrWorker: TesseractWorker | null = null
 
         console.log(`[ocr] PDF has ${pdf.numPages} page(s)`)
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -113,16 +118,16 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
             // Scanned page — fall back to Tesseract OCR
             if (!ocrWorker) {
               const { createWorker } = await import('tesseract.js')
-              ocrWorker = await createWorker('eng', 1, {
+              ocrWorker = (await createWorker('eng', 1, {
                 logger: (m: { status: string; progress: number }) => {
                   if (m.status === 'recognizing text') setOcrProgress(Math.round(m.progress * 100))
                 },
-              })
+              })) as unknown as TesseractWorker
             }
             const canvas = document.createElement('canvas')
             canvas.width = viewport.width; canvas.height = viewport.height
             await page.render({ canvas, viewport }).promise
-            ocrText += (await ocrWorker.recognize(canvas)).data.text + '\n'
+            ocrText += (await ocrWorker!.recognize(canvas)).data.text + '\n'
           }
         }
         if (ocrWorker) await ocrWorker.terminate()
@@ -221,10 +226,16 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
         if (pr.ok) patterns = await pr.json()
       } catch { /* non-critical — fall back to raw descriptions */ }
 
+      // Drafts keep amounts in major units for UI friendliness; the commit step
+      // converts to integer cents at the API boundary.
+      // rawSource is intentionally blank here — stashing 2 KB of OCR text per
+      // row duplicated the same prefix across every transaction; the user
+      // already has the source PDF if they need it.
       setDrafts(normalized.map((t) => {
         const rawDesc = t.originalDescription
         const amt = Number(t.amount) || 0
-        const match = patterns.length > 0 ? findMatchingRule(patterns, rawDesc, amt) : null
+        // Rule min/maxAmount gates are in cents; compare against cents too.
+        const match = patterns.length > 0 ? findMatchingRule(patterns, rawDesc, toCents(amt)) : null
         return {
           _id: crypto.randomUUID(),
           date: t.date ?? today,
@@ -235,7 +246,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
           category: match ? match.category : (t.category || 'Other'),
           accountId: selectedAccountId,
           notes: '',
-          rawSource: ocrText.slice(0, 2000),
+          rawSource: '',
         }
       }))
       setPhase('review')
@@ -246,9 +257,13 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
   }
 
   const handleCommit = async () => {
+    const payload = drafts.map(({ _id: _, amount, ...t }) => ({
+      ...t,
+      amount: toCents(amount),
+    }))
     const res = await fetch('/api/transactions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(drafts.map(({ _id: _, ...t }) => t)),
+      body: JSON.stringify(payload),
     })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }))

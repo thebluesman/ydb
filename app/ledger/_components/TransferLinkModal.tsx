@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
+import { fromCents } from '@/lib/money'
 
 type Transaction = {
   id: number
@@ -154,7 +155,7 @@ export function TransferLinkModal({
                   </p>
                 </div>
                 <span className="text-xs font-mono mr-3 whitespace-nowrap" style={{ color: t.amount < 0 ? 'var(--tx-error)' : 'var(--tx-success)' }}>
-                  {t.amount < 0 ? '−' : '+'}{t.account.currency}{Math.abs(t.amount).toFixed(2)}
+                  {t.amount < 0 ? '−' : '+'}{t.account.currency}{fromCents(Math.abs(t.amount)).toFixed(2)}
                 </span>
                 <button
                   onClick={() => handleLink(t.id)}

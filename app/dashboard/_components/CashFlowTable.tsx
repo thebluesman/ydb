@@ -1,9 +1,10 @@
 'use client'
 
 import type { CashFlowRow } from '../page'
+import { fromCents } from '@/lib/money'
 
-function fmt(v: number, currency: string) {
-  return v.toLocaleString('en-US', { style: 'currency', currency, maximumFractionDigits: 2 })
+function fmt(cents: number, currency: string) {
+  return fromCents(cents).toLocaleString('en-US', { style: 'currency', currency, maximumFractionDigits: 2 })
 }
 
 export function CashFlowTable({ data, currency }: { data: CashFlowRow[]; currency: string }) {

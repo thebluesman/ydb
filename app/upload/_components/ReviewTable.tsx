@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { X, ChevronDown, Plus, Check } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
 import { DatePicker } from '@/app/_components/DatePicker'
+import { toCents } from '@/lib/money'
 
 export type DraftTransaction = {
   _id: string; date: string; description: string; originalDescription: string; amount: number
@@ -32,7 +33,7 @@ const selectContent: React.CSSProperties = {
 
 // ── Row Text Input (local state to avoid full-table re-renders on each keystroke) ──
 
-function RowTextInput({ value, onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { value: string; onChange: (v: string) => void }) {
+function RowTextInput({ value, onChange, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & { value: string; onChange: (v: string) => void }) {
   const [local, setLocal] = useState(value)
   const externalRef = useRef(value)
   // Sync if the value was changed from outside (e.g. reset)
@@ -548,8 +549,10 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
 
   useEffect(() => {
     if (drafts.length === 0) return
+    // Draft amounts are in major units; the duplicate check compares against
+    // DB rows stored as integer cents.
     const candidates = drafts.map((d) => ({
-      _id: d._id, date: d.date, amount: d.amount,
+      _id: d._id, date: d.date, amount: toCents(d.amount),
       description: d.description, accountId: d.accountId,
     }))
     fetch('/api/transactions/check-duplicates', {

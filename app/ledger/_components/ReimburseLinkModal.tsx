@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
+import { fromCents } from '@/lib/money'
 
 type TxSummary = {
   id: number
@@ -160,7 +161,7 @@ export function ReimburseLinkModal({
                   className="text-xs font-mono mr-3 whitespace-nowrap"
                   style={{ color: 'var(--tx-success)' }}
                 >
-                  +{t.account.currency}{Math.abs(t.amount).toFixed(2)}
+                  +{t.account.currency}{fromCents(Math.abs(t.amount)).toFixed(2)}
                 </span>
                 <button
                   onClick={() => handleLink(t.id)}

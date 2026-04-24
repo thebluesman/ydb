@@ -6,8 +6,10 @@ import {
   Legend, ResponsiveContainer,
 } from 'recharts'
 import type { TrendCategory } from '../page'
+import { fromCents } from '@/lib/money'
 
-function fmtShort(v: number) {
+function fmtShort(cents: number) {
+  const v = fromCents(cents)
   if (v >= 1000) return `${(v / 1000).toFixed(1)}k`
   return Math.round(v).toString()
 }

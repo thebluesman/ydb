@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { fromCents } from '@/lib/money'
 
 type RecurringRow = {
   description: string
@@ -65,7 +66,7 @@ export function RecurringTransactions() {
                 {r.category}
               </td>
               <td className="px-3 py-2 font-mono" style={{ color: 'var(--tx-error)' }}>
-                −{r.avgAmount.toFixed(2)}
+                −{fromCents(r.avgAmount).toFixed(2)}
               </td>
               <td className="px-3 py-2 font-mono" style={{ color: 'var(--tx-secondary)' }}>
                 {r.occurrences}×

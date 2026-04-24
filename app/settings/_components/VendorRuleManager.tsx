@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react'
 import * as Select from '@radix-ui/react-select'
 import { AlertCircle, ChevronDown, ChevronRight, X, FlaskConical } from 'lucide-react'
 import { pillTextColor } from '@/lib/category-colors'
+import { fromCents, toCents } from '@/lib/money'
 
 type VendorRule = {
   id: number
@@ -166,8 +167,9 @@ export function VendorRuleManager({
           vendor: v, pattern: p, category: addCategory,
           matchType: addMatchType, direction: addDirection,
           transactionType: addTransactionType === 'none' ? null : addTransactionType,
-          minAmount: addMinAmount ? parseFloat(addMinAmount) : null,
-          maxAmount: addMaxAmount ? parseFloat(addMaxAmount) : null,
+          // User enters major units; rule gates store cents to match DB amount.
+          minAmount: addMinAmount ? toCents(parseFloat(addMinAmount)) : null,
+          maxAmount: addMaxAmount ? toCents(parseFloat(addMaxAmount)) : null,
           priority: 0,
         }),
       })
@@ -290,9 +292,11 @@ export function VendorRuleManager({
     categories.find((c) => c.name === name)?.color ?? '#6750A4'
 
   const amtLabel = (r: VendorRule) => {
-    if (r.minAmount !== null && r.maxAmount !== null) return `${r.minAmount}–${r.maxAmount}`
-    if (r.minAmount !== null) return `≥ ${r.minAmount}`
-    if (r.maxAmount !== null) return `≤ ${r.maxAmount}`
+    const lo = r.minAmount !== null ? fromCents(r.minAmount) : null
+    const hi = r.maxAmount !== null ? fromCents(r.maxAmount) : null
+    if (lo !== null && hi !== null) return `${lo}–${hi}`
+    if (lo !== null) return `≥ ${lo}`
+    if (hi !== null) return `≤ ${hi}`
     return null
   }
 
@@ -502,8 +506,12 @@ export function VendorRuleManager({
                             <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Min amount</label>
                             <input
                               type="number" step="0.01" placeholder="None"
-                              value={editDraft.minAmount ?? rule.minAmount ?? ''}
-                              onChange={(e) => setEditDraft((d) => ({ ...d, minAmount: e.target.value ? parseFloat(e.target.value) : null }))}
+                              value={
+                                editDraft.minAmount !== undefined
+                                  ? (editDraft.minAmount === null ? '' : fromCents(editDraft.minAmount))
+                                  : (rule.minAmount === null ? '' : fromCents(rule.minAmount))
+                              }
+                              onChange={(e) => setEditDraft((d) => ({ ...d, minAmount: e.target.value ? toCents(parseFloat(e.target.value)) : null }))}
                               className="px-2 py-1 text-xs rounded-[6px] outline-none w-20"
                               style={inputStyle}
                             />
@@ -512,8 +520,12 @@ export function VendorRuleManager({
                             <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Max amount</label>
                             <input
                               type="number" step="0.01" placeholder="None"
-                              value={editDraft.maxAmount ?? rule.maxAmount ?? ''}
-                              onChange={(e) => setEditDraft((d) => ({ ...d, maxAmount: e.target.value ? parseFloat(e.target.value) : null }))}
+                              value={
+                                editDraft.maxAmount !== undefined
+                                  ? (editDraft.maxAmount === null ? '' : fromCents(editDraft.maxAmount))
+                                  : (rule.maxAmount === null ? '' : fromCents(rule.maxAmount))
+                              }
+                              onChange={(e) => setEditDraft((d) => ({ ...d, maxAmount: e.target.value ? toCents(parseFloat(e.target.value)) : null }))}
                               className="px-2 py-1 text-xs rounded-[6px] outline-none w-20"
                               style={inputStyle}
                             />
@@ -600,7 +612,7 @@ export function VendorRuleManager({
                                       className="font-mono shrink-0"
                                       style={{ color: tx.amount < 0 ? 'var(--tx-error)' : 'var(--tx-success)' }}
                                     >
-                                      {tx.amount < 0 ? '−' : '+'}{currency}{Math.abs(tx.amount).toFixed(2)}
+                                      {tx.amount < 0 ? '−' : '+'}{currency}{fromCents(Math.abs(tx.amount)).toFixed(2)}
                                     </span>
                                     <span className="shrink-0" style={{ color: 'var(--tx-faint)' }}>{tx.category}</span>
                                   </div>

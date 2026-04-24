@@ -37,9 +37,17 @@ export async function DELETE(
     return NextResponse.json({ error: 'Invalid id' }, { status: 400 })
   }
 
-  const count = await prisma.transaction.count({ where: { accountId } })
-  if (count > 0) {
-    return NextResponse.json({ error: 'HAS_TRANSACTIONS', count }, { status: 409 })
+  // Both transactions and import records FK into Account. Checking only one
+  // used to surface as an opaque 500 when the other had rows.
+  const [txCount, importCount] = await Promise.all([
+    prisma.transaction.count({ where: { accountId } }),
+    prisma.importRecord.count({ where: { accountId } }),
+  ])
+  if (txCount > 0) {
+    return NextResponse.json({ error: 'HAS_TRANSACTIONS', count: txCount }, { status: 409 })
+  }
+  if (importCount > 0) {
+    return NextResponse.json({ error: 'HAS_IMPORTS', count: importCount }, { status: 409 })
   }
 
   await prisma.account.delete({ where: { id: accountId } })

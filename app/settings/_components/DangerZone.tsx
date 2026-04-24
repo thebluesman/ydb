@@ -70,7 +70,7 @@ export function DangerZone() {
     await fetch('/api/clear-data', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(scope),
+      body: JSON.stringify({ confirmation: 'DELETE ALL DATA', scope }),
     })
     router.refresh()
     setClearing(false)

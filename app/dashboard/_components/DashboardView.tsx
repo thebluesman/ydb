@@ -22,6 +22,7 @@ import { NetWorthWidget } from './NetWorthWidget'
 import type { AccountBalance, CashFlowRow, TopTransaction, TrendCategory, BudgetData } from '../page'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { isLiability } from '@/lib/accounts'
+import { fromCents } from '@/lib/money'
 
 type CategoryBreakdown = { category: string; total: number; count: number }
 type MonthlyData = { month: string; income: number; expenses: number; net: number }
@@ -113,9 +114,13 @@ export function DashboardView({
   const grid   = isDark ? 'rgba(242,241,237,0.07)' : 'rgba(38,37,30,0.07)'
   const cursor = isDark ? 'rgba(242,241,237,0.06)' : 'rgba(38,37,30,0.04)'
 
-  const fmt = (v: number) =>
-    `${currency} ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const fmtShort = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)))
+  // All incoming values are integer cents; convert before formatting.
+  const fmt = (cents: number) =>
+    `${currency} ${fromCents(cents).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const fmtShort = (cents: number) => {
+    const v = fromCents(cents)
+    return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v))
+  }
 
   const pushParams = (overrides: Record<string, string>) => {
     const p = new URLSearchParams(searchParams?.toString() ?? '')
@@ -243,27 +248,26 @@ export function DashboardView({
                 }}
               >
                 {acc.currentBalance >= 0 ? '' : '−'}
-                {Math.abs(acc.currentBalance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {fromCents(Math.abs(acc.currentBalance)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
               {acc.accountType === 'credit' && acc.creditLimit != null && (() => {
-                // currentBalance is already the debt owed (positive). Clamp at
-                // zero in case the user has overpaid the card into a credit
-                // balance.
+                // currentBalance and creditLimit are integer cents. Math is
+                // unit-agnostic; formatting divides by 100.
                 const used = Math.max(acc.currentBalance, 0)
                 const utilPct = Math.min(100, Math.round((used / acc.creditLimit) * 100))
-                const available = Math.max(acc.creditLimit - used, 0)
+                const availableCents = Math.max(acc.creditLimit - used, 0)
                 const barColor = utilPct >= 90 ? 'var(--tx-error)' : utilPct >= 30 ? 'var(--tx-badge-review)' : 'var(--tx-success)'
                 return (
                   <div className="mt-3 space-y-1">
                     <div className="flex justify-between text-[10px]" style={{ color: 'var(--tx-faint)' }}>
                       <span>{utilPct}% used</span>
-                      <span>{available.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} available</span>
+                      <span>{fromCents(availableCents).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} available</span>
                     </div>
                     <div className="rounded-full overflow-hidden" style={{ height: 4, backgroundColor: 'var(--border-warm-md)' }}>
                       <div style={{ width: `${utilPct}%`, height: '100%', backgroundColor: barColor, borderRadius: 9999, transition: 'width 0.3s' }} />
                     </div>
                     <p className="text-[10px]" style={{ color: 'var(--tx-faint)' }}>
-                      of {acc.creditLimit.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} limit
+                      of {fromCents(acc.creditLimit).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} limit
                     </p>
                   </div>
                 )

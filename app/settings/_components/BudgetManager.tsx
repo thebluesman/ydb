@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { X, ChevronDown } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
+import { fromCents, toCents } from '@/lib/money'
 
 type Budget = { id: number; category: string; monthlyLimit: number }
 type Category = { id: number; name: string; color: string }
@@ -39,7 +40,8 @@ export function BudgetManager({
       const res = await fetch('/api/budgets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: newCategory, monthlyLimit: limit }),
+        // Server stores cents; user entered major units.
+        body: JSON.stringify({ category: newCategory, monthlyLimit: toCents(limit) }),
       })
       if (!res.ok) throw new Error(await res.text())
       const budget = await res.json()
@@ -83,7 +85,7 @@ export function BudgetManager({
                 <tr key={b.id} style={{ borderTop: i > 0 ? '1px solid var(--border-warm)' : 'none' }}>
                   <td className="px-3 py-2" style={{ color: 'var(--tx-primary)' }}>{b.category}</td>
                   <td className="px-3 py-2 text-right font-mono text-xs" style={{ color: 'var(--tx-secondary)' }}>
-                    {b.monthlyLimit.toFixed(2)}
+                    {fromCents(b.monthlyLimit).toFixed(2)}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <button

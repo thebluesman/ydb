@@ -7,6 +7,7 @@ import { DatePicker } from '@/app/_components/DatePicker'
 import { TransferLinkModal } from './TransferLinkModal'
 import { ReimburseLinkModal } from './ReimburseLinkModal'
 import { SplitForm } from './SplitForm'
+import { fromCents, toCents } from '@/lib/money'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
 
@@ -197,10 +198,11 @@ export function LedgerRow({
     t.transactionType === 'transfer' && t.amount >= 0 ? 'in' : 'out'
 
   const [transferDirection, setTransferDirection] = useState<'in' | 'out'>(initDirection(transaction))
+  // absAmount is kept in major units for the input UX; converted to cents on save.
   const [draft, setDraft] = useState({
     date: formatDate(transaction.date),
     description: transaction.description,
-    absAmount: Math.abs(transaction.amount),
+    absAmount: fromCents(Math.abs(transaction.amount)),
     transactionType: transaction.transactionType,
     category: transaction.category,
     accountId: transaction.accountId,
@@ -213,12 +215,13 @@ export function LedgerRow({
   const set = (field: string, value: string | number | null) =>
     setDraft((prev) => ({ ...prev, [field]: value }))
 
+  // Returns integer cents matching the API contract.
   const computeSignedAmount = () => {
-    const abs = draft.absAmount
-    if (draft.transactionType === 'debit') return -Math.abs(abs)
-    if (draft.transactionType === 'credit') return Math.abs(abs)
+    const absCents = toCents(Math.abs(draft.absAmount))
+    if (draft.transactionType === 'debit') return -absCents
+    if (draft.transactionType === 'credit') return absCents
     // transfer
-    return transferDirection === 'in' ? Math.abs(abs) : -Math.abs(abs)
+    return transferDirection === 'in' ? absCents : -absCents
   }
 
   const handleSave = async () => {
@@ -274,7 +277,7 @@ export function LedgerRow({
     setDraft({
       date: formatDate(transaction.date),
       description: transaction.description,
-      absAmount: Math.abs(transaction.amount),
+      absAmount: fromCents(Math.abs(transaction.amount)),
       transactionType: transaction.transactionType,
       category: transaction.category,
       accountId: transaction.accountId,
@@ -350,9 +353,11 @@ export function LedgerRow({
 
   const rowBorder: React.CSSProperties = { borderTop: '1px solid var(--border-warm)' }
 
+  // Both sides are integer cents; sum is cents.
   const netAmount = transaction.reimbursementTx
     ? transaction.amount + transaction.reimbursementTx.amount
     : null
+  const fmtMoney = (cents: number) => fromCents(Math.abs(cents)).toFixed(2)
 
   // ── Shared rule suggestion strip ──────────────────────────────────────────────
   const ruleSuggestionRow = ruleSuggestion ? (
@@ -735,11 +740,11 @@ export function LedgerRow({
         {/* 4 · Amount */}
         <td className="px-3 py-3 font-mono whitespace-nowrap" style={{ letterSpacing: '-0.275px' }}>
           <div className="text-sm" style={{ color: amtColor(transaction.amount) }}>
-            {transaction.amount < 0 ? '−' : '+'}{currency}{Math.abs(transaction.amount).toFixed(2)}
+            {transaction.amount < 0 ? '−' : '+'}{currency}{fmtMoney(transaction.amount)}
           </div>
           {netAmount !== null && (
             <div className="text-[10px] font-normal mt-0.5" style={{ color: 'var(--tx-secondary)', letterSpacing: 0 }}>
-              net {netAmount < 0 ? '−' : '+'}{currency}{Math.abs(netAmount).toFixed(2)}
+              net {netAmount < 0 ? '−' : '+'}{currency}{fmtMoney(netAmount)}
             </div>
           )}
         </td>
@@ -868,7 +873,7 @@ export function LedgerRow({
             {leg.description}
           </td>
           <td className="px-3 py-2.5 text-sm font-mono whitespace-nowrap" style={{ color: amtColor(leg.amount), letterSpacing: '-0.275px' }}>
-            {leg.amount < 0 ? '−' : '+'}{currency}{Math.abs(leg.amount).toFixed(2)}
+            {leg.amount < 0 ? '−' : '+'}{currency}{fmtMoney(leg.amount)}
           </td>
           <td className="px-3 py-2.5 text-sm" style={{ color: 'var(--tx-faint)' }}>
             {leg.category}

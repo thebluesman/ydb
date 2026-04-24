@@ -1,5 +1,5 @@
-// TODO: migrate monetary fields (amount, openingBalance, creditLimit, monthlyLimit)
-// from Float to Int (store cents) to avoid floating point rounding errors in summations.
+// Monetary fields are stored as integer cents to avoid floating-point
+// drift on summations. Convert at the API boundary with lib/money.ts.
 
 datasource db {
   provider = "sqlite"
@@ -15,9 +15,9 @@ model Account {
   accountType        String         // "current" | "savings" | "cash" | "credit" | "personal_loan" | "auto_loan"
   currency           String         @default("GBP")
   isActive           Boolean        @default(true)
-  openingBalance     Float          @default(0)
+  openingBalance     Int            @default(0)
   openingBalanceDate DateTime?
-  creditLimit        Float?
+  creditLimit        Int?
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   transactions       Transaction[]
@@ -37,7 +37,7 @@ model ImportRecord {
 model Transaction {
   id                  Int           @id @default(autoincrement())
   date                DateTime
-  amount              Float
+  amount              Int
   description         String        // human-readable display name (may be set by a pattern)
   originalDescription String?       // raw text from PDF/LLM before pattern substitution
   transactionType     String        @default("debit")  // "credit" | "debit" | "transfer"
@@ -61,6 +61,13 @@ model Transaction {
   transferCounterpartAccount       Account?      @relation("TransferCounterpart", fields: [transferCounterpartAccountId], references: [id], onDelete: SetNull)
   createdAt                        DateTime      @default(now())
   updatedAt                        DateTime      @updatedAt
+
+  @@index([date])
+  @@index([accountId, date])
+  @@index([status])
+  @@index([category])
+  @@index([parentTransactionId])
+  @@index([linkedTransferId])
 }
 
 model ChatSession {
@@ -96,7 +103,7 @@ model Setting {
 model Budget {
   id           Int    @id @default(autoincrement())
   category     String @unique
-  monthlyLimit Float
+  monthlyLimit Int
 }
 
 model VendorRule {
@@ -107,7 +114,7 @@ model VendorRule {
   category        String                          // must match a Category.name
   direction       String  @default("either")      // "either" | "debit" | "credit"  — input gate
   transactionType String?                         // if set, overrides the inferred type: "credit" | "debit" | "transfer"
-  minAmount       Float?                          // optional lower bound on abs(amount)
-  maxAmount       Float?                          // optional upper bound on abs(amount)
+  minAmount       Int?                            // optional lower bound on abs(amount), in cents
+  maxAmount       Int?                            // optional upper bound on abs(amount), in cents
   priority        Int     @default(0)             // lower number = higher priority
 }

@@ -7,6 +7,7 @@ import * as Select from '@radix-ui/react-select'
 import { Check, ChevronDown } from 'lucide-react'
 import { CategoryManager } from './CategoryManager'
 import { DatePicker } from '@/app/_components/DatePicker'
+import { fromCents, toCents } from '@/lib/money'
 
 type Account = {
   id?: number
@@ -48,15 +49,17 @@ export function AccountsForm({
   baseCurrency: string
   onCategoriesChange?: (cats: Category[]) => void
 }) {
+  // Server stores money as integer cents; the form works in major units so
+  // users see familiar numbers (e.g. 1234.56 rather than 123456).
   const [accounts, setAccounts] = useState<Account[]>(() =>
     initialAccounts.length > 0
       ? initialAccounts.map((a) => ({
           ...a,
-          openingBalance: (a as Account).openingBalance ?? 0,
+          openingBalance: fromCents((a as Account).openingBalance ?? 0),
           openingBalanceDate: (a as Account).openingBalanceDate
             ? new Date((a as Account).openingBalanceDate).toISOString().split('T')[0]
             : '',
-          creditLimit: (a as Account).creditLimit ?? null,
+          creditLimit: (a as Account).creditLimit != null ? fromCents((a as Account).creditLimit as number) : null,
           currency: (a as Account).currency || baseCurrency,
         }))
       : [BLANK_ACCOUNT(baseCurrency)]
@@ -72,14 +75,18 @@ export function AccountsForm({
     setSavingIdx(i)
     setError(null)
     try {
+      // Convert the major-unit form state to integer cents at the API boundary.
       const payload = {
         name: account.name,
         accountType: account.accountType,
         currency: account.currency,
         isActive: account.isActive,
-        openingBalance: account.openingBalance,
+        openingBalance: toCents(account.openingBalance),
         openingBalanceDate: account.openingBalanceDate || null,
-        creditLimit: account.accountType === 'credit' ? (account.creditLimit ?? null) : null,
+        creditLimit:
+          account.accountType === 'credit' && account.creditLimit != null
+            ? toCents(account.creditLimit)
+            : null,
       }
       if (account.id) {
         const res = await fetch(`/api/accounts/${account.id}`, {

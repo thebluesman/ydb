@@ -5,6 +5,16 @@ import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, Ro
 import * as Select from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
 import { DatePicker } from '@/app/_components/DatePicker'
+import { fromCents, toCents } from '@/lib/money'
+
+// Excel/Sheets treat cells beginning with =, +, -, @, \t, \r as formulas.
+// Prefixing with a single quote neutralises that without breaking the value.
+function csvCell(raw: string | number | null | undefined): string {
+  const s = raw == null ? '' : String(raw)
+  const needsEscape = /^[=+\-@\t\r]/.test(s)
+  const safe = needsEscape ? `'${s}` : s
+  return `"${safe.replace(/"/g, '""')}"`
+}
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
 
@@ -188,18 +198,20 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
 
   const handleExport = () => {
     const headers = ['Date', 'Description', 'Original Description', 'Type', 'Amount', 'Category', 'Account', 'Status', 'Notes']
+    // Every cell gets quote-wrapped + formula-sigil escaping. Amount shifts
+    // from cents back to major units for the CSV view.
     const rows = sorted.map((t) => [
       new Date(t.date).toISOString().split('T')[0],
-      `"${(t.description ?? '').replace(/"/g, '""')}"`,
-      `"${(t.originalDescription ?? '').replace(/"/g, '""')}"`,
+      t.description ?? '',
+      t.originalDescription ?? '',
       t.transactionType,
-      t.amount.toFixed(2),
+      fromCents(t.amount).toFixed(2),
       t.category,
       t.account.name,
       t.status,
-      `"${(t.notes ?? '').replace(/"/g, '""')}"`,
-    ])
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
+      t.notes ?? '',
+    ].map(csvCell))
+    const csv = [headers.map(csvCell).join(','), ...rows.map((r) => r.join(','))].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -252,10 +264,12 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     //   credit   → positive (money entered the account)
     //   transfer → signed by direction on the originating side; the API
     //              creates the counterpart row with the opposite sign.
+    // API expects integer cents — convert at the boundary.
+    const absCents = toCents(amt)
     const signedAmount =
-      addType === 'debit' ? -amt
-      : addType === 'credit' ? amt
-      : addTransferDirection === 'out' ? -amt : amt
+      addType === 'debit' ? -absCents
+      : addType === 'credit' ? absCents
+      : addTransferDirection === 'out' ? -absCents : absCents
 
     setAddSaving(true); setAddError('')
     try {
@@ -329,9 +343,9 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
         {[
-          { label: 'Income',   value: `+${currency} ${stats.income.toFixed(2)}`,   sub: `${stats.incomeCount} transaction${stats.incomeCount !== 1 ? 's' : ''}`,   bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
-          { label: 'Expenses', value: `−${currency} ${stats.expenses.toFixed(2)}`, sub: `${stats.expenseCount} transaction${stats.expenseCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
-          { label: 'Net',      value: `${stats.net >= 0 ? '+' : '−'}${currency} ${Math.abs(stats.net).toFixed(2)}`, sub: `${filtered.length} shown`, bg: 'var(--bg-stat-net)', tx: stats.net >= 0 ? 'var(--tx-stat-net-pos)' : 'var(--tx-stat-net-neg)' },
+          { label: 'Income',   value: `+${currency} ${fromCents(stats.income).toFixed(2)}`,   sub: `${stats.incomeCount} transaction${stats.incomeCount !== 1 ? 's' : ''}`,   bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
+          { label: 'Expenses', value: `−${currency} ${fromCents(stats.expenses).toFixed(2)}`, sub: `${stats.expenseCount} transaction${stats.expenseCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
+          { label: 'Net',      value: `${stats.net >= 0 ? '+' : '−'}${currency} ${fromCents(Math.abs(stats.net)).toFixed(2)}`, sub: `${filtered.length} shown`, bg: 'var(--bg-stat-net)', tx: stats.net >= 0 ? 'var(--tx-stat-net-pos)' : 'var(--tx-stat-net-neg)' },
         ].map(({ label, value, sub, bg, tx }) => (
           <div key={label} className="card-hover p-5 rounded-[8px]" style={{ backgroundColor: bg, border: '1px solid var(--border-warm)' }}>
             <p className="text-[11px] font-medium uppercase tracking-[0.048px] mb-2" style={{ color: 'var(--tx-secondary)' }}>{label}</p>
@@ -356,7 +370,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
           <span>
             {pendingReimbursements.length} pending reimbursement{pendingReimbursements.length !== 1 ? 's' : ''} awaiting settlement
             {' — '}
-            {currency}{pendingReimbursements.reduce((s, t) => s + Math.abs(t.amount), 0).toFixed(2)} outstanding
+            {currency}{fromCents(pendingReimbursements.reduce((s, t) => s + Math.abs(t.amount), 0)).toFixed(2)} outstanding
           </span>
           <span className="ml-auto text-xs" style={{ color: 'var(--tx-secondary)' }}>
             {showPendingOnly ? 'Show all' : 'Filter'}

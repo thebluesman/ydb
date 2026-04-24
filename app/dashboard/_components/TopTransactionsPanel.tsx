@@ -1,9 +1,10 @@
 'use client'
 
 import type { TopTransaction } from '../page'
+import { fromCents } from '@/lib/money'
 
-function fmt(v: number, currency: string) {
-  return Math.abs(v).toLocaleString('en-US', { style: 'currency', currency, maximumFractionDigits: 2 })
+function fmt(cents: number, currency: string) {
+  return fromCents(Math.abs(cents)).toLocaleString('en-US', { style: 'currency', currency, maximumFractionDigits: 2 })
 }
 
 export function TopTransactionsPanel({

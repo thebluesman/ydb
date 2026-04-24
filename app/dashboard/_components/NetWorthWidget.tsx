@@ -12,8 +12,11 @@ import {
 } from 'recharts'
 import type { AccountBalance, CashFlowRow } from '../page'
 import { isAsset, isLiability } from '@/lib/accounts'
+import { fromCents } from '@/lib/money'
 
-function fmtShort(v: number) {
+// Input arrives as integer cents.
+function fmtShort(cents: number) {
+  const v = fromCents(cents)
   if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}k`
   return v.toFixed(0)
 }
@@ -60,7 +63,7 @@ export function NetWorthWidget({
     color: 'var(--tx-primary)',
   }
 
-  const fmt = (v: number) => `${currency} ${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const fmt = (cents: number) => `${currency} ${fromCents(Math.abs(cents)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
   return (
     <div className="space-y-5">

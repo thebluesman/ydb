@@ -1,5 +1,7 @@
 'use client'
 
+import { fromCents } from '@/lib/money'
+
 type BudgetData = { category: string; budget: number; actual: number }
 
 function barColor(pct: number) {
@@ -28,7 +30,7 @@ export function BudgetWidget({
                 {b.category}
               </span>
               <span className="text-xs font-mono" style={{ color }}>
-                {currency} {b.actual.toFixed(0)} / {b.budget.toFixed(0)}
+                {currency} {fromCents(b.actual).toFixed(0)} / {fromCents(b.budget).toFixed(0)}
                 {pct > 1 && (
                   <span className="ml-1 text-[10px]">+{((pct - 1) * 100).toFixed(0)}% over</span>
                 )}

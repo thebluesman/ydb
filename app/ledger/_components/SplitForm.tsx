@@ -2,10 +2,13 @@
 
 import { useState } from 'react'
 import { Plus, X } from 'lucide-react'
+import { fromCents, toCents } from '@/lib/money'
 
 type SplitLeg = { amount: number; category: string; description: string }
 type Category = { id: number; name: string; color: string }
 
+// parentAmount comes in as integer cents; legs keep amounts in major units for
+// the input UX and convert to cents at POST time.
 export function SplitForm({
   parentId,
   parentAmount,
@@ -23,8 +26,9 @@ export function SplitForm({
   onSave: (updated: object) => void
   onCancel: () => void
 }) {
+  const parentMajor = fromCents(parentAmount)
   const [legs, setLegs] = useState<SplitLeg[]>([
-    { amount: parentAmount, category: parentCategory, description: parentDescription },
+    { amount: parentMajor, category: parentCategory, description: parentDescription },
     { amount: 0, category: categories[0]?.name ?? 'Other', description: parentDescription },
   ])
   const [saving, setSaving] = useState(false)
@@ -48,18 +52,25 @@ export function SplitForm({
     setLegs((prev) => prev.filter((_, idx) => idx !== i))
   }
 
-  const total = legs.reduce((s, l) => s + (Number(l.amount) || 0), 0)
-  const remaining = parentAmount - total
-  const isValid = Math.abs(remaining) < 0.01
+  // Sum in cents so rounding drift can't accumulate — the server now requires
+  // exact integer equality.
+  const totalCents = legs.reduce((s, l) => s + toCents(Number(l.amount) || 0), 0)
+  const remainingCents = parentAmount - totalCents
+  const isValid = remainingCents === 0
 
   const handleSave = async () => {
-    if (!isValid) { setError(`Amounts must sum to ${parentAmount.toFixed(2)}. Remaining: ${remaining.toFixed(2)}`); return }
+    if (!isValid) {
+      setError(`Amounts must sum to ${parentMajor.toFixed(2)}. Remaining: ${fromCents(remainingCents).toFixed(2)}`)
+      return
+    }
     setSaving(true); setError('')
     try {
       const res = await fetch(`/api/transactions/${parentId}/split`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ legs: legs.map((l) => ({ ...l, amount: Number(l.amount) })) }),
+        body: JSON.stringify({
+          legs: legs.map((l) => ({ ...l, amount: toCents(Number(l.amount) || 0) })),
+        }),
       })
       if (!res.ok) throw new Error(await res.json().then((e) => e.error ?? res.statusText))
       onSave(await res.json())
@@ -81,13 +92,13 @@ export function SplitForm({
             <div className="flex items-center justify-between mb-1">
               <p className="text-xs font-medium" style={{ color: 'var(--tx-secondary)' }}>
                 Split transaction — amounts must sum to{' '}
-                <span className="font-mono" style={{ color: amtColor(parentAmount) }}>
-                  {parentAmount < 0 ? '−' : '+'}{Math.abs(parentAmount).toFixed(2)}
+                <span className="font-mono" style={{ color: amtColor(parentMajor) }}>
+                  {parentMajor < 0 ? '−' : '+'}{Math.abs(parentMajor).toFixed(2)}
                 </span>
               </p>
               {!isValid && (
                 <span className="text-xs font-mono" style={{ color: 'var(--tx-error)' }}>
-                  Remaining: {remaining > 0 ? '+' : ''}{remaining.toFixed(2)}
+                  Remaining: {remainingCents > 0 ? '+' : ''}{fromCents(remainingCents).toFixed(2)}
                 </span>
               )}
             </div>
