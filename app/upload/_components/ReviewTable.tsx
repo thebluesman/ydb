@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { memo, useCallback, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { X, ChevronDown, Plus, Check } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
@@ -34,22 +34,45 @@ const selectContent: React.CSSProperties = {
 // ── Row Text Input (local state to avoid full-table re-renders on each keystroke) ──
 
 function RowTextInput({ value, onChange, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & { value: string; onChange: (v: string) => void }) {
-  const [local, setLocal] = useState(value)
-  const externalRef = useRef(value)
-  // Sync if the value was changed from outside (e.g. reset)
-  if (externalRef.current !== value && local !== value) {
-    externalRef.current = value
-    setLocal(value)
+  // Derived-state pattern: store the externally-supplied value alongside local
+  // edits so we can detect an external change and reset without an effect.
+  const [state, setState] = useState({ external: value, local: value })
+  if (state.external !== value) {
+    setState({ external: value, local: value })
   }
   return (
     <input
       {...props}
-      value={local}
-      onChange={(e) => setLocal(e.target.value)}
+      value={state.local}
+      onChange={(e) => setState((s) => ({ ...s, local: e.target.value }))}
       onBlur={(e) => {
-        onChange(local)
+        onChange(state.local)
         props.onBlur?.(e)
       }}
+    />
+  )
+}
+
+function RowAmountInput({ value, onCommit, style, className }: {
+  value: number
+  onCommit: (v: number) => void
+  style: React.CSSProperties
+  className: string
+}) {
+  const [state, setState] = useState({ external: value, local: String(Math.abs(value)) })
+  if (state.external !== value && parseFloat(state.local) !== Math.abs(value)) {
+    setState({ external: value, local: String(Math.abs(value)) })
+  }
+  return (
+    <input
+      type="number"
+      step="0.01"
+      min="0"
+      value={state.local}
+      onChange={(e) => setState((s) => ({ ...s, local: e.target.value }))}
+      onBlur={() => onCommit(Math.abs(parseFloat(state.local) || 0))}
+      className={className}
+      style={style}
     />
   )
 }
@@ -502,6 +525,323 @@ function TypeSelect({ value, onChange }: { value: string; onChange: (v: string) 
   )
 }
 
+// ── Row (memoized) ────────────────────────────────────────────────────────────
+//
+// Each row owns local state for its text inputs (RowTextInput / RowAmountInput)
+// and only commits to the parent on blur. With the row also wrapped in
+// React.memo, an edit to one row no longer re-renders the other rows or their
+// nested Radix Select trees — which is what was hanging the page on large
+// statements.
+
+type RowProps = {
+  draft: DraftTransaction
+  isFirst: boolean
+  isDuplicate: boolean
+  ruleSuggestion: RuleSuggestion | null
+  transferDirection: 'in' | 'out'
+  isNotesExpanded: boolean
+  savingRule: boolean
+  categories: Category[]
+  accounts: Account[]
+  onUpdate: (id: string, field: keyof DraftTransaction, value: string | number | null) => void
+  onRemove: (id: string) => void
+  onTypeChange: (id: string, type: string) => void
+  onTransferDirChange: (id: string, dir: 'in' | 'out') => void
+  onCategoryChange: (id: string, cat: string) => void
+  onExpandNotes: (id: string) => void
+  onDismissDuplicate: (id: string) => void
+  onAddCategoryForRow: (id: string) => void
+  onAddAccountForRow: (id: string) => void
+  onSaveRule: (id: string) => void
+  onDismissRule: (id: string) => void
+  onUpdateRuleField: (id: string, field: keyof RuleSuggestion, value: string) => void
+}
+
+const Row = memo(function Row({
+  draft: d, isFirst, isDuplicate, ruleSuggestion, transferDirection,
+  isNotesExpanded, savingRule, categories, accounts,
+  onUpdate, onRemove, onTypeChange, onTransferDirChange,
+  onCategoryChange, onExpandNotes, onDismissDuplicate,
+  onAddCategoryForRow, onAddAccountForRow,
+  onSaveRule, onDismissRule, onUpdateRuleField,
+}: RowProps) {
+  return (
+    <div
+      style={{
+        borderTop: isFirst ? undefined : '1px solid var(--border-warm)',
+        backgroundColor: 'var(--bg-card)',
+      }}
+    >
+      {isDuplicate && (
+        <div
+          className="flex items-center justify-between px-4 py-1.5"
+          style={{ backgroundColor: 'var(--bg-badge-review)', borderBottom: '1px solid var(--border-warm)' }}
+        >
+          <span className="text-xs" style={{ color: 'var(--tx-badge-review)' }}>
+            Possible duplicate — verify before committing
+          </span>
+          <button
+            onClick={() => onDismissDuplicate(d._id)}
+            className="text-xs underline transition-opacity hover:opacity-70"
+            style={{ color: 'var(--tx-badge-review)' }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      <div className="flex gap-4 px-4 py-3 items-start">
+        <div className="shrink-0 space-y-2" style={{ width: 148 }}>
+          <DatePicker
+            value={d.date}
+            onChange={(v) => onUpdate(d._id, 'date', v)}
+            style={{ width: '100%' }}
+          />
+          <TypeSelect
+            value={d.transactionType}
+            onChange={(v) => onTypeChange(d._id, v)}
+          />
+        </div>
+
+        <div className="flex-1 min-w-0 space-y-2">
+          <RowTextInput
+            type="text"
+            value={d.description}
+            onChange={(v) => onUpdate(d._id, 'description', v)}
+            placeholder="Description"
+            className={inputCls}
+            style={inputStyle}
+          />
+          {d.originalDescription && d.originalDescription !== d.description && (
+            <div
+              className="text-[11px] truncate px-0.5"
+              style={{ color: 'var(--tx-faint)' }}
+              title={d.originalDescription}
+            >
+              {d.originalDescription}
+            </div>
+          )}
+          {isNotesExpanded ? (
+            <RowTextInput
+              type="text"
+              value={d.notes}
+              onChange={(v) => onUpdate(d._id, 'notes', v)}
+              placeholder="Notes (optional)"
+              className={inputCls}
+              style={{ ...inputStyle, fontStyle: 'italic' }}
+              autoFocus={!d.notes}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => onExpandNotes(d._id)}
+              className="text-xs py-0.5 text-left transition-opacity duration-100 hover:opacity-80"
+              style={{ color: 'var(--tx-faint)' }}
+            >
+              + Add note
+            </button>
+          )}
+        </div>
+
+        <div className="shrink-0 space-y-2" style={{ width: 176 }}>
+          <RowAmountInput
+            value={d.amount}
+            onCommit={(abs) => {
+              let signed: number
+              if (d.transactionType === 'debit') signed = -abs
+              else if (d.transactionType === 'credit') signed = abs
+              else signed = transferDirection === 'in' ? abs : -abs
+              onUpdate(d._id, 'amount', signed)
+            }}
+            className={`${inputCls} font-mono text-right`}
+            style={{ ...inputStyle, color: amountColor(d.amount, d.transactionType) }}
+          />
+          {d.transactionType === 'transfer' && (
+            <Select.Root
+              value={transferDirection}
+              onValueChange={(dir) => onTransferDirChange(d._id, dir as 'in' | 'out')}
+            >
+              <Select.Trigger
+                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                style={inputStyle}
+              >
+                <Select.Value />
+                <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+                  <ChevronDown size={12} />
+                </Select.Icon>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
+                  <Select.Viewport className="p-1">
+                    {[{ value: 'out', label: '↑ Out' }, { value: 'in', label: '↓ In' }].map((opt) => (
+                      <Select.Item
+                        key={opt.value} value={opt.value}
+                        className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                        style={{ color: 'var(--tx-primary)' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <Select.ItemText>{opt.label}</Select.ItemText>
+                      </Select.Item>
+                    ))}
+                  </Select.Viewport>
+                </Select.Content>
+              </Select.Portal>
+            </Select.Root>
+          )}
+          <CategorySelect
+            value={d.category}
+            categories={categories}
+            onChange={(v) => onCategoryChange(d._id, v)}
+            onAddNew={() => onAddCategoryForRow(d._id)}
+          />
+          <AccountSelect
+            value={d.accountId}
+            accounts={accounts}
+            onChange={(id) => onUpdate(d._id, 'accountId', id)}
+            onAddNew={() => onAddAccountForRow(d._id)}
+          />
+          {d.transactionType === 'transfer' && (
+            <Select.Root
+              value={String(d.transferCounterpartAccountId ?? '__none__')}
+              onValueChange={(v) => onUpdate(d._id, 'transferCounterpartAccountId', v === '__none__' ? null : parseInt(v))}
+            >
+              <Select.Trigger
+                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
+                style={inputStyle}
+              >
+                <Select.Value placeholder={transferDirection === 'out' ? 'To account…' : 'From account…'} />
+                <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+                  <ChevronDown size={12} />
+                </Select.Icon>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
+                  <Select.Viewport className="p-1">
+                    <Select.Item
+                      value="__none__"
+                      className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                      style={{ color: 'var(--tx-faint)' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <Select.ItemText>— none —</Select.ItemText>
+                    </Select.Item>
+                    {accounts
+                      .filter((a) => a.id !== d.accountId)
+                      .map((a) => (
+                        <Select.Item
+                          key={a.id} value={String(a.id)}
+                          className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                          style={{ color: 'var(--tx-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                        >
+                          <Select.ItemText>{a.name}</Select.ItemText>
+                        </Select.Item>
+                      ))}
+                  </Select.Viewport>
+                </Select.Content>
+              </Select.Portal>
+            </Select.Root>
+          )}
+        </div>
+
+        <button
+          onClick={() => onRemove(d._id)}
+          className="shrink-0 mt-0.5 transition-opacity hover:opacity-60"
+          style={{ color: 'var(--tx-tertiary)' }}
+          aria-label="Remove row"
+        >
+          <X size={15} />
+        </button>
+      </div>
+
+      {ruleSuggestion && (
+        <div
+          className="px-4 py-2.5 space-y-2"
+          style={{ borderTop: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-card-alt)' }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium" style={{ color: 'var(--tx-secondary)' }}>
+              Save vendor rule
+            </span>
+            <span className="text-xs px-1.5 py-0.5 rounded-[4px]" style={{ backgroundColor: 'var(--bg-badge-committed)', color: 'var(--tx-badge-committed)' }}>
+              {ruleSuggestion.category}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => onSaveRule(d._id)}
+                disabled={savingRule}
+                className="px-2.5 py-0.5 text-xs rounded-[4px] font-medium disabled:opacity-40"
+                style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+              >
+                {savingRule ? '…' : 'Save'}
+              </button>
+              <button
+                onClick={() => onDismissRule(d._id)}
+                className="transition-opacity hover:opacity-60"
+                style={{ color: 'var(--tx-tertiary)' }}
+              >
+                <X size={11} />
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="text"
+              defaultValue={ruleSuggestion.pattern}
+              onBlur={(e) => onUpdateRuleField(d._id, 'pattern', e.target.value)}
+              placeholder="Pattern"
+              className="flex-1 min-w-0 px-2 py-1 text-xs rounded-[4px] outline-none font-mono"
+              style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              title="Text pattern to match against transaction descriptions"
+            />
+            <input
+              type="text"
+              defaultValue={ruleSuggestion.vendor}
+              onBlur={(e) => onUpdateRuleField(d._id, 'vendor', e.target.value)}
+              placeholder="Vendor name"
+              className="w-32 px-2 py-1 text-xs rounded-[4px] outline-none"
+              style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+              title="Display name for this vendor"
+            />
+            <Select.Root value={ruleSuggestion.matchType} onValueChange={(v) => onUpdateRuleField(d._id, 'matchType', v)}>
+              <Select.Trigger
+                className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-[4px] outline-none whitespace-nowrap"
+                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
+                title="How to match the pattern"
+              >
+                <Select.Value />
+                <Select.Icon className="ml-1 shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+                  <ChevronDown size={10} />
+                </Select.Icon>
+              </Select.Trigger>
+              <Select.Portal>
+                <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
+                  <Select.Viewport className="p-1">
+                    {['contains', 'starts-with', 'ends-with', 'exact', 'regex'].map((mt) => (
+                      <Select.Item
+                        key={mt} value={mt}
+                        className="px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
+                        style={{ color: 'var(--tx-primary)' }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                      >
+                        <Select.ItemText>{mt}</Select.ItemText>
+                      </Select.Item>
+                    ))}
+                  </Select.Viewport>
+                </Select.Content>
+              </Select.Portal>
+            </Select.Root>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+})
+
 // ── ReviewTable ───────────────────────────────────────────────────────────────
 
 export function ReviewTable({ drafts, accounts: initialAccounts, categories: initialCategories, onChange, onCommit, onDiscard }: {
@@ -535,22 +875,18 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
   const [transferDirections, setTransferDirections] = useState<Map<string, 'in' | 'out'>>(
     () => new Map(drafts.map((d) => [d._id, d.amount >= 0 ? 'in' : 'out'] as [string, 'in' | 'out']))
   )
-  const setTransferDirection = (id: string, dir: 'in' | 'out') =>
-    setTransferDirections((prev) => new Map(prev).set(id, dir))
-  const getTransferDirection = (d: DraftTransaction): 'in' | 'out' =>
-    transferDirections.get(d._id) ?? (d.amount >= 0 ? 'in' : 'out')
 
-  const computeSignedAmount = (d: DraftTransaction): number => {
-    const abs = Math.abs(d.amount)
-    if (d.transactionType === 'debit') return -abs
-    if (d.transactionType === 'credit') return abs
-    return getTransferDirection(d) === 'in' ? abs : -abs
-  }
+  // Refs let stable useCallback handlers read latest state without listing it
+  // as a dep. Without this, every keystroke would invalidate every callback
+  // and defeat React.memo on rows.
+  const draftsRef = useRef(drafts); draftsRef.current = drafts
+  const onChangeRef = useRef(onChange); onChangeRef.current = onChange
+  const ruleSuggestionsRef = useRef(ruleSuggestions); ruleSuggestionsRef.current = ruleSuggestions
+  const dismissedRulesRef = useRef(dismissedRules); dismissedRulesRef.current = dismissedRules
+  const transferDirRef = useRef(transferDirections); transferDirRef.current = transferDirections
 
   useEffect(() => {
     if (drafts.length === 0) return
-    // Draft amounts are in major units; the duplicate check compares against
-    // DB rows stored as integer cents.
     const candidates = drafts.map((d) => ({
       _id: d._id, date: d.date, amount: toCents(d.amount),
       description: d.description, accountId: d.accountId,
@@ -565,19 +901,17 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
       .catch(() => { /* silent */ })
   }, [drafts.length])
 
-  const update = (id: string, field: keyof DraftTransaction, value: string | number | null) =>
-    onChange(drafts.map((d) => (d._id === id ? { ...d, [field]: value } : d)))
+  const update = useCallback((id: string, field: keyof DraftTransaction, value: string | number | null) => {
+    onChangeRef.current(draftsRef.current.map((d) => (d._id === id ? { ...d, [field]: value } : d)))
+  }, [])
 
-  const updateFields = (id: string, fields: Partial<DraftTransaction>) =>
-    onChange(drafts.map((d) => (d._id === id ? { ...d, ...fields } : d)))
-
-  const remove = (id: string) => {
-    onChange(drafts.filter((d) => d._id !== id))
+  const remove = useCallback((id: string) => {
+    onChangeRef.current(draftsRef.current.filter((d) => d._id !== id))
     setDuplicateIds((prev) => { const n = new Set(prev); n.delete(id); return n })
     setDismissedIds((prev) => { const n = new Set(prev); n.delete(id); return n })
     setExpandedNotes((prev) => { const n = new Set(prev); n.delete(id); return n })
     setTransferDirections((prev) => { const n = new Map(prev); n.delete(id); return n })
-  }
+  }, [])
 
   const addRow = () => onChange([...drafts, {
     _id: crypto.randomUUID(),
@@ -595,13 +929,18 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
     catch (e) { setError(String(e)); setCommitting(false) }
   }
 
-  const dismissDuplicate = (id: string) =>
+  const dismissDuplicate = useCallback((id: string) => {
     setDismissedIds((prev) => new Set([...prev, id]))
+  }, [])
 
-  const handleCategoryChange = (id: string, newCategory: string) => {
-    update(id, 'category', newCategory)
-    if (dismissedRules.has(id)) return
-    const draft = drafts.find((d) => d._id === id)
+  const expandNotes = useCallback((id: string) => {
+    setExpandedNotes((prev) => new Set([...prev, id]))
+  }, [])
+
+  const handleCategoryChange = useCallback((id: string, newCategory: string) => {
+    onChangeRef.current(draftsRef.current.map((d) => (d._id === id ? { ...d, category: newCategory } : d)))
+    if (dismissedRulesRef.current.has(id)) return
+    const draft = draftsRef.current.find((d) => d._id === id)
     const rawText = (draft?.originalDescription || draft?.description || '').trim()
     const displayName = (draft?.description || '').trim()
     if (!rawText) return
@@ -611,24 +950,50 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
       category: newCategory,
       matchType: 'contains',
     }))
-  }
+  }, [])
 
-  const updateRuleSuggestion = (id: string, field: keyof RuleSuggestion, value: string) =>
+  const handleTypeChange = useCallback((id: string, type: string) => {
+    const d = draftsRef.current.find((x) => x._id === id)
+    if (!d) return
+    const abs = Math.abs(d.amount)
+    let newAmount: number
+    if (type === 'debit') newAmount = -abs
+    else if (type === 'credit') newAmount = abs
+    else {
+      const dir = transferDirRef.current.get(id) ?? (d.amount >= 0 ? 'in' : 'out')
+      newAmount = dir === 'in' ? abs : -abs
+    }
+    onChangeRef.current(draftsRef.current.map((x) => x._id === id ? {
+      ...x, transactionType: type, amount: newAmount,
+      ...(type !== 'transfer' ? { transferCounterpartAccountId: null } : {}),
+    } : x))
+  }, [])
+
+  const handleTransferDirChange = useCallback((id: string, dir: 'in' | 'out') => {
+    setTransferDirections((prev) => new Map(prev).set(id, dir))
+    const d = draftsRef.current.find((x) => x._id === id)
+    if (!d) return
+    const abs = Math.abs(d.amount)
+    onChangeRef.current(draftsRef.current.map((x) => x._id === id ? { ...x, amount: dir === 'in' ? abs : -abs } : x))
+  }, [])
+
+  const updateRuleSuggestion = useCallback((id: string, field: keyof RuleSuggestion, value: string) => {
     setRuleSuggestions((prev) => {
       const existing = prev.get(id)
       if (!existing) return prev
       return new Map(prev).set(id, { ...existing, [field]: value })
     })
+  }, [])
 
-  const dismissRuleSuggestion = (id: string) => {
+  const dismissRuleSuggestion = useCallback((id: string) => {
     setRuleSuggestions((prev) => { const n = new Map(prev); n.delete(id); return n })
     setDismissedRules((prev) => new Set([...prev, id]))
-  }
+  }, [])
 
-  const handleSaveRule = async (id: string) => {
-    const suggestion = ruleSuggestions.get(id)
+  const handleSaveRule = useCallback(async (id: string) => {
+    const suggestion = ruleSuggestionsRef.current.get(id)
     if (!suggestion) return
-    const draft = drafts.find((d) => d._id === id)
+    const draft = draftsRef.current.find((d) => d._id === id)
     setSavingRuleId(id)
     try {
       const res = await fetch('/api/vendor-rules', {
@@ -647,7 +1012,10 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
     } catch { /* silent */ } finally {
       setSavingRuleId(null)
     }
-  }
+  }, [dismissRuleSuggestion])
+
+  const openAddCategoryForRow = useCallback((id: string) => setAddCategoryForRow(id), [])
+  const openAddAccountForRow = useCallback((id: string) => setAddAccountForRow(id), [])
 
   const handleCategoryAdded = (cat: Category) => {
     setCategories((prev) => [...prev, cat].sort((a, b) => a.name.localeCompare(b.name)))
@@ -689,311 +1057,32 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
           drafts.map((d, idx) => {
             const isDuplicate = duplicateIds.has(d._id) && !dismissedIds.has(d._id)
             const ruleSuggestion = ruleSuggestions.get(d._id) ?? null
+            const dir = transferDirections.get(d._id) ?? (d.amount >= 0 ? 'in' : 'out')
             return (
-              <div
+              <Row
                 key={d._id}
-                style={{
-                  borderTop: idx > 0 ? '1px solid var(--border-warm)' : undefined,
-                  backgroundColor: 'var(--bg-card)',
-                }}
-              >
-                {/* Duplicate warning strip */}
-                {isDuplicate && (
-                  <div
-                    className="flex items-center justify-between px-4 py-1.5"
-                    style={{ backgroundColor: 'var(--bg-badge-review)', borderBottom: '1px solid var(--border-warm)' }}
-                  >
-                    <span className="text-xs" style={{ color: 'var(--tx-badge-review)' }}>
-                      Possible duplicate — verify before committing
-                    </span>
-                    <button
-                      onClick={() => dismissDuplicate(d._id)}
-                      className="text-xs underline transition-opacity hover:opacity-70"
-                      style={{ color: 'var(--tx-badge-review)' }}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                )}
-
-                {/* Card body */}
-                <div className="flex gap-4 px-4 py-3 items-start">
-                  {/* Left: Date + Type */}
-                  <div className="shrink-0 space-y-2" style={{ width: 148 }}>
-                    <DatePicker
-                      value={d.date}
-                      onChange={(v) => update(d._id, 'date', v)}
-                      style={{ width: '100%' }}
-                    />
-                    <TypeSelect
-                      value={d.transactionType}
-                      onChange={(v) => {
-                        const abs = Math.abs(d.amount)
-                        let newAmount: number
-                        if (v === 'debit') newAmount = -abs
-                        else if (v === 'credit') newAmount = abs
-                        else {
-                          const dir = getTransferDirection(d)
-                          newAmount = dir === 'in' ? abs : -abs
-                        }
-                        updateFields(d._id, {
-                          transactionType: v,
-                          amount: newAmount,
-                          ...(v !== 'transfer' ? { transferCounterpartAccountId: null } : {}),
-                        })
-                      }}
-                    />
-                  </div>
-
-                  {/* Middle: Description + originalDescription + Notes */}
-                  <div className="flex-1 min-w-0 space-y-2">
-                    <RowTextInput
-                      type="text"
-                      value={d.description}
-                      onChange={(v) => update(d._id, 'description', v)}
-                      placeholder="Description"
-                      className={inputCls}
-                      style={inputStyle}
-                    />
-                    {d.originalDescription && d.originalDescription !== d.description && (
-                      <div
-                        className="text-[11px] truncate px-0.5"
-                        style={{ color: 'var(--tx-faint)' }}
-                        title={d.originalDescription}
-                      >
-                        {d.originalDescription}
-                      </div>
-                    )}
-                    {expandedNotes.has(d._id) ? (
-                      <RowTextInput
-                        type="text"
-                        value={d.notes}
-                        onChange={(v) => update(d._id, 'notes', v)}
-                        placeholder="Notes (optional)"
-                        className={inputCls}
-                        style={{ ...inputStyle, fontStyle: 'italic' }}
-                        autoFocus={!d.notes}
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setExpandedNotes((prev) => new Set([...prev, d._id]))}
-                        className="text-xs py-0.5 text-left transition-opacity duration-100 hover:opacity-80"
-                        style={{ color: 'var(--tx-faint)' }}
-                      >
-                        + Add note
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Right: Amount + Direction (transfer) + Category + Account + Counterpart (transfer) */}
-                  <div className="shrink-0 space-y-2" style={{ width: 176 }}>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={Math.abs(d.amount)}
-                        onChange={(e) => {
-                          const abs = Math.abs(parseFloat(e.target.value) || 0)
-                          const signed = computeSignedAmount({ ...d, amount: abs })
-                          update(d._id, 'amount', signed)
-                        }}
-                        className={`${inputCls} font-mono text-right`}
-                        style={{ ...inputStyle, color: amountColor(d.amount, d.transactionType) }}
-                      />
-                    </div>
-                    {d.transactionType === 'transfer' && (
-                      <Select.Root
-                        value={getTransferDirection(d)}
-                        onValueChange={(dir) => {
-                          setTransferDirection(d._id, dir as 'in' | 'out')
-                          const abs = Math.abs(d.amount)
-                          update(d._id, 'amount', dir === 'in' ? abs : -abs)
-                        }}
-                      >
-                        <Select.Trigger
-                          className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
-                          style={inputStyle}
-                        >
-                          <Select.Value />
-                          <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-                            <ChevronDown size={12} />
-                          </Select.Icon>
-                        </Select.Trigger>
-                        <Select.Portal>
-                          <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
-                            <Select.Viewport className="p-1">
-                              {[{ value: 'out', label: '↑ Out' }, { value: 'in', label: '↓ In' }].map((opt) => (
-                                <Select.Item
-                                  key={opt.value} value={opt.value}
-                                  className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                                  style={{ color: 'var(--tx-primary)' }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                                >
-                                  <Select.ItemText>{opt.label}</Select.ItemText>
-                                </Select.Item>
-                              ))}
-                            </Select.Viewport>
-                          </Select.Content>
-                        </Select.Portal>
-                      </Select.Root>
-                    )}
-                    <CategorySelect
-                      value={d.category}
-                      categories={categories}
-                      onChange={(v) => handleCategoryChange(d._id, v)}
-                      onAddNew={() => setAddCategoryForRow(d._id)}
-                    />
-                    <AccountSelect
-                      value={d.accountId}
-                      accounts={accounts}
-                      onChange={(id) => update(d._id, 'accountId', id)}
-                      onAddNew={() => setAddAccountForRow(d._id)}
-                    />
-                    {d.transactionType === 'transfer' && (
-                      <Select.Root
-                        value={String(d.transferCounterpartAccountId ?? '__none__')}
-                        onValueChange={(v) => update(d._id, 'transferCounterpartAccountId', v === '__none__' ? null : parseInt(v))}
-                      >
-                        <Select.Trigger
-                          className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
-                          style={inputStyle}
-                        >
-                          <Select.Value placeholder={getTransferDirection(d) === 'out' ? 'To account…' : 'From account…'} />
-                          <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-                            <ChevronDown size={12} />
-                          </Select.Icon>
-                        </Select.Trigger>
-                        <Select.Portal>
-                          <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
-                            <Select.Viewport className="p-1">
-                              <Select.Item
-                                value="__none__"
-                                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                                style={{ color: 'var(--tx-faint)' }}
-                                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                              >
-                                <Select.ItemText>— none —</Select.ItemText>
-                              </Select.Item>
-                              {accounts
-                                .filter((a) => a.id !== d.accountId)
-                                .map((a) => (
-                                  <Select.Item
-                                    key={a.id} value={String(a.id)}
-                                    className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                                    style={{ color: 'var(--tx-primary)' }}
-                                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                                  >
-                                    <Select.ItemText>{a.name}</Select.ItemText>
-                                  </Select.Item>
-                                ))}
-                            </Select.Viewport>
-                          </Select.Content>
-                        </Select.Portal>
-                      </Select.Root>
-                    )}
-                  </div>
-
-                  {/* Delete */}
-                  <button
-                    onClick={() => remove(d._id)}
-                    className="shrink-0 mt-0.5 transition-opacity hover:opacity-60"
-                    style={{ color: 'var(--tx-tertiary)' }}
-                    aria-label="Remove row"
-                  >
-                    <X size={15} />
-                  </button>
-                </div>
-
-                {/* Rule suggestion strip */}
-                {ruleSuggestion && (
-                  <div
-                    className="px-4 py-2.5 space-y-2"
-                    style={{ borderTop: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-card-alt)' }}
-                  >
-                    {/* Row 1: summary + actions */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium" style={{ color: 'var(--tx-secondary)' }}>
-                        Save vendor rule
-                      </span>
-                      <span className="text-xs px-1.5 py-0.5 rounded-[4px]" style={{ backgroundColor: 'var(--bg-badge-committed)', color: 'var(--tx-badge-committed)' }}>
-                        {ruleSuggestion.category}
-                      </span>
-                      <div className="ml-auto flex items-center gap-2">
-                        <button
-                          onClick={() => handleSaveRule(d._id)}
-                          disabled={savingRuleId === d._id}
-                          className="px-2.5 py-0.5 text-xs rounded-[4px] font-medium disabled:opacity-40"
-                          style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-                        >
-                          {savingRuleId === d._id ? '…' : 'Save'}
-                        </button>
-                        <button
-                          onClick={() => dismissRuleSuggestion(d._id)}
-                          className="transition-opacity hover:opacity-60"
-                          style={{ color: 'var(--tx-tertiary)' }}
-                        >
-                          <X size={11} />
-                        </button>
-                      </div>
-                    </div>
-                    {/* Row 2: editable fields */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <input
-                        type="text"
-                        value={ruleSuggestion.pattern}
-                        onChange={(e) => updateRuleSuggestion(d._id, 'pattern', e.target.value)}
-                        placeholder="Pattern"
-                        className="flex-1 min-w-0 px-2 py-1 text-xs rounded-[4px] outline-none font-mono"
-                        style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-                        title="Text pattern to match against transaction descriptions"
-                      />
-                      <input
-                        type="text"
-                        value={ruleSuggestion.vendor}
-                        onChange={(e) => updateRuleSuggestion(d._id, 'vendor', e.target.value)}
-                        placeholder="Vendor name"
-                        className="w-32 px-2 py-1 text-xs rounded-[4px] outline-none"
-                        style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-                        title="Display name for this vendor"
-                      />
-                      <Select.Root value={ruleSuggestion.matchType} onValueChange={(v) => updateRuleSuggestion(d._id, 'matchType', v)}>
-                        <Select.Trigger
-                          className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-[4px] outline-none whitespace-nowrap"
-                          style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-                          title="How to match the pattern"
-                        >
-                          <Select.Value />
-                          <Select.Icon className="ml-1 shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-                            <ChevronDown size={10} />
-                          </Select.Icon>
-                        </Select.Trigger>
-                        <Select.Portal>
-                          <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
-                            <Select.Viewport className="p-1">
-                              {['contains', 'starts-with', 'ends-with', 'exact', 'regex'].map((mt) => (
-                                <Select.Item
-                                  key={mt} value={mt}
-                                  className="px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
-                                  style={{ color: 'var(--tx-primary)' }}
-                                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                                >
-                                  <Select.ItemText>{mt}</Select.ItemText>
-                                </Select.Item>
-                              ))}
-                            </Select.Viewport>
-                          </Select.Content>
-                        </Select.Portal>
-                      </Select.Root>
-                    </div>
-                  </div>
-                )}
-              </div>
+                draft={d}
+                isFirst={idx === 0}
+                isDuplicate={isDuplicate}
+                ruleSuggestion={ruleSuggestion}
+                transferDirection={dir}
+                isNotesExpanded={expandedNotes.has(d._id)}
+                savingRule={savingRuleId === d._id}
+                categories={categories}
+                accounts={accounts}
+                onUpdate={update}
+                onRemove={remove}
+                onTypeChange={handleTypeChange}
+                onTransferDirChange={handleTransferDirChange}
+                onCategoryChange={handleCategoryChange}
+                onExpandNotes={expandNotes}
+                onDismissDuplicate={dismissDuplicate}
+                onAddCategoryForRow={openAddCategoryForRow}
+                onAddAccountForRow={openAddAccountForRow}
+                onSaveRule={handleSaveRule}
+                onDismissRule={dismissRuleSuggestion}
+                onUpdateRuleField={updateRuleSuggestion}
+              />
             )
           })
         )}
@@ -1045,3 +1134,4 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
     </div>
   )
 }
+

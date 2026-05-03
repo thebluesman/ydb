@@ -209,10 +209,43 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
     try {
       // The prompt ends with '[' to prime JSON array output, so prepend it back
       const clean = ('[' + accumulated).replace(/```json|```/g, '').trim()
-      const start = clean.indexOf('['); const end = clean.lastIndexOf(']')
-      if (start === -1 || end === -1) throw new Error('No JSON array found')
-      const parsed: Array<{ date: string; description: string; amount: number; category: string }> =
-        JSON.parse(clean.slice(start, end + 1))
+      type RawTxn = { date: string; description: string; amount: number; category: string }
+      let parsed: RawTxn[] = []
+      const arrStart = clean.indexOf('[')
+      const arrEnd = clean.lastIndexOf(']')
+      if (arrStart !== -1 && arrEnd !== -1) {
+        try {
+          parsed = JSON.parse(clean.slice(arrStart, arrEnd + 1))
+        } catch { /* fall through to salvage */ }
+      }
+      // Salvage path: walk the buffer and extract every well-formed top-level
+      // object. The model occasionally emits a malformed entry mid-stream
+      // (mismatched quotes, truncation); without this, one bad row would
+      // discard the entire statement.
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        const salvaged: RawTxn[] = []
+        let depth = 0, objStart = -1, inString = false, escape = false
+        const src = arrStart !== -1 ? clean.slice(arrStart) : clean
+        for (let i = 0; i < src.length; i++) {
+          const c = src[i]
+          if (escape) { escape = false; continue }
+          if (c === '\\') { escape = true; continue }
+          if (c === '"') { inString = !inString; continue }
+          if (inString) continue
+          if (c === '{') { if (depth === 0) objStart = i; depth++ }
+          else if (c === '}') {
+            depth--
+            if (depth === 0 && objStart !== -1) {
+              try {
+                const obj = JSON.parse(src.slice(objStart, i + 1))
+                if (obj && typeof obj === 'object' && 'description' in obj) salvaged.push(obj as RawTxn)
+              } catch { /* skip malformed */ }
+              objStart = -1
+            }
+          }
+        }
+        parsed = salvaged
+      }
       if (!Array.isArray(parsed) || parsed.length === 0) {
         setError('The model found no transactions in this document.'); setPhase('idle'); return
       }

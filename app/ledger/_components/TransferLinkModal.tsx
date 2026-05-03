@@ -52,9 +52,10 @@ export function TransferLinkModal({
           const expected = Math.abs(transactionAmount)
           const actual = Math.abs(t.amount)
           if (Math.abs(actual - expected) / expected > 0.15) return false
-          // Date within ±7 days
+          // Date within ±45 days. Credit-card payment cycles routinely span
+          // a full month, so a tighter window misses the most common pairs.
           const daysDiff = Math.abs(new Date(t.date).getTime() - refDate) / 86_400_000
-          if (daysDiff > 7) return false
+          if (daysDiff > 45) return false
           return true
         })
         setCandidates(filtered)
@@ -118,7 +119,7 @@ export function TransferLinkModal({
         </div>
 
         <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
-          Select the matching transaction from the other account. Candidates with opposite amount within ±15% and ±7 days are shown.
+          Select the matching transaction from the other account. Candidates with opposite amount within ±15% and ±45 days are shown.
         </p>
 
         <input
