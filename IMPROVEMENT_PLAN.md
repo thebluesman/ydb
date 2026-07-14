@@ -105,12 +105,31 @@ the app being run with `next dev` instead of a production build.
 **0.4 Add missing composite index.**
 - `prisma/schema.prisma` Transaction: add `@@index([accountId, status, date])` (dashboard and
   balance queries filter on accountId+status, often with a date bound). Create via a new migration.
+- Note: the baseline migration (0.1) must match the **current** schema exactly — it gets marked
+  as applied on the live DB via `prisma migrate resolve` without executing. Any schema *change*
+  (this index, the Phase 6.2 CHECK constraints) must be a separate follow-on migration so it
+  actually runs against the live database. Do not fold schema changes into the baseline.
+
+**0.5 M1 exit checkpoint — re-measure before committing to the rewrites.**
+- The "likely running `next dev`" diagnosis (root cause #3) is inferred from the README, not
+  confirmed. After 0.2/0.3 are deployed on the real server, measure against the real DB:
+  `curl -so /dev/null -w '%{time_starttransfer}s %{size_download}B\n'` for `/ledger` and
+  `/dashboard`, plus interaction feel (ledger search typing, page switches).
+- Record the numbers at the top of this file. They serve two purposes: (a) if prod mode + WAL
+  already made the app feel fine, M2's urgency drops — do M2a (design system) next and let M2b
+  ride behind it rather than rushing; (b) they become the baseline that Phase 1/2's "definition
+  of done" is judged against on this hardware, instead of the placeholder targets below.
+- Phases 1–2 stay on the roadmap regardless: full-table reads scale with the DB and will degrade
+  every month — the checkpoint sets pacing, not direction.
 
 ### Phase 1 — Ledger: move filtering/pagination to the server (biggest win)
 
 The ledger currently ships the whole table to the client and keeps a mutable copy in React state.
-Replace with a server-driven table. Target: `/ledger` responds in <200 ms and transfers <100 KB
-with 50k rows in the DB.
+Replace with a server-driven table. Working target: `/ledger` responds in <200 ms and transfers
+<100 KB with 50k rows in the DB — these are order-of-magnitude guardrails, **not** benchmarked
+against the actual home-server hardware; calibrate them against the 0.5 baseline numbers. The
+non-negotiable definition of done is structural: response time and payload size must be
+independent of total table size (no full-table reads, no full-table serialization).
 
 **1.1 Query API.**
 - Rework `GET /api/transactions` (`app/api/transactions/route.ts`) to accept query params:
@@ -168,8 +187,9 @@ income/expense) — they are documented in comments there and mirrored in the ch
 - Add a **unit test** comparing the SQL aggregates against the old in-memory algorithm on a fixture
   set that includes splits, linked reimbursements, and transfers (port the current JS logic into the
   test as the oracle before deleting it).
-- Verify: dashboard totals unchanged on the existing DB (snapshot values before/after), page render
-  under 150 ms with the 50k-row seed.
+- Verify: dashboard totals unchanged on the existing DB (snapshot values before/after); render
+  time judged against the 0.5 baseline (working guardrail: ~150 ms with the 50k-row seed — same
+  caveat as Phase 1: the structural requirement is "no full-table reads", not the exact number).
 
 ### Phase 3 — API hygiene
 
@@ -224,14 +244,25 @@ for both prompts, and cap each message's length.
 ### Phase 5 — LLM pipeline quality
 
 - **Settings-driven config (fixes the README lie).** Add Settings keys `ollamaUrl`,
-  `extractionModel`, `chatModel` (UI in `PreferencesForm.tsx`, dropdown populated from
-  `${ollamaUrl}/api/tags` via a small proxy route). Both LLM routes read the Setting first, env var
-  as fallback, current defaults last. Cache the setting lookup per request only (no global cache —
-  it can go stale).
+  `extractionModel`, `chatModel`. Both LLM routes read the Setting first, env var as fallback,
+  current defaults last. Cache the setting lookup per request only (no global cache — it can go
+  stale). **UI: defaults-first, not a raw model dropdown.** A list of installed model names tells
+  the user nothing about which is good at extraction vs. text-to-SQL. `PreferencesForm.tsx` shows
+  the two roles with their current values and a short recommendation line each; changing them is
+  an "Advanced" disclosure with the `${ollamaUrl}/api/tags` list (via a small proxy route), where
+  known-good models are annotated ("recommended for SQL", "faster, less accurate") and unknown
+  ones are selectable but unannotated. Write the actual recommendations down in the README
+  (starting point: `qwen2.5-coder:14b` for extraction — structured-output-focused, fits modest
+  VRAM; `qwen2.5:32b` for text-to-SQL if the box has the memory, else the 14b; revise from
+  experience). The current env-var defaults stay as the shipped defaults.
 - **Structured extraction.** In `app/api/ollama/route.ts` pass Ollama's structured output
   (`format: { type: 'array', items: {...} }` — check the Ollama docs for the JSON-schema `format`
-  parameter) so the model must emit valid JSON. Keep the salvage parser as fallback for models that
-  ignore `format`. Remove the `'['` assistant-priming hack when `format` is used.
+  parameter) so the model must emit valid JSON. **This is unvalidated against the models this app
+  actually runs** — local models honor `format` inconsistently. First step of this task: test
+  `format` against the configured extraction model with a real statement's text; record the result
+  in this file. Keep the salvage parser as a permanent fallback regardless of the outcome (do not
+  treat structured output as a reason to delete it). Remove the `'['` assistant-priming hack only
+  when `format` is confirmed working for the model in use.
 - **Chunk long statements.** In `UploadFlow.tsx`, if extracted text exceeds ~12 KB, send one
   request per page (the page loop already yields per-page text) and concatenate the parsed arrays.
   Show "page 2/5" in the parse log. This keeps well inside `num_ctx` and improves accuracy.
@@ -246,11 +277,15 @@ for both prompts, and cap each message's length.
   creation paths). `DELETE /api/transactions/[id]`: cascade to the counterpart only when the
   counterpart's `createdVia === 'manual'`; otherwise unlink (null both pointers) and delete only the
   requested row. Return `{ deletedCounterpart: boolean }` so the UI can message accurately.
-- **6.2 DB constraints** (FOLLOWUPS §5): in the next migration add
+- **6.2 DB constraints** (FOLLOWUPS §5): in a **follow-on migration — deliberately not folded
+  into the 0.1 baseline** (the baseline is marked applied on the live DB without executing, so
+  anything folded into it would never reach the existing database; see the note under 0.4): add
   `CHECK ((transactionType = 'debit' AND amount <= 0) OR (transactionType = 'credit' AND amount >= 0) OR transactionType = 'transfer')`
-  via raw SQL in the migration file (Prisma schema can't express CHECK; write it as
-  `CREATE TABLE ... ` table rebuild or `ALTER TABLE` per SQLite rules — a table rebuild migration is
-  the reliable route). Also switch split legs to `onDelete: Cascade` on `parentTransaction`.
+  via raw SQL in the migration file (Prisma schema can't express CHECK; SQLite requires a
+  `CREATE TABLE` rebuild — copy rows, drop old, rename — since `ALTER TABLE ADD CONSTRAINT` isn't
+  supported). Before writing the migration, run the CHECK predicate as a SELECT against the live
+  DB to confirm zero violating rows (FOLLOWUPS §3 anomalies would make the rebuild fail midway).
+  Also switch split legs to `onDelete: Cascade` on `parentTransaction`.
 - **6.3 Bulk reimbursement linking** (FOLLOWUPS §1): in the ledger pending-reimbursements view, add
   "Suggest matches": `GET /api/reimbursements/suggest` pairs each unlinked `reimbursableFor` expense
   with candidate credits (same currency, amount within ±1%, date after expense, category
@@ -571,19 +606,39 @@ Target: fully usable on a ~390px phone; comfortable on tablet.
 
 ## 5. Suggested execution order & checkpoints
 
-Tech phases (0–8) and UX phases (U1–U6) interleave: do U1/U1.5 alongside the Phase 1 ledger
-rework (both rewrite the same components — doing them together avoids touching LedgerView twice),
-and U4's `loading.tsx` work lands with Phase 2 so slow-page feedback and fast pages arrive
-together.
+Tech phases (0–8) and UX phases (U1–U6) interleave. U1/U1.5 (design-system primitives + tokens)
+land as their **own PR before** the Phase 1 ledger rework: they touch the same components, but a
+pure pixel-identical-except-U1.5 refactor and a data-flow rewrite are much easier to review
+separately, and Phase 1 then builds on the primitives. Mobile (U3) rides with M4 — it's a
+confirmed requirement (phone-on-the-couch is a primary usage mode), so it shouldn't wait behind
+the Phase 6 data-integrity work; its only hard dependency is U1's primitives. U4's `loading.tsx`
+work lands with Phase 2 so slow-page feedback and fast pages arrive together.
 
 | Milestone | Contains | Definition of done |
 |---|---|---|
-| M1 | Phase 0 | Migrations committed; WAL on; prod-mode docs; index added; build green |
-| M2 | Phase 1 + U1 + U1.5 | Ledger server-driven; 50k-row seed feels instant; stats match old values; currency bug fixed; UI primitives in place; token gaps filled (transfer amber, overlay, focus ring); JS hover handlers gone from migrated components |
+| M1 | Phase 0 | Migrations committed; WAL on; prod-mode deploy; index added; build green; **0.5 baseline numbers recorded at the top of this file** |
+| M2a | U1 + U1.5 | UI primitives in place; token gaps filled (transfer amber, overlay, focus ring); JS hover handlers gone; screens pixel-identical except enumerated U1.5 changes |
+| M2b | Phase 1 | Ledger server-driven; 50k-row seed feels instant vs. 0.5 baseline; stats match old values; currency bug fixed |
 | M3 | Phase 2 + 3 + U4 | Dashboard SQL aggregates with oracle test; refetch storm, rule counts, dup-check, SQL cap, timeouts fixed; toast system replaces every `alert()`/silent catch; `loading.tsx` on all routes; upload format-override chip; chat stop button |
-| M4 | Phase 4 + 5 + U2 | Guide off the bundle; undo-delete; settings-driven models; structured extraction; chunked parsing; Radix Dialog modals; aria labels; keyboard-visible row actions; reduced-motion + system theme |
-| M5 | Phase 6 + U3 | createdVia + safe deletes; CHECK constraints; bulk reimbursement suggestions; mobile nav, ledger cards, chat drawer — usable at 390px |
+| M4 | Phase 4 + 5 + U3 | Guide off the bundle; undo-delete; settings-driven models (defaults + advanced override); structured extraction validated against the configured model; chunked parsing; mobile nav, ledger cards, chat drawer — usable at 390px |
+| M5 | Phase 6 + U2 | createdVia + safe deletes; CHECK constraints (follow-on migration, pre-checked against live data); bulk reimbursement suggestions; Radix Dialog modals; aria labels; keyboard-visible row actions; reduced-motion + system theme |
 | M6 | Phase 7 (items 1–4 min) + U5 | CSV import; reconciliation; restore; net-worth history; Dashboard in nav; ledger date filter + presets; unified money/date formatting; category color dots; settings sub-nav; empty states; first-run card |
 | M7 | Phase 8 + U6 | Seed, tests, CI, ops docs; woff2 fonts; Playwright viewport sweep + axe checks; Lighthouse a11y ≥ 95 |
 
 Each milestone should be a separate PR-sized change with `npm run lint && npm run test:run && npm run build` green before moving on.
+
+### Choosing an implementer per phase
+
+Not every phase needs the same horsepower. If work is delegated to models of different strengths:
+
+- **Mechanical — a lighter/faster model is fine:** 0.1 baseline migration, 0.3 docs/systemd, 0.4
+  index, U6 font conversion, U4 toast plumbing and `loading.tsx` skeletons, U5 formatting
+  unification, Phase 8 seed script and CI wiring, the U1 *migration* of components onto
+  already-built primitives.
+- **Judgment-heavy — use the strongest model available, and review its diff:** Phase 1 and
+  Phase 2 (correctness-preserving rewrites of the aggregation semantics — the split/reimbursement
+  exclusion rules are subtle and the oracle test must be written *before* the old code is
+  deleted), the 6.2 CHECK-constraint table-rebuild migration (data-destructive if wrong),
+  designing the U1 primitive APIs and U1.5 tokens (one-time decisions everything else inherits),
+  and Phase 5's structured-output validation (requires honest experimentation, not assumption).
+- Regardless of model: no milestone merges without the verify steps in its phases actually run.
