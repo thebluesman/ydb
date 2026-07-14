@@ -2,6 +2,8 @@
 
 A personal finance tracker with AI-powered natural language querying. Import bank statements, categorise transactions, track budgets, and ask questions about your spending in plain English — all running locally.
 
+> **Working on ydb?** Read [`IMPROVEMENT_PLAN.md`](IMPROVEMENT_PLAN.md) first — it's the full code/product/UX review and the phased roadmap (performance fixes, design-system work, feature milestones M1–M7). New work should follow the plan's order and respect its non-goals.
+
 ## Features
 
 - **Multi-account support** — current accounts, credit cards, personal loans, and auto loans
