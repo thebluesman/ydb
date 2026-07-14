@@ -307,25 +307,283 @@ Ordered by value for a single home user:
 
 ---
 
-## 3. Explicit non-goals
+## 3. UI/UX review & plan
+
+Reviewed: `globals.css`, `Design Guide.md`, layout/nav/theme, every page and interactive component
+(ledger, dashboard, upload/review, chat, settings, modals, DatePicker, dropzone, error/404 pages).
+The app has a genuinely distinctive, coherent visual identity (warm Cursor-inspired palette, full
+dark-mode variable set, three-font system, tasteful micro-animations). The problems are structural:
+the design system exists only as **repeated inline styles**, accessibility is an afterthought,
+mobile is essentially unsupported, and feedback patterns are inconsistent (`alert()`, silent
+catches, no toasts, no loading states).
+
+### UI/UX findings
+
+**Bugs / broken styling**
+- `app/chat/_components/ChatPane.tsx:308,360` references `var(--border)`, which is **not defined**
+  in `globals.css` (only `--border-warm*` exist) — the composer border and disabled send-button
+  background silently resolve to invalid values.
+- `app/globals.css:243-247` forces `font-weight: 600` and a press-scale transform on **every**
+  button in the app — this is why some "buttons" look bolder than intended and checkboxes/icon
+  buttons visibly shrink on click.
+
+**Design-system debt**
+- `backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)'`-style inline props
+  are repeated in essentially every component; `LedgerView`, `LedgerRow`, `ReviewTable` each define
+  their own private `cardStyle` / `selectStyle` / `selectDropdownStyle` copies. There are **three
+  independent Radix Select wrappers** (`FilterSelect` in LedgerView, `TypeSelect` + `SimpleSelect`
+  in LedgerRow, more inside ReviewTable) with duplicated markup.
+- Hover states are implemented in JS (`onMouseEnter`/`onMouseLeave` mutating `element.style`) in
+  dozens of places — no keyboard-focus parity, does nothing on touch, and bloats every component.
+- No shared Button/Card/Input/Badge/Modal primitives; radius (4/6/8/10/12/16px), icon sizes
+  (9–40px), and heading styles (`text-[26px]` + inline `letterSpacing`) are ad hoc per file.
+- The orange accent (`--color-accent`) is used as a primary button exactly once (upload "Extract
+  Transactions"); every other action is the same beige button — no visual action hierarchy.
+
+**Accessibility**
+- Only 5 files contain any `aria-*` attribute. Most icon-only buttons (row delete ✕, unlink,
+  scissors/split, chat-session delete) have `title` at best, no `aria-label`.
+- Ledger row actions are `opacity-0 group-hover:opacity-100` — invisible to keyboard users (they
+  can still be focused while invisible) and unreachable on touch devices.
+- All modals (`AddCategoryModal`, `TransferLinkModal`, `ReimburseLinkModal`, DangerZone modal) are
+  hand-rolled portals: no `role="dialog"`, no `aria-modal`, no focus trap, inconsistent Escape
+  handling. Radix primitives are already a dependency — Radix `Dialog` should be used.
+- Sortable ledger headers are `<th onClick>` with no button semantics or keyboard support.
+- Inputs get a global orange focus ring (good) but buttons/links widely use `outline: none` with
+  no visible replacement (DatePicker trigger, nav links, select triggers).
+- Contrast: `--tx-faint` (35% opacity) and `--tx-tertiary` (40%) at 10–11px font sizes fail WCAG
+  AA; used for genuinely informative text (original descriptions, split legs, timestamps).
+- No `prefers-reduced-motion` guard on any animation; theme ignores `prefers-color-scheme`
+  (first visit is always light regardless of OS setting).
+
+**Responsive / mobile — effectively unsupported.** A home-server app gets used from phones on the
+couch; this matters. Only 5 responsive utility usages exist in the whole app (page padding only):
+- Header nav (6 items) has no collapse — wraps/overflows below ~500px.
+- Ledger stat cards are a fixed `grid-cols-3`; the table needs ~900px and the edit drawer's
+  `flex-wrap` fields get chaotic; the fixed-position bulk bar (`whiteSpace: nowrap`) overflows.
+- Chat sidebar is a fixed 220px column with no collapse — chat is unusable on a phone.
+- Dashboard chart grids don't reflow; the filter bar pushes the date range off-canvas.
+
+**Feedback & state handling**
+- Errors: native `alert()` (`LedgerView.tsx:246`, `LedgerRow.tsx:271`), native `confirm()` for
+  deletes (`LedgerRow.tsx:266`), and several **silent** `catch { /* silent */ }` handlers
+  (unlink, rule save) where a failure gives the user no signal at all.
+- `DangerZone.handleClear` never checks `res.ok` — a failed wipe closes the modal as if it
+  succeeded.
+- No `loading.tsx` for any route: with the current slow queries, navigation appears frozen with
+  zero pending feedback (compounds the perf problem perceptually).
+- Upload flow never tells the user which statement format was detected (`credit-card` vs
+  `bank-account` drives sign interpretation!) and offers no override when detection is wrong.
+- Chat has no stop-generation button (upload does), no copy-answer affordance, and raw SQLite
+  error strings are shown verbatim.
+- The upload "done" screen offers "Upload another" but no link to the ledger to see the result.
+
+**Information architecture & consistency**
+- **Dashboard is missing from the nav** (`NavLinks.tsx` lists Ledger/Chat/Upload/Guide only; the
+  dashboard is reachable only via the logo) and the settings link is labeled "Config" while the
+  page calls itself "Settings".
+- **The ledger has no date filter** — the single most useful filter for a transaction list (the
+  dashboard has a range picker; the ledger does not).
+- Number formatting is inconsistent: ledger stats use `toFixed(2)` (no thousands separators, so
+  `AED 123456.78`), the dashboard uses `toLocaleString`, and `lib/money.ts` already exports
+  `formatCents` that almost nobody uses. Spacing is also inconsistent (`+AED 50.00` vs `AED50.00`).
+- Dates render as raw ISO `YYYY-MM-DD` in tables but `14 Jul 2026` in the DatePicker.
+- Categories have colors (`Category.color`, curated palette) that are shown **nowhere** except the
+  trend chart — ledger and review tables show plain text.
+- Settings is one very long scroll: Accounts → Categories → Vendor Rules (800-line manager) →
+  Budgets → Recurring → Imports → Backups → Danger Zone, with no section nav.
+- Fonts ship as 9 raw `.ttf` files (7 IBM Plex Mono weights alone) — convert to woff2 and drop
+  unused weights; this is both a perf and first-paint polish issue.
+
+### Phase U1 — Design-system consolidation (do before other U-phases; pairs well with Phase 1 work)
+
+Create `app/_components/ui/` with small primitives that encode the existing look (values from
+`globals.css` vars and `Design Guide.md` — this is a refactor, **not** a redesign):
+- `Button.tsx` — variants: `primary` (accent orange, one per screen), `default` (beige),
+  `ghost`, `danger`; sizes `sm|md`. CSS-class hover/focus states, not JS.
+- `Card.tsx` (bg-card + border-warm + radius 8), `Input.tsx`, `Field.tsx` (label + control),
+  `Badge.tsx` (status/type pills), `Select.tsx` (ONE Radix Select wrapper replacing the three
+  copies — hover via `data-highlighted` CSS, not mouse handlers), `Modal.tsx` (Radix Dialog:
+  focus trap, Escape, `aria-modal`, overlay click, shared card styling).
+- Add utility classes in `globals.css` (`.card`, `.h-page`, `.h-section`, `.text-meta`) for the
+  repeated heading/caption patterns; migrate the JS hover handlers to `:hover` /
+  `[data-highlighted]` CSS rules.
+- Fix the two style bugs: define `--border` (alias of `--border-warm`) or fix the two ChatPane
+  references; scope the global `button { font-weight:600; scale }` rule to a `.btn` class.
+- Migration order: LedgerView/LedgerRow (worst offenders) → ReviewTable → settings components →
+  the rest. Each screen should look pixel-identical after migration (compare screenshots) —
+  except where a U1.5 token improvement below intentionally changes it.
+- Verify: `grep -rn "onMouseEnter" app | wc -l` drops to ~0; no component defines its own
+  `selectDropdownStyle`/`cardStyle` copies.
+
+### Phase U1.5 — Design-system improvements (proposals, apply during the U1 migration)
+
+The current system is 90% of a good design system; these close the gaps. All are token/convention
+changes, not a redesign — the warm Cursor-inspired identity stays.
+
+1. **Fill the token gaps.** The semantic-variable set in `globals.css` is missing states that
+   components hardcode today:
+   - `--tx-transfer` / `--bg-transfer`: the transfer amber (`#F59E0B`, `#92400E`,
+     `rgba(245,158,11,…)`) is hardcoded in **11 places across 5 files** with **no dark-mode
+     variant** — `#92400E` (dark brown) text on dark backgrounds is near-invisible. Add light +
+     dark values (e.g. dark: `#fbbf24` text on `rgba(245,158,11,0.15)`), replace all occurrences.
+   - `--bg-overlay`: modal scrims hardcode `rgba(0,0,0,0.5)` in 3 places; dark mode wants a
+     heavier scrim (`rgba(0,0,0,0.65)`).
+   - `--focus-ring`: the orange input glow is duplicated in light/dark blocks; make it a token and
+     reuse it for button/link `:focus-visible` (U2).
+   - `--border`: alias of `--border-warm` (fixes the ChatPane bug permanently instead of just
+     editing two call sites).
+   - Motion tokens: `--dur-fast: 100ms; --dur-base: 150ms; --dur-slow: 200ms;
+     --ease-out: cubic-bezier(0.22,1,0.36,1)` — the codebase already uses exactly these values,
+     just inconsistently inline.
+2. **Establish an action hierarchy.** Today the accent orange appears on exactly one button in the
+   app; everything else is the same beige, so nothing guides the eye. Convention: **one orange
+   primary per screen** — Commit (review table), Extract (upload), Save (ledger edit drawer / add
+   form), Apply (bulk bar) — beige `default` for everything else, `ghost` for cancel/dismiss,
+   crimson `danger` (filled) reserved for destructive confirms. Encode as the `Button` variants;
+   this is the one intentional visual change of the phase.
+3. **Collapse the status-color triplets.** `--bg-badge-committed` / `--bg-notify-success` /
+   `--bg-stat-income` are three names for the same green (same for the red set). Reduce to one
+   semantic pair per hue (`--bg-positive`/`--tx-positive`, `--bg-negative`/`--tx-negative`,
+   `--bg-caution`/`--tx-caution`, `--bg-info`/`--tx-info`) with the badge/stat/notify components
+   consuming them. Fewer tokens, zero drift risk, and dark mode is defined once per hue.
+4. **Codify the type scale as classes.** `.text-page-title` (26px/−0.325px), `.text-section`
+   (22px/−0.11px), `.text-card-label` (11px uppercase tracked), `.text-meta` (12px secondary) —
+   the four styles every page hand-rolls with `text-[26px]` + inline `letterSpacing`. Headings
+   already inherit the display font from the `h1–h4` rule; the classes make the sizes consistent
+   and greppable.
+5. **Number typography rule.** All amounts render in the mono font with `font-variant-numeric:
+   tabular-nums` (add to a `.amount` class) so columns of figures align — currently amounts mix
+   mono and default and never set tabular numerals. Signs: always typographic minus `−` (already
+   mostly used) and a leading `+` only in stat cards, never in table cells (currently mixed).
+6. **Elevation discipline.** Three levels only: flat (border only), raised (`--shadow-ambient` —
+   popovers, dropdowns), overlay (`--shadow-card` — modals, the bulk bar). Today dropdowns use the
+   heavy modal shadow; align them to `raised` so modals feel meaningfully "above" menus.
+
+Verify: `grep -rn "F59E0B\|92400E\|rgba(245" app --include='*.tsx'` returns nothing;
+dark-mode screenshots of a transfer-heavy ledger page are legible; every screen has at most one
+orange button visible per section.
+
+### Phase U2 — Accessibility pass
+
+- Replace all hand-rolled modals with the new Radix `Modal.tsx` (U1). Keep the DangerZone
+  typed-confirmation content — it's a good pattern; make it the standard destructive-confirm.
+- Icon-only buttons: `aria-label` on every one (row actions, sidebar deletes, theme toggle
+  already has one). Sortable headers become `<button>` inside `<th>` with `aria-sort`.
+- Ledger row actions: visible at reduced opacity (e.g. 0.4 → 1 on hover/focus-within) instead of
+  `opacity-0`, so keyboard and touch users can find them. Add `:focus-visible` styles for buttons/
+  links/nav (reuse the orange ring), and remove bare `outline: none` without replacement.
+- Bump minimum body-adjacent text to 12px and raise `--tx-faint`/`--tx-tertiary` to pass AA for
+  informative text (decorative hints may stay).
+- Wrap animations in `@media (prefers-reduced-motion: no-preference)`; make the theme-init script
+  fall back to `prefers-color-scheme` when localStorage is empty, and add a "System" option to
+  `ThemeToggle`.
+- ChatSidebar session rows become buttons; chat thread gets `aria-live="polite"` on the streaming
+  message container.
+- Verify: keyboard-only walkthrough of ledger edit, upload commit, and danger-zone flows; axe
+  DevTools (or `@axe-core/playwright` in the Phase 8 smoke) reports no critical issues.
+
+### Phase U3 — Responsive / mobile
+
+Target: fully usable on a ~390px phone; comfortable on tablet.
+- **Nav:** collapse to a hamburger (Radix `DropdownMenu` or a simple disclosure) below `md`;
+  include Dashboard (see U5) and Settings in the collapsed menu.
+- **Ledger:** stat cards `grid-cols-1 sm:grid-cols-3`; below `md`, render rows as stacked cards
+  (date + description + amount + badges, actions in an overflow menu) instead of the wide table —
+  a `LedgerRowCard` sibling component sharing the same handlers; bulk bar becomes full-width
+  bottom sheet; filters collapse into a "Filters" disclosure showing active-filter chips.
+- **Chat:** sidebar becomes a slide-over drawer below `md` with a sessions button in the header.
+- **Dashboard:** chart grids stack to one column; filter bar wraps (already `flex-wrap` — verify
+  the `ml-auto` date group behaves); balances rail already scrolls horizontally (keep).
+- **Settings/Upload/Review:** review-table rows already wrap; verify at 390px and fix overflow.
+- Verify: Playwright viewport sweep (390/768/1280) screenshotting each page; no horizontal page
+  scroll at any width.
+
+### Phase U4 — Feedback, loading, and error states
+
+- **Toast system** (single `Toaster` in `layout.tsx`, `useToast()` hook — or a tiny dependency-free
+  implementation): success ("Saved", "12 transactions committed", "Backup created") and error
+  toasts. Replace every `alert()` and every silent `catch` with it. Destructive confirms use the
+  U1 Modal (replaces `confirm()`); ledger delete gets the 5-second **Undo** toast (Phase 4 item).
+- Fix `DangerZone.handleClear` to check `res.ok` and surface failures.
+- **`loading.tsx` for every route** (dashboard, ledger, settings, upload, guide): skeleton cards
+  matching each page's layout (stat-card row + table skeleton for ledger, chart placeholders for
+  dashboard). Even after Phases 1–2 make pages fast, first-navigation feedback matters.
+- **Upload flow:** show the detected format as an editable chip before parsing ("Detected:
+  Credit card statement ▾" with the three options) — mis-detection currently flips amount signs
+  silently; show a page-progress indicator during chunked parsing (Phase 5); "done" screen links
+  to `/ledger?status=review` ("Review them in the ledger →").
+- **Chat:** stop-generation button while streaming (wire the existing AbortController pattern from
+  UploadFlow); copy button on assistant messages; friendlier error rendering ("The generated query
+  failed" + collapsible technical detail instead of a raw SQLite error as the message body).
+- Verify: `grep -rn "alert(\|confirm(" app` returns nothing; killing Ollama mid-chat and failing a
+  save both produce visible, non-blocking feedback.
+
+### Phase U5 — Information architecture & screen-level UX
+
+- **Nav:** add Dashboard to `NavLinks`; rename "Config" → "Settings" (keep the gear icon); order:
+  Dashboard · Ledger · Upload · Chat · Guide.
+- **Ledger date filter:** add a date-range control (reuse `DatePicker` pair from the dashboard) to
+  the filter bar, wired into the Phase 1 query API (`startDate`/`endDate` params). Add quick
+  presets (This month · Last month · 3M · YTD · All) shared with the dashboard's range picker.
+- **Money/date formatting:** route ALL amount rendering through `formatCents` /a small `fmtMoney`
+  helper (thousands separators, consistent `AED 1,234.56`, minus sign handling) and all table
+  dates through one `formatDate` (`14 Jul 2026`). Delete per-component `toFixed(2)` calls.
+- **Category color dots** next to category names in ledger rows, review table, category selects,
+  and the settings category manager — the colors already exist in the DB; use them.
+- **Settings sub-navigation:** sticky in-page section nav (Accounts · Categories · Rules · Budgets
+  · Recurring · Imports · Backups · Danger Zone) with anchor scrolling; move Danger Zone visually
+  last with stronger separation (it already is last — keep it).
+- **Dashboard:** add empty-state cards when there are no transactions in range ("No activity in
+  this period" + CTA to upload) instead of blank charts; cap the category-trend chart to the top 8
+  categories + "Other" to avoid color soup; add a one-line explanation under the budget widget for
+  the months-multiplier behavior.
+- **First-run experience** (Phase 7 item 8 — implement here): dashboard onboarding card with the
+  3-step checklist when the DB is empty.
+- Verify: every page reachable from the nav in one click; a new user can go from empty DB →
+  imported statement → categorized ledger without reading the guide.
+
+### Phase U6 — Visual polish & performance of the UI itself
+
+- Convert the 9 `.ttf` fonts to `.woff2` and drop unused IBM Plex Mono weights (keep 400/500/600);
+  `next/font/local` supports woff2 directly. Cuts several hundred KB from first load.
+- Normalize the radius scale to the Design Guide's (4 / 6 / 8 / 12 / pill) and icon sizes to a
+  small set (12 / 14 / 16 / 20 / 28) during U1 migration — no separate pass, just enforce in the
+  primitives.
+- Table density option (comfortable/compact) in the ledger — nice-to-have, last.
+- Chart theming: read tick/grid colors from CSS vars instead of the `isDark` MutationObserver
+  state in `DashboardView` (the observer can stay for Recharts props if needed, but prefer
+  CSS-var-driven `stroke`/`fill` so charts re-theme without a re-render).
+- Verify: Lighthouse (production build) — a11y score ≥ 95, no layout shift from fonts
+  (`font-display: swap` already set), total font transfer < 200 KB.
+
+---
+
+## 4. Explicit non-goals
 
 - No auth/multi-user (LAN-only by design; do not add login flows).
 - No cloud sync, no bank API integrations (Plaid etc.).
-- No migration off SQLite/Prisma; no framework/library swaps; no visual redesign
-  (follow `Design Guide.md` for any new UI).
+- No migration off SQLite/Prisma; no framework/library swaps; no visual redesign — the warm
+  Cursor-inspired identity stays. Follow `Design Guide.md` for any new UI; the only intentional
+  visual changes are the ones enumerated in Phase U1.5 (action hierarchy, token fixes).
 - Do not change the money-in-cents convention or the sign/type rules in `lib/accounts.ts`.
 - Do not weaken the read-only SQL guard (`lib/prisma.ts`) — extend its tests when touching it.
 
-## 4. Suggested execution order & checkpoints
+## 5. Suggested execution order & checkpoints
+
+Tech phases (0–8) and UX phases (U1–U6) interleave: do U1/U1.5 alongside the Phase 1 ledger
+rework (both rewrite the same components — doing them together avoids touching LedgerView twice),
+and U4's `loading.tsx` work lands with Phase 2 so slow-page feedback and fast pages arrive
+together.
 
 | Milestone | Contains | Definition of done |
 |---|---|---|
 | M1 | Phase 0 | Migrations committed; WAL on; prod-mode docs; index added; build green |
-| M2 | Phase 1 | Ledger server-driven; 50k-row seed feels instant; stats match old values; currency bug fixed |
-| M3 | Phase 2 + 3 | Dashboard SQL aggregates with oracle test; refetch storm, rule counts, dup-check, SQL cap, timeouts fixed |
-| M4 | Phase 4 + 5 | Guide off the bundle; toasts/undo; settings-driven models; structured extraction; chunked parsing |
-| M5 | Phase 6 | createdVia + safe deletes; CHECK constraints; bulk reimbursement suggestions |
-| M6 | Phase 7 (items 1–4 minimum) | CSV import; reconciliation; restore; net-worth history |
-| M7 | Phase 8 | Seed, tests, CI, ops docs |
+| M2 | Phase 1 + U1 + U1.5 | Ledger server-driven; 50k-row seed feels instant; stats match old values; currency bug fixed; UI primitives in place; token gaps filled (transfer amber, overlay, focus ring); JS hover handlers gone from migrated components |
+| M3 | Phase 2 + 3 + U4 | Dashboard SQL aggregates with oracle test; refetch storm, rule counts, dup-check, SQL cap, timeouts fixed; toast system replaces every `alert()`/silent catch; `loading.tsx` on all routes; upload format-override chip; chat stop button |
+| M4 | Phase 4 + 5 + U2 | Guide off the bundle; undo-delete; settings-driven models; structured extraction; chunked parsing; Radix Dialog modals; aria labels; keyboard-visible row actions; reduced-motion + system theme |
+| M5 | Phase 6 + U3 | createdVia + safe deletes; CHECK constraints; bulk reimbursement suggestions; mobile nav, ledger cards, chat drawer — usable at 390px |
+| M6 | Phase 7 (items 1–4 min) + U5 | CSV import; reconciliation; restore; net-worth history; Dashboard in nav; ledger date filter + presets; unified money/date formatting; category color dots; settings sub-nav; empty states; first-run card |
+| M7 | Phase 8 + U6 | Seed, tests, CI, ops docs; woff2 fonts; Playwright viewport sweep + axe checks; Lighthouse a11y ≥ 95 |
 
 Each milestone should be a separate PR-sized change with `npm run lint && npm run test:run && npm run build` green before moving on.
