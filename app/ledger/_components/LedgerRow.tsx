@@ -6,9 +6,10 @@ import { DatePicker } from '@/app/_components/DatePicker'
 import { TransferLinkModal } from './TransferLinkModal'
 import { ReimburseLinkModal } from './ReimburseLinkModal'
 import { SplitForm } from './SplitForm'
-import { Select, Badge, Button, Modal, useToast } from '@/app/_components/ui'
+import { Select, Badge, Button, Modal, CategoryDot, useToast } from '@/app/_components/ui'
 import type { BadgeVariant } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
+import { categoryColor } from '@/lib/category-colors'
 import { deleteWithUndo } from './deleteWithUndo'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
@@ -71,12 +72,14 @@ function SimpleSelect({
   value,
   onChange,
   options,
+  showDot = false,
 }: {
   value: string
   onChange: (v: string) => void
-  options: { value: string; label: string }[]
+  options: { value: string; label: string; dot?: string }[]
+  showDot?: boolean
 }) {
-  return <Select value={value} onValueChange={onChange} options={options} />
+  return <Select value={value} onValueChange={onChange} options={options} showDot={showDot} />
 }
 
 function formatDate(d: string | Date) {
@@ -451,10 +454,11 @@ function LedgerRowInner({
                   <SimpleSelect
                     value={draft.category}
                     onChange={(v) => set('category', v)}
+                    showDot
                     options={[
-                      ...categories.map((c) => ({ value: c.name, label: c.name })),
+                      ...categories.map((c) => ({ value: c.name, label: c.name, dot: c.color })),
                       ...(!categories.find((c) => c.name === draft.category) && draft.category
-                        ? [{ value: draft.category, label: draft.category }]
+                        ? [{ value: draft.category, label: draft.category, dot: categoryColor(draft.category, categories) }]
                         : []),
                     ]}
                   />
@@ -690,8 +694,13 @@ function LedgerRowInner({
               {showSplitLegs ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
               Split ×{transaction.splitLegs.length}
             </button>
+          ) : transaction.category ? (
+            <span className="flex items-center gap-1.5">
+              <CategoryDot color={categoryColor(transaction.category, categories)} />
+              {transaction.category}
+            </span>
           ) : (
-            transaction.category || <span style={{ color: 'var(--tx-faint)' }}>—</span>
+            <span style={{ color: 'var(--tx-faint)' }}>—</span>
           )}
         </td>
 
@@ -831,7 +840,12 @@ function LedgerRowInner({
             {leg.amount < 0 ? '−' : '+'}{currency}{fmtMoney(leg.amount)}
           </td>
           <td className="px-3 py-2.5 text-sm" style={{ color: 'var(--tx-faint)' }}>
-            {leg.category}
+            {leg.category && (
+              <span className="flex items-center gap-1.5">
+                <CategoryDot color={categoryColor(leg.category, categories)} />
+                {leg.category}
+              </span>
+            )}
           </td>
           <td colSpan={3} />
         </tr>

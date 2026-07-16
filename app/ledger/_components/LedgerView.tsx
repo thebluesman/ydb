@@ -9,8 +9,9 @@ import { LedgerRowCard } from './LedgerRowCard'
 import { ReimbursementSuggestModal } from './ReimbursementSuggestModal'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { DateRangePresets } from '@/app/_components/DateRangePresets'
-import { Select, Card, Button, useToast } from '@/app/_components/ui'
+import { Select, Card, Button, CategoryDot, useToast } from '@/app/_components/ui'
 import { toCents, fmtMoney } from '@/lib/money'
+import { categoryColor } from '@/lib/category-colors'
 import { DEFAULT_PAGE_SIZE, SORT_KEYS, type SortKey } from '@/lib/transactions-query'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
@@ -539,9 +540,10 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                       <RSelect.Item
                         key={c}
                         value={c}
-                        className="ui-select-item px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
+                        className="ui-select-item flex items-center gap-2 px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
                         style={{ color: 'var(--tx-primary)' }}
                       >
+                        <CategoryDot color={categoryColor(c, categories)} />
                         <RSelect.ItemText>{c}</RSelect.ItemText>
                       </RSelect.Item>
                     ))}

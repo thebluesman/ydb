@@ -3,9 +3,10 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, Scissors, Link2 } from 'lucide-react'
 import { DatePicker } from '@/app/_components/DatePicker'
-import { Select, Badge, Button, Modal, useToast } from '@/app/_components/ui'
+import { Select, Badge, Button, Modal, CategoryDot, useToast } from '@/app/_components/ui'
 import type { BadgeVariant } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
+import { categoryColor } from '@/lib/category-colors'
 import { deleteWithUndo } from './deleteWithUndo'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
@@ -190,7 +191,10 @@ export function LedgerRowCard({
           </p>
 
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            <Badge variant="info" pop>{transaction.category || 'Uncategorized'}</Badge>
+            <Badge variant="info" pop className="gap-1">
+              {transaction.category && <CategoryDot color={categoryColor(transaction.category, categories)} />}
+              {transaction.category || 'Uncategorized'}
+            </Badge>
             <Badge variant={statusCfg.variant} pop>{statusCfg.label}</Badge>
             {transaction.linkedTransferId && (
               <span title="Linked transfer" style={{ color: 'var(--tx-tertiary)' }}><Link2 size={12} /></span>
