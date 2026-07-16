@@ -17,6 +17,29 @@ the app being run with `next dev` instead of a production build.
 
 ---
 
+## 0.5 baseline measurements (M1 exit checkpoint)
+
+Measured 2026-07-16 after 0.2 (WAL/pragmas) and 0.3 (prod build) landed, via
+`npm run build && npm run start` on port 3333, then:
+`curl -so /dev/null -w '%{time_starttransfer}s %{size_download}B\n' http://localhost:3333/<route>`.
+
+| Route | Cold | Warm | Size |
+|---|---|---|---|
+| `/ledger` | 0.018s | 0.001s | 22.5KB |
+| `/dashboard` | 0.124s | 0.007s | 32.2KB |
+
+**Caveats — these numbers are not the real baseline the plan calls for:**
+- Measured on a laptop dev machine, not the actual home-server hardware.
+- `prisma/dev.db` is currently **empty** (0 accounts, 0 transactions). Every route above is
+  reading zero rows, so this says nothing about how full-table reads perform at real data volume
+  — it only confirms prod-mode + WAL didn't break anything.
+- Do not treat this table as grounds to deprioritize M2b (ledger server-side rewrite) or M2a
+  ordering. Re-run the same two `curl` commands against the real deployment once it's populated
+  with live data and replace this table — that result is what should actually gate the M2a-vs-M2b
+  sequencing call the plan describes below.
+
+---
+
 ## 1. Review summary
 
 ### What is good (do not break)
