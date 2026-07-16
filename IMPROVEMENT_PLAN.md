@@ -460,6 +460,64 @@ for both prompts, and cap each message's length.
   arbitrary strings in, which then don't appear in Settings. Cheapest fix: auto-create the category
   (with palette color) on first use, matching the CategoryManager behavior.
 
+> **M5a status (Phase 6): DONE.** Implemented on `claude/m5a-data-integrity`.
+>
+> 1. **6.1 Soften transfer delete cascade — done.** `createdVia String @default("import")` added to
+>    `Transaction` via migration `20260716201136_add_transaction_created_via`. Set to `'manual'` in
+>    `POST /api/transactions/manual` (both the single-row and two-sided-transfer paths) and in the
+>    re-pair branch of `PATCH /api/transactions/[id]` that creates a fresh counterpart. `DELETE
+>    /api/transactions/[id]` now reads the counterpart's `createdVia` before deciding: cascades only
+>    when it's `'manual'`, otherwise nulls `linkedTransferId` on the surviving row and deletes only
+>    the requested row. Response includes `{ deletedCounterpart: boolean }`;
+>    `app/ledger/_components/deleteWithUndo.ts` reads it and swaps the "Transaction deleted" toast
+>    for one explaining the linked transfer was imported and kept unlinked, when applicable. Split-leg
+>    cascade logic in the same route is left explicit (see 6.2) rather than removed.
+> 2. **6.2 DB constraints — done, validated structurally, not against volume.** Follow-on migration
+>    `20260716201150_split_leg_cascade_and_check_constraint` hand-adds
+>    `CHECK ((transactionType = 'debit' AND amount <= 0) OR (transactionType = 'credit' AND amount >= 0) OR transactionType = 'transfer')`
+>    to the rebuilt `Transaction` table and switches `parentTransaction`'s FK to `ON DELETE CASCADE`
+>    (mirrored in `schema.prisma` as `onDelete: Cascade`). The negated-predicate SELECT was run
+>    against `dev.db` before writing the migration and returned 0 rows — **but `dev.db` in this
+>    environment was freshly created from the baseline migration and empty** (no `dev.db` shipped;
+>    per the plan's own prior note it was intentionally cleared), so this is a structural check only,
+>    not a validation against real transaction volume. Confirmed the constraint actually rejects bad
+>    inserts (`CHECK constraint failed` on a manually-crafted violating INSERT) and that the schema/DB
+>    now agree via `prisma generate` + `prisma migrate dev`. The app-level split-leg
+>    `deleteMany({ parentTransactionId })` in `DELETE /api/transactions/[id]` is kept (not removed)
+>    for clarity of what the transaction does, now backed up by the DB-level cascade.
+> 3. **6.3 Bulk reimbursement linking — done.** `GET /api/reimbursements/suggest` scores every
+>    (outstanding expense, candidate credit) pair — same account currency, credit amount within ±1%
+>    of `abs(expense.amount)`, credit dated after the expense, and either `category === 'Reimbursement'`
+>    or description-similarity ≥ 0.4 — then greedily assigns highest-score pairs first so no credit is
+>    suggested for two expenses. The bigram-Dice `similarity()` helper duplicated in
+>    `check-duplicates/route.ts` was extracted to `lib/textSimilarity.ts` (`descriptionSimilarity`) and
+>    both routes now import it. `app/ledger/_components/ReimbursementSuggestModal.tsx` is a new
+>    "Suggest matches" entry point next to the ledger's pending-reimbursements banner
+>    (`LedgerView.tsx`); it lists each suggested pair with Confirm/Dismiss, Confirm calling the
+>    existing `POST /api/transactions/[id]/reimburse`. No new linking logic — the modal is purely a
+>    bulk entry point onto the endpoint that already existed.
+> 4. **6.4 Category referential tidiness — done.** Both `PATCH /api/transactions/bulk` and
+>    `PATCH /api/transactions/[id]` now `prisma.category.upsert` (`update: {}`, so an existing
+>    category's color is never touched) with `colorForCategory()` — the same palette function
+>    `POST /api/categories` already uses — whenever the patch sets a `category` value, instead of
+>    silently letting an orphan string in.
+>
+> **Tests:** `tests/textSimilarity.test.ts` (the extracted similarity heuristic),
+> `tests/reimbursementSuggest.test.ts` (8 cases: category match, description-similarity match, ±1%
+> tolerance rejection, date-ordering rejection, cross-currency rejection, already-linked-settlement
+> exclusion, no-double-assignment, non-committed/already-linked exclusion), and
+> `tests/transactionDeleteCascade.test.ts` (5 cases covering the createdVia cascade/unlink split, no
+> linked transfer, split-leg cascade, and delete-of-missing-row) — all against an in-memory fake of
+> the Prisma calls each route makes, following the existing mock-prisma pattern in
+> `tests/transactionValidation.test.ts` (no route-handler tests existed before this PR to follow, so
+> this establishes that pattern for future route work). `npm run test:run`: 106 passed (was 89).
+> `npm run lint`: same 16 pre-existing errors in untouched files as baseline, zero introduced.
+> `npm run build`: compiles clean, `/api/reimbursements/suggest` listed as a new route.
+>
+> **Caveat:** the CHECK-constraint predicate could only be checked against an empty `dev.db` in this
+> environment (see 6.2 above) — it is unverified against real transaction volume until run against a
+> populated database.
+
 ### Phase 7 — Product gaps (to rival a polished tracker)
 
 Ordered by value for a single home user:
