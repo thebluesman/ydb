@@ -160,6 +160,7 @@ export function CategoryManager({
                   className="text-xs leading-none transition-opacity hover:opacity-100"
                   style={{ color: 'inherit', opacity: 0.75 }}
                   title="Save"
+                  aria-label="Save"
                 >
                   {editSaving ? '…' : <Check size={10} />}
                 </button>
@@ -168,6 +169,7 @@ export function CategoryManager({
                   className="text-xs leading-none transition-opacity hover:opacity-100"
                   style={{ color: 'inherit', opacity: 0.6 }}
                   title="Cancel"
+                  aria-label="Cancel"
                 >
                   <X size={10} />
                 </button>

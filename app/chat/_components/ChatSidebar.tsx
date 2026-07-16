@@ -57,28 +57,33 @@ function SessionList({ sessions, activeSessionId, onSelectSession, onNewSession,
           return (
             <div
               key={s.id}
-              className="group flex items-start gap-1 px-2 py-2 rounded-[6px] cursor-pointer transition-colors duration-100"
+              className="group flex items-start gap-1 px-2 py-2 rounded-[6px] transition-colors duration-100 focus-within:bg-[var(--bg-card-alt)]"
               style={{
                 backgroundColor: isActive ? 'var(--bg-nav-active)' : 'transparent',
               }}
               onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)' }}
               onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.backgroundColor = 'transparent' }}
-              onClick={() => onSelectSession(s.id)}
             >
-              <div className="flex-1 min-w-0">
+              <button
+                onClick={() => onSelectSession(s.id)}
+                aria-current={isActive ? 'true' : undefined}
+                aria-label={`${s.title}, updated ${relativeTime(s.updatedAt)}`}
+                className="flex-1 min-w-0 text-left"
+              >
                 <p
                   className="text-xs font-medium truncate leading-tight"
                   style={{ color: isActive ? 'var(--tx-nav-active)' : 'var(--tx-primary)' }}
                 >
                   {s.title}
                 </p>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--tx-faint)' }}>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--tx-faint)' }}>
                   {relativeTime(s.updatedAt)}
                 </p>
-              </div>
+              </button>
               <button
                 onClick={(e) => { e.stopPropagation(); onDeleteSession(s.id) }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity duration-100 mt-0.5 shrink-0"
+                aria-label={`Delete chat: ${s.title}`}
+                className="opacity-40 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity duration-100 mt-0.5 shrink-0"
                 style={{ color: 'var(--tx-tertiary)' }}
                 onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--tx-error)')}
                 onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--tx-tertiary)')}

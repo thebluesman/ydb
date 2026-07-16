@@ -55,16 +55,19 @@ function SimpleSelect({
   options,
   placeholder,
   width,
+  ariaLabel,
 }: {
   value: string
   onChange: (v: string) => void
   options: { value: string; label: string }[]
   placeholder?: string
   width?: string
+  ariaLabel?: string
 }) {
   return (
     <Select.Root value={value} onValueChange={onChange}>
       <Select.Trigger
+        aria-label={ariaLabel}
         className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-[6px] outline-none"
         style={{ ...inputStyle, minWidth: width ?? '120px' }}
       >
@@ -384,7 +387,7 @@ export function VendorRuleManager({
                     {repRule.category}
                   </button>
 
-                  <span className="text-[11px] shrink-0" style={{ color: 'var(--tx-faint)' }}>
+                  <span className="text-xs shrink-0" style={{ color: 'var(--tx-faint)' }}>
                     {vendorRules.length} pattern{vendorRules.length !== 1 ? 's' : ''} · {totalMatched} matched
                   </span>
 
@@ -459,12 +462,12 @@ export function VendorRuleManager({
                       </div>
 
                       {/* Matched count */}
-                      <span className="text-[11px] shrink-0 tabular-nums" style={{ color: rule.matchCount > 0 ? 'var(--tx-faint)' : 'var(--tx-faint)', opacity: rule.matchCount === 0 ? 0.4 : 1 }}>
+                      <span className="text-xs shrink-0 tabular-nums" style={{ color: rule.matchCount > 0 ? 'var(--tx-faint)' : 'var(--tx-faint)', opacity: rule.matchCount === 0 ? 0.4 : 1 }}>
                         {rule.matchCount} matched
                       </span>
 
                       {/* Actions — visible on hover */}
-                      <div className="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0">
+                      <div className="flex items-center gap-2.5 opacity-40 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150 shrink-0">
                         <button
                           onClick={() => editingRuleId === rule.id ? setEditingRuleId(null) : startEdit(rule)}
                           className="btn text-xs transition-colors hover:opacity-80"
@@ -515,6 +518,7 @@ export function VendorRuleManager({
                               onChange={(v) => setEditDraft((d) => ({ ...d, matchType: v }))}
                               options={MATCH_TYPES.map((m) => ({ value: m.value, label: m.label }))}
                               width="130px"
+                              ariaLabel="Match type"
                             />
                           </div>
                           <div>
@@ -524,6 +528,7 @@ export function VendorRuleManager({
                               onChange={(v) => setEditDraft((d) => ({ ...d, direction: v }))}
                               options={DIRECTIONS}
                               width="150px"
+                              ariaLabel="Direction"
                             />
                           </div>
                           <div>
@@ -561,6 +566,7 @@ export function VendorRuleManager({
                               onChange={(v) => setEditDraft((d) => ({ ...d, category: v }))}
                               options={allCategories.map((c) => ({ value: c, label: c }))}
                               width="130px"
+                              ariaLabel="Category"
                             />
                           </div>
                           <div>
@@ -575,6 +581,7 @@ export function VendorRuleManager({
                                 { value: 'transfer', label: 'Transfer' },
                               ]}
                               width="140px"
+                              ariaLabel="Set type"
                             />
                           </div>
                         </div>
@@ -629,7 +636,7 @@ export function VendorRuleManager({
                                     <div className="flex-1 min-w-0">
                                       <div className="truncate" style={{ color: 'var(--tx-primary)' }}>{tx.description}</div>
                                       {tx.originalDescription && tx.originalDescription !== tx.description && (
-                                        <div className="truncate text-[10px]" style={{ color: 'var(--tx-faint)' }}>{tx.originalDescription}</div>
+                                        <div className="truncate text-xs" style={{ color: 'var(--tx-faint)' }}>{tx.originalDescription}</div>
                                       )}
                                     </div>
                                     <span
@@ -701,6 +708,7 @@ export function VendorRuleManager({
             </label>
             <Select.Root value={addCategory} onValueChange={setAddCategory}>
               <Select.Trigger
+                aria-label="Category"
                 className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none min-w-[120px]"
                 style={inputStyle}
               >
@@ -765,6 +773,7 @@ export function VendorRuleManager({
                 onChange={setAddMatchType}
                 options={MATCH_TYPES.map((m) => ({ value: m.value, label: m.label }))}
                 width="130px"
+                ariaLabel="Match type"
               />
             </div>
             <div>
@@ -774,6 +783,7 @@ export function VendorRuleManager({
                 onChange={setAddDirection}
                 options={DIRECTIONS}
                 width="160px"
+                ariaLabel="Direction"
               />
             </div>
             <div>
@@ -788,6 +798,7 @@ export function VendorRuleManager({
                   { value: 'transfer', label: 'Transfer' },
                 ]}
                 width="140px"
+                ariaLabel="Set type"
               />
             </div>
             <div>

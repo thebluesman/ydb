@@ -170,6 +170,7 @@ function CategorySelect({
       onOpenChange={(open) => { if (!open) setSearch('') }}
     >
       <RSelect.Trigger
+        aria-label="Category"
         className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
         style={inputStyle}
       >
@@ -362,6 +363,7 @@ function AccountSelect({
   return (
     <RSelect.Root value={String(value)} onValueChange={handleChange}>
       <RSelect.Trigger
+        aria-label="Account"
         className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
         style={inputStyle}
       >
@@ -508,7 +510,7 @@ const Row = memo(function Row({
           />
           {d.originalDescription && d.originalDescription !== d.description && (
             <div
-              className="text-[11px] truncate px-0.5"
+              className="text-xs truncate px-0.5"
               style={{ color: 'var(--tx-faint)' }}
               title={d.originalDescription}
             >

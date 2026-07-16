@@ -162,6 +162,7 @@ export function LedgerRowCard({
             checked={!!selected}
             onChange={() => onToggleSelect(transaction.id)}
             className="mt-1 cursor-pointer shrink-0"
+            aria-label={`Select transaction: ${transaction.description}`}
           />
         )}
 
@@ -192,7 +193,7 @@ export function LedgerRowCard({
               <span title="Split transaction" style={{ color: 'var(--tx-tertiary)' }}><Scissors size={12} /></span>
             )}
             {transaction.account.name && (
-              <span className="text-[11px]" style={{ color: 'var(--tx-faint)' }}>{transaction.account.name}</span>
+              <span className="text-xs" style={{ color: 'var(--tx-faint)' }}>{transaction.account.name}</span>
             )}
           </div>
         </div>

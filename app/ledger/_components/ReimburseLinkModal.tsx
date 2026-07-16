@@ -128,7 +128,7 @@ export function ReimburseLinkModal({
                 <p className="text-xs font-medium truncate" style={{ color: 'var(--tx-primary)' }}>
                   {t.description}
                 </p>
-                <p className="text-[11px]" style={{ color: 'var(--tx-secondary)' }}>
+                <p className="text-xs" style={{ color: 'var(--tx-secondary)' }}>
                   {formatDate(t.date)} · {t.account.name}
                 </p>
               </div>
