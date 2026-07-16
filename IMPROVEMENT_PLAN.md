@@ -19,24 +19,42 @@ the app being run with `next dev` instead of a production build.
 
 ## 0.5 baseline measurements (M1 exit checkpoint)
 
-Measured 2026-07-16 after 0.2 (WAL/pragmas) and 0.3 (prod build) landed, via
-`npm run build && npm run start` on port 3333, then:
+Measured 2026-07-16, on the actual home-server machine (this laptop), after 0.2 (WAL/pragmas)
+and 0.3 (prod build) landed, via `npm run build && npm run start` on port 3333, then:
 `curl -so /dev/null -w '%{time_starttransfer}s %{size_download}B\n' http://localhost:3333/<route>`.
+Three data points, measured in sequence against the same code:
 
-| Route | Cold | Warm | Size |
-|---|---|---|---|
-| `/ledger` | 0.018s | 0.001s | 22.5KB |
-| `/dashboard` | 0.124s | 0.007s | 32.2KB |
+| Data state | Route | Cold | Warm | Size |
+|---|---|---|---|---|
+| Empty DB (0 tx, 0 accounts) | `/ledger` | 0.018s | 0.001s | 22.5KB |
+| Empty DB (0 tx, 0 accounts) | `/dashboard` | 0.124s | 0.007s | 32.2KB |
+| Real data, restored from `backups/ydb-2026-05-20_06-59-04.db` (119 tx, 8 accounts) | `/ledger` | 0.018s | 0.001s | 22.5KB |
+| Real data (119 tx, 8 accounts) | `/dashboard` | 0.130s | 0.010s | 55.0KB |
+| Synthetic seed on top of real accounts (50,119 tx, 8 accounts) | `/ledger` | 0.016s | 0.002s | 22.5KB |
+| Synthetic seed (50,119 tx, 8 accounts) | `/dashboard` | **0.488s** | **0.302s** | 58.5KB |
 
-**Caveats — these numbers are not the real baseline the plan calls for:**
-- Measured on a laptop dev machine, not the actual home-server hardware.
-- `prisma/dev.db` is currently **empty** (0 accounts, 0 transactions). Every route above is
-  reading zero rows, so this says nothing about how full-table reads perform at real data volume
-  — it only confirms prod-mode + WAL didn't break anything.
-- Do not treat this table as grounds to deprioritize M2b (ledger server-side rewrite) or M2a
-  ordering. Re-run the same two `curl` commands against the real deployment once it's populated
-  with live data and replace this table — that result is what should actually gate the M2a-vs-M2b
-  sequencing call the plan describes below.
+**Reading this:**
+- `dev.db` was empty going into this session because the real data was intentionally cleared
+  pending this rework; a real 119-row backup existed at `backups/ydb-2026-05-20_06-59-04.db`
+  (two more recent backups, `05-28` and today's, are also empty).
+- `/ledger`'s response size and latency **don't move at all** across 0 → 119 → 50k rows — its
+  route only serves the client shell; the actual transaction data is fetched client-side after
+  hydration, so this curl-based test doesn't exercise the ledger's real cost at all. That in
+  itself confirms the plan's Phase 1 diagnosis (full client-side fetch/filter) rather than
+  refuting it — a proper ledger measurement needs to time the client-side data fetch, not the
+  initial HTML.
+- `/dashboard` **is** SSR'd and shows the predicted degradation directly: 10ms warm at 119 rows →
+  302ms warm at 50k rows, a ~30x regression from a 420x increase in row count. This confirms
+  root cause #2 (dashboard aggregates in JS across every committed transaction) and is a real
+  signal, not a synthetic-data artifact — accounts were real, only the transaction rows were
+  generated.
+- `dev.db` was restored to its pre-session empty state after this test (your call — you're
+  holding off on re-entering real data until further into the rework). The 119-row real backup is
+  untouched at its original path.
+- **Conclusion for M2 sequencing:** this settles it — M2b (server-driven ledger) and Phase 2
+  (SQL dashboard aggregation) stay high-priority and go before U-phase-only work; the dashboard
+  number alone shows the full-table-JS-aggregation problem is real and already significant at
+  50k rows, which is a plausible multi-year size for a single-user tracker.
 
 ---
 
