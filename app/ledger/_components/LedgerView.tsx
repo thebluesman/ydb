@@ -681,6 +681,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                     onUpdate={handleUpdate}
                     onUpdateById={handleUpdateById}
                     onDelete={handleDelete}
+                    onRestore={refetch}
                     selected={selectedIds.has(t.id)}
                     onToggleSelect={toggleSelectRow}
                   />

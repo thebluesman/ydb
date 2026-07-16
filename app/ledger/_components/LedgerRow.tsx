@@ -100,6 +100,7 @@ function LedgerRowInner({
   onUpdate,
   onUpdateById,
   onDelete,
+  onRestore,
   selected,
   onToggleSelect,
 }: {
@@ -109,6 +110,8 @@ function LedgerRowInner({
   onUpdate: (updated: Transaction) => void
   onUpdateById?: (id: number, patch: Partial<Transaction>) => void
   onDelete: (id: number) => void
+  /** Called after a delete is undone, so the ledger can refetch and show the restored row. */
+  onRestore?: () => void
   selected?: boolean
   onToggleSelect?: (id: number) => void
 }) {
@@ -205,7 +208,53 @@ function LedgerRowInner({
       if (!res.ok) throw new Error(`Server returned ${res.status}`)
       setConfirmingDelete(false)
       onDelete(transaction.id)
-      toast.success('Transaction deleted')
+
+      // Snapshot the deleted row so Undo can re-POST it. Recreated rows get a
+      // new id and lose split-leg/transfer ids, but this is cheaper than
+      // soft-delete and good enough for home use.
+      const restore = {
+        date: typeof transaction.date === 'string' ? transaction.date : transaction.date.toISOString(),
+        amount: transaction.amount,
+        description: transaction.description,
+        transactionType: transaction.transactionType,
+        category: transaction.category,
+        accountId: transaction.accountId,
+        notes: transaction.notes ?? undefined,
+        status: transaction.status,
+        transferCounterpartAccountId: transaction.transferCounterpartAccountId ?? undefined,
+      }
+      const splitLegs = transaction.splitLegs
+
+      toast.success('Transaction deleted', {
+        duration: 5000,
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            try {
+              const recreateRes = await fetch('/api/transactions/manual', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(restore),
+              })
+              if (!recreateRes.ok) throw new Error(`Server returned ${recreateRes.status}`)
+              const recreated = await recreateRes.json()
+              if (splitLegs && splitLegs.length > 0) {
+                await fetch(`/api/transactions/${recreated.id}/split`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    legs: splitLegs.map((l) => ({ amount: l.amount, category: l.category, description: l.description })),
+                  }),
+                })
+              }
+              onRestore?.()
+              toast.success('Transaction restored')
+            } catch (e) {
+              toast.error(`Could not restore transaction: ${e instanceof Error ? e.message : String(e)}`)
+            }
+          },
+        },
+      })
     } catch (e) {
       toast.error(`Could not delete transaction: ${e instanceof Error ? e.message : String(e)}`)
     } finally {

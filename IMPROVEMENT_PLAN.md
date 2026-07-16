@@ -310,17 +310,26 @@ for both prompts, and cap each message's length.
 > capped to the last 8 messages), 3.6 (timeouts, abort forwarding, `temperature: 0` for SQL gen,
 > `GET /api/ollama/health`).
 
-### Phase 4 — Client rendering cleanups
+### Phase 4 — Client rendering cleanups ✅ (M4)
 
-- **Guide:** remove `'use client'` from `GuideView.tsx` (extract any interactive bits into small
-  client leaf components) so 1,500 lines of static JSX render on the server and leave the bundle.
-- **Ledger:** done in Phase 1 (memo + debounce). Also replace `alert()`/`confirm()`
-  (`LedgerView.tsx:246`, `LedgerRow.tsx:266`) with an inline confirm popover and a toast component;
-  add "Undo" to delete by keeping the deleted row payload client-side and re-POSTing on undo (5 s
-  window) — cheaper than soft-delete and good enough for home use.
-- **Chat:** `bottomRef.scrollIntoView({behavior:'smooth'})` on every token causes jitter — scroll
-  instantly while streaming, and only if the user is already near the bottom.
-- **Dashboard:** memoize chart data transforms if profiling shows re-render cost; otherwise leave.
+- **Guide:** ✅ removed `'use client'` from `GuideView.tsx`. The four interactive demo widgets
+  (`FormatDemo`, `TransactionRowDemo`, `ChatConversationDemo`, `ReimbursementDemo`) moved to
+  `GuideDemos.tsx`; the scrollspy sidebar nav moved to `GuideNav.tsx`. `GuideView.tsx` is now a
+  Server Component — confirmed by the build output showing `/guide` as `○ (Static)`.
+- **Ledger:** done in Phase 1 (memo + debounce). `alert()`/`confirm()` had already been replaced by
+  a `Modal`-based confirm dialog + toast system during M3 (no native dialogs remained by the time
+  this phase started). ✅ Added "Undo" to delete: `LedgerRow.tsx` snapshots the deleted row
+  (including split legs and transfer counterpart id) before calling `DELETE`, then shows a 5s toast
+  with an Undo action that re-POSTs to `/api/transactions/manual` (and replays `/[id]/split` for
+  split legs) and triggers a ledger refetch. Recreated rows get new ids — acceptable per the plan's
+  own "cheaper than soft-delete, good enough for home use" framing.
+- **Chat:** ✅ fixed. `ChatPane.tsx` now checks whether the message thread is scrolled near the
+  bottom before auto-scrolling, and uses `behavior: 'auto'` (instant) while a response is streaming,
+  `'smooth'` once it's done — eliminates the per-token jitter from `smooth` scrolling on every chunk.
+- **Dashboard:** verified — no client-side chart data transform pipeline exists to memoize. Chart
+  components (`DashboardView.tsx`, `NetWorthWidget.tsx`, `CategoryTrendChart.tsx`) receive
+  pre-aggregated data straight from server props (Phase 2's SQL aggregation) and pass it directly to
+  `recharts`. Left as-is per the plan's own "otherwise leave" branch.
 
 ### Phase 5 — LLM pipeline quality
 
