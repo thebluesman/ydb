@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { validateTransactionWrite } from '@/lib/transactionValidation'
+import { colorForCategory } from '@/lib/category-colors'
 
 const INCLUDE = {
   account: { select: { name: true, currency: true } },
@@ -60,6 +61,16 @@ export async function PATCH(
     ...(body.notes !== undefined && { notes: body.notes ?? null }),
     ...(body.reimbursableFor !== undefined && { reimbursableFor: body.reimbursableFor }),
     ...(body.transferCounterpartAccountId !== undefined && { transferCounterpartAccountId: body.transferCounterpartAccountId }),
+  }
+
+  // Ledger lets arbitrary category strings in; auto-create rather than reject
+  // so it shows up in Settings too (Phase 6.4).
+  if (body.category) {
+    await prisma.category.upsert({
+      where: { name: body.category },
+      update: {},
+      create: { name: body.category, color: colorForCategory(body.category) },
+    })
   }
 
   // Re-pair the counterpart if the user moved the transfer to a different
@@ -128,6 +139,7 @@ export async function PATCH(
           notes: body.notes !== undefined ? (body.notes ?? null) : existing.notes,
           transferCounterpartAccountId: newOwnAccountId,
           linkedTransferId: txId,
+          createdVia: 'manual',
         },
       })
       await tx.transaction.update({
@@ -180,28 +192,38 @@ export async function DELETE(
   // linked transfer leaves an orphan row with a stale linkedTransferId.
   const existing = await prisma.transaction.findUnique({
     where: { id: txId },
-    include: { splitLegs: { select: { id: true } } },
+    include: {
+      splitLegs: { select: { id: true } },
+      linkedTransfer: { select: { id: true, createdVia: true } },
+    },
   })
   if (!existing) return NextResponse.json({ ok: true })
 
+  // Only cascade-delete the counterpart when it was created in-app (an
+  // in-app transfer's other leg has no independent existence outside the
+  // pair). A counterpart that was imported from a statement is a real row
+  // the user doesn't expect to vanish — unlink instead (FOLLOWUPS §2).
+  const counterpart = existing.linkedTransfer
+  const shouldDeleteCounterpart = counterpart?.createdVia === 'manual'
+
   await prisma.$transaction(async (tx) => {
-    // Null out the back-pointer first so the second update in a linked pair
-    // doesn't FK-reference a row that's about to be deleted.
-    if (existing.linkedTransferId) {
-      await tx.transaction.update({
-        where: { id: existing.linkedTransferId },
-        data: { linkedTransferId: null },
-      })
+    // Null out the back-pointer either way — either the counterpart is about
+    // to be deleted (so it can't FK-reference this soon-gone row) or it's
+    // surviving unlinked (FOLLOWUPS §2).
+    if (counterpart) {
+      await tx.transaction.update({ where: { id: counterpart.id }, data: { linkedTransferId: null } })
     }
-    // Split legs are owned by the parent; cascade.
+    // Split legs are owned by the parent; cascade. (The DB also does this via
+    // ON DELETE CASCADE on parentTransactionId as of the 6.2 migration — kept
+    // explicit here for clarity of what this transaction does.)
     if (existing.splitLegs.length > 0) {
       await tx.transaction.deleteMany({ where: { parentTransactionId: txId } })
     }
     await tx.transaction.delete({ where: { id: txId } })
-    if (existing.linkedTransferId) {
-      await tx.transaction.delete({ where: { id: existing.linkedTransferId } })
+    if (counterpart && shouldDeleteCounterpart) {
+      await tx.transaction.delete({ where: { id: counterpart.id } })
     }
   })
 
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, deletedCounterpart: shouldDeleteCounterpart })
 }

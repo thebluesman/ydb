@@ -49,6 +49,7 @@ export async function POST(request: Request) {
     notes: body.notes ?? null,
     status: body.status ?? 'committed',
     reimbursableFor: body.reimbursableFor ?? null,
+    createdVia: 'manual',
   }
 
   // Non-transfer (or transfer without a counterpart): one-row create, same as before.

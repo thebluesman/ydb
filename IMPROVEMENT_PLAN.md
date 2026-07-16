@@ -460,6 +460,64 @@ for both prompts, and cap each message's length.
   arbitrary strings in, which then don't appear in Settings. Cheapest fix: auto-create the category
   (with palette color) on first use, matching the CategoryManager behavior.
 
+> **M5a status (Phase 6): DONE.** Implemented on `claude/m5a-data-integrity`.
+>
+> 1. **6.1 Soften transfer delete cascade — done.** `createdVia String @default("import")` added to
+>    `Transaction` via migration `20260716201136_add_transaction_created_via`. Set to `'manual'` in
+>    `POST /api/transactions/manual` (both the single-row and two-sided-transfer paths) and in the
+>    re-pair branch of `PATCH /api/transactions/[id]` that creates a fresh counterpart. `DELETE
+>    /api/transactions/[id]` now reads the counterpart's `createdVia` before deciding: cascades only
+>    when it's `'manual'`, otherwise nulls `linkedTransferId` on the surviving row and deletes only
+>    the requested row. Response includes `{ deletedCounterpart: boolean }`;
+>    `app/ledger/_components/deleteWithUndo.ts` reads it and swaps the "Transaction deleted" toast
+>    for one explaining the linked transfer was imported and kept unlinked, when applicable. Split-leg
+>    cascade logic in the same route is left explicit (see 6.2) rather than removed.
+> 2. **6.2 DB constraints — done, validated structurally, not against volume.** Follow-on migration
+>    `20260716201150_split_leg_cascade_and_check_constraint` hand-adds
+>    `CHECK ((transactionType = 'debit' AND amount <= 0) OR (transactionType = 'credit' AND amount >= 0) OR transactionType = 'transfer')`
+>    to the rebuilt `Transaction` table and switches `parentTransaction`'s FK to `ON DELETE CASCADE`
+>    (mirrored in `schema.prisma` as `onDelete: Cascade`). The negated-predicate SELECT was run
+>    against `dev.db` before writing the migration and returned 0 rows — **but `dev.db` in this
+>    environment was freshly created from the baseline migration and empty** (no `dev.db` shipped;
+>    per the plan's own prior note it was intentionally cleared), so this is a structural check only,
+>    not a validation against real transaction volume. Confirmed the constraint actually rejects bad
+>    inserts (`CHECK constraint failed` on a manually-crafted violating INSERT) and that the schema/DB
+>    now agree via `prisma generate` + `prisma migrate dev`. The app-level split-leg
+>    `deleteMany({ parentTransactionId })` in `DELETE /api/transactions/[id]` is kept (not removed)
+>    for clarity of what the transaction does, now backed up by the DB-level cascade.
+> 3. **6.3 Bulk reimbursement linking — done.** `GET /api/reimbursements/suggest` scores every
+>    (outstanding expense, candidate credit) pair — same account currency, credit amount within ±1%
+>    of `abs(expense.amount)`, credit dated after the expense, and either `category === 'Reimbursement'`
+>    or description-similarity ≥ 0.4 — then greedily assigns highest-score pairs first so no credit is
+>    suggested for two expenses. The bigram-Dice `similarity()` helper duplicated in
+>    `check-duplicates/route.ts` was extracted to `lib/textSimilarity.ts` (`descriptionSimilarity`) and
+>    both routes now import it. `app/ledger/_components/ReimbursementSuggestModal.tsx` is a new
+>    "Suggest matches" entry point next to the ledger's pending-reimbursements banner
+>    (`LedgerView.tsx`); it lists each suggested pair with Confirm/Dismiss, Confirm calling the
+>    existing `POST /api/transactions/[id]/reimburse`. No new linking logic — the modal is purely a
+>    bulk entry point onto the endpoint that already existed.
+> 4. **6.4 Category referential tidiness — done.** Both `PATCH /api/transactions/bulk` and
+>    `PATCH /api/transactions/[id]` now `prisma.category.upsert` (`update: {}`, so an existing
+>    category's color is never touched) with `colorForCategory()` — the same palette function
+>    `POST /api/categories` already uses — whenever the patch sets a `category` value, instead of
+>    silently letting an orphan string in.
+>
+> **Tests:** `tests/textSimilarity.test.ts` (the extracted similarity heuristic),
+> `tests/reimbursementSuggest.test.ts` (8 cases: category match, description-similarity match, ±1%
+> tolerance rejection, date-ordering rejection, cross-currency rejection, already-linked-settlement
+> exclusion, no-double-assignment, non-committed/already-linked exclusion), and
+> `tests/transactionDeleteCascade.test.ts` (5 cases covering the createdVia cascade/unlink split, no
+> linked transfer, split-leg cascade, and delete-of-missing-row) — all against an in-memory fake of
+> the Prisma calls each route makes, following the existing mock-prisma pattern in
+> `tests/transactionValidation.test.ts` (no route-handler tests existed before this PR to follow, so
+> this establishes that pattern for future route work). `npm run test:run`: 106 passed (was 89).
+> `npm run lint`: same 16 pre-existing errors in untouched files as baseline, zero introduced.
+> `npm run build`: compiles clean, `/api/reimbursements/suggest` listed as a new route.
+>
+> **Caveat:** the CHECK-constraint predicate could only be checked against an empty `dev.db` in this
+> environment (see 6.2 above) — it is unverified against real transaction volume until run against a
+> populated database.
+
 ### Phase 7 — Product gaps (to rival a polished tracker)
 
 Ordered by value for a single home user:
@@ -663,7 +721,7 @@ Verify: `grep -rn "F59E0B\|92400E\|rgba(245" app --include='*.tsx'` returns noth
 dark-mode screenshots of a transfer-heavy ledger page are legible; every screen has at most one
 orange button visible per section.
 
-### Phase U2 — Accessibility pass
+### Phase U2 — Accessibility pass ✅ (M5b)
 
 - Replace all hand-rolled modals with the new Radix `Modal.tsx` (U1). Keep the DangerZone
   typed-confirmation content — it's a good pattern; make it the standard destructive-confirm.
@@ -681,6 +739,59 @@ orange button visible per section.
   message container.
 - Verify: keyboard-only walkthrough of ledger edit, upload commit, and danger-zone flows; axe
   DevTools (or `@axe-core/playwright` in the Phase 8 smoke) reports no critical issues.
+
+> **M5b status:** done, verified with a real `@axe-core/playwright` scan (dev-only dependency,
+> not added to `package.json`) against `/ledger`, `/dashboard`, `/chat`, `/settings`, `/upload`.
+> **Modals:** confirmed all modals already route through `Modal.tsx` (DangerZone, TransferLinkModal,
+> ReimburseLinkModal, AddCategoryModal, AddAccountModal, LedgerRow's delete confirm,
+> LedgerRowCard) — no hand-rolled portals or `alert`/`confirm` remained; this had already landed by
+> M3/M4 as the plan predicted. **Icon-only buttons:** added the handful of missing `aria-label`s
+> (LedgerRow's unlink/link/split actions, LedgerView's filter-chip clear buttons, CategoryManager's
+> save/cancel), then went further based on what axe actually flagged with real ledger rows: the
+> per-row/select-all checkboxes had no accessible name (`label-title-only`/`label` violations —
+> `title` alone isn't sufficient), several Radix `Select` triggers across LedgerView/ReviewTable/
+> BudgetManager/VendorRuleManager/PreferencesForm rendered with no accessible name despite visible
+> text (Radix quirk — content alone didn't satisfy the accessible-name computation; fixed by adding
+> explicit `aria-label`/threading an `ariaLabel` prop through the `Select`/`SimpleSelect`
+> wrappers), the empty actions `<th>` got a `sr-only` label, and the upload dropzone's hidden file
+> input got an `aria-label`. **Sortable headers:** `LedgerView`'s date/description/amount/category
+> headers are now `<button>` inside `<th aria-sort>`, verified `aria-sort` flips
+> none→ascending→descending on click via Playwright. **Row actions:** ledger row and
+> VendorRuleManager pattern-row actions go from `opacity-0` to `opacity-40`, with
+> `group-focus-within:opacity-100` added alongside `group-hover`; a global
+> `button/a/[role=button]/[role=tab]/summary:focus-visible` rule (reusing `--focus-ring`) was added
+> to `globals.css` so DatePicker/calendar buttons, nav links, and Select triggers all get a visible
+> ring where they previously had bare `outline: none`. **Contrast:** `--tx-faint` and
+> `--tx-tertiary` raised (light: 0.35→0.64, 0.40→0.66; dark: 0.35→0.50, 0.40→0.53 alpha) — both now
+> clear 4.5:1 against `--bg-card`/`--bg-page` (verified with a contrast-ratio script, not just
+> eyeballed); the dozen or so genuinely-informative sub-12px text spots found via grep (original
+> descriptions, notes, account-name captions, chat timestamps, credit-utilization captions) were
+> bumped to `text-xs` (12px) — uppercase field/table-header labels and badges stayed at their
+> existing 10–11px since `.text-card-label` (11px) is itself an established U1.5 token, not a new
+> violation. **Caveat found but out of scope:** the axe scan also surfaced that `--tx-secondary`
+> (0.55 alpha, used for nav links, table headers, and the `--tx-positive`/`--tx-negative` status
+> colors on tinted badge backgrounds) sits around 3.4–4.2:1, short of AA — this is a much larger,
+> pre-existing design-system-wide issue (hundreds of nodes across every page) outside this phase's
+> explicit `--tx-faint`/`--tx-tertiary` scope and the "no visual redesign" non-goal; flagged here as
+> a candidate for a future U1.5/U6 follow-up rather than fixed inline. Also unfixed: `/chat` has no
+> `<h1>` (axe `page-has-heading-one`, moderate, page-level IA decision beyond this phase).
+> **Reduced motion:** added a `prefers-reduced-motion: reduce` block in `globals.css` that zeroes
+> `animation-duration`/`animation-iteration-count` globally (`!important`, since several entrance
+> animations — calendar popover, toast, drawer — are inline `style` values that a class-scoped
+> `no-preference` wrapper couldn't reach); CSS `transition`s used for hover/focus feedback are
+> untouched. **System theme:** the `theme-init` inline script now falls back to
+> `prefers-color-scheme: dark` when `localStorage` has no `theme` key or the key is `'system'`;
+> `ThemeToggle` is a 3-way light→dark→system cycle button, storing `'system'` and re-checking
+> `matchMedia` at read time (plus a live `change` listener while `system` is active, so an OS theme
+> flip is reflected without a reload). **Chat:** `ChatSidebar` session rows are now `<button>`s with
+> `aria-label`/`aria-current`, restructured as a sibling to the delete button instead of nesting a
+> button inside a clickable div; `ChatPane`'s message-thread container has
+> `role="log" aria-live="polite" aria-relevant="additions text"` (not `assertive`, so streaming
+> tokens don't interrupt). **Verified:** `npm run test:run`/`lint`/`build` all green (lint's 16
+> errors/13 warnings are pre-existing on `main`, unchanged by this PR); a Playwright keyboard-only
+> walkthrough confirmed Enter opens the ledger edit drawer and the DangerZone modal, focus moves
+> into the modal, and Escape closes it; axe found zero `critical`/`serious` issues left on the
+> four pages other than the pre-existing `--tx-secondary` contrast caveat above.
 
 ### Phase U3 — Responsive / mobile ✅ (M4)
 

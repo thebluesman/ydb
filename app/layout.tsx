@@ -43,12 +43,14 @@ export default function RootLayout({
     <html lang="en" className={`${clashDisplay.variable} ${clashGrotesk.variable} ${ibmPlexMono.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col">
         <ToastProvider>
-        {/* Prevent flash of wrong theme */}
+        {/* Prevent flash of wrong theme. 'system' (or no stored preference at
+            all) falls back to prefers-color-scheme so first visit respects
+            the OS setting instead of always landing on light. */}
         <Script
           id="theme-init"
           strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark')}catch(e){}})()`,
+            __html: `(function(){try{var t=localStorage.getItem('theme');var d=t==='dark'||(t!=='light'&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark')}catch(e){}})()`,
           }}
         />
         <header
