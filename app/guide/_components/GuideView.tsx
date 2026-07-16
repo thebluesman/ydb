@@ -1,24 +1,7 @@
-'use client'
-
-import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, ArrowRight, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RefreshCw, Target, RotateCcw, CheckCircle2, FlaskConical, AlertTriangle, History, Settings } from 'lucide-react'
-
-const SECTIONS = [
-  { id: 'overview',        label: 'Overview',        num: '00' },
-  { id: 'accounts',        label: 'Accounts',         num: '01' },
-  { id: 'upload',          label: 'Upload',           num: '02' },
-  { id: 'review',          label: 'Review',           num: '03' },
-  { id: 'ledger',          label: 'Ledger',           num: '04' },
-  { id: 'categories',      label: 'Categories & AI',  num: '05' },
-  { id: 'budgets',         label: 'Budgets',          num: '06' },
-  { id: 'dashboard',       label: 'Dashboard',        num: '07' },
-  { id: 'recurring',       label: 'Recurring',        num: '08' },
-  { id: 'chat',            label: 'Chat',             num: '09' },
-  { id: 'reimbursements',  label: 'Reimbursements',   num: '10' },
-  { id: 'backups',         label: 'Backups',          num: '11' },
-  { id: 'settings',        label: 'Settings',         num: '12' },
-]
+import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RefreshCw, Target, RotateCcw, CheckCircle2, FlaskConical, AlertTriangle, History, Settings } from 'lucide-react'
+import { GuideNav } from './GuideNav'
+import { FormatDemo, TransactionRowDemo, ChatConversationDemo, ReimbursementDemo } from './GuideDemos'
 
 // ── Inline demo components ────────────────────────────────────────────────────
 
@@ -106,78 +89,6 @@ function AccountCardDemo({ currency }: { currency: string }) {
           </div>
         </div>
       ))}
-    </div>
-  )
-}
-
-function FormatDemo() {
-  const [active, setActive] = useState('credit-card')
-  const formats = [
-    { id: 'credit-card', label: 'Credit Card', hint: 'Single amount column. Positive = expense, CR suffix = payment.' },
-    { id: 'bank-account', label: 'Bank Account', hint: 'Separate Debit and Credit columns.' },
-    { id: 'auto', label: 'Auto', hint: "Let Qwen figure it out — works for most statements." },
-  ]
-  const active_fmt = formats.find(f => f.id === active)
-  return (
-    <div className="space-y-3">
-      <div className="flex gap-2 flex-wrap justify-center">
-        {formats.map((f) => (
-          <button
-            key={f.id}
-            onClick={() => setActive(f.id)}
-            className="btn px-3 py-1.5 text-sm rounded-[8px] transition-all duration-150"
-            style={{
-              background: active === f.id ? 'var(--bg-selected)' : 'var(--bg-btn)',
-              color: active === f.id ? 'var(--tx-selected)' : 'var(--tx-secondary)',
-              border: `1px solid ${active === f.id ? 'var(--bg-selected)' : 'var(--border-warm)'}`,
-            }}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-      <p className="text-sm text-center" style={{ color: 'var(--tx-secondary)' }}>{active_fmt?.hint}</p>
-    </div>
-  )
-}
-
-function TransactionRowDemo({ currency }: { currency: string }) {
-  const [committed, setCommitted] = useState(false)
-  return (
-    <div className="space-y-2">
-      <div
-        className="flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
-      >
-        <span className="w-24 shrink-0 font-mono text-xs" style={{ color: 'var(--tx-tertiary)' }}>2024-03-15</span>
-        <span className="flex-1 truncate" style={{ color: 'var(--tx-primary)' }}>NETFLIX.COM</span>
-        <span
-          className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0"
-          style={{ background: '#1D4ED8', color: '#fff' }}
-        >
-          Entertainment
-        </span>
-        <span className="font-mono text-sm shrink-0" style={{ color: 'var(--tx-error)', letterSpacing: '-0.275px' }}>-{currency} 15.99</span>
-        <span
-          className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0"
-          style={{
-            background: committed ? 'var(--bg-badge-committed)' : 'var(--bg-badge-review)',
-            color: committed ? 'var(--tx-badge-committed)' : 'var(--tx-badge-review)',
-          }}
-        >
-          {committed ? 'Committed' : 'Review'}
-        </span>
-        <button
-          onClick={() => setCommitted(!committed)}
-          className="btn text-xs px-2.5 py-1 rounded-[6px] transition-colors duration-150 shrink-0"
-          style={{ background: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-        >
-          {committed ? 'Undo' : 'Commit'}
-        </button>
-      </div>
-      <p className="text-xs" style={{ color: 'var(--tx-tertiary)' }}>
-        {committed ? '✓ Transaction committed to ledger.' : 'Click Commit to move this to the permanent ledger.'}
-      </p>
     </div>
   )
 }
@@ -343,151 +254,6 @@ function ChatFlowDiagram() {
   )
 }
 
-function ChatConversationDemo({ currency }: { currency: string }) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="w-full space-y-3 text-sm">
-      {/* User bubble */}
-      <div className="flex justify-end">
-        <div
-          className="px-3.5 py-2.5 rounded-[14px] rounded-tr-[4px] max-w-[80%]"
-          style={{ background: 'var(--bg-selected)', color: 'var(--tx-selected)' }}
-        >
-          What were my top 3 spending categories last month?
-        </div>
-      </div>
-      {/* Assistant bubble */}
-      <div className="flex justify-start">
-        <div className="max-w-[85%] space-y-1.5">
-          <div
-            className="px-3.5 py-2.5 rounded-[14px] rounded-tl-[4px]"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-          >
-            Last month your top three spending categories were <strong>Dining</strong> (−{currency} 342.10),{' '}
-            <strong>Groceries</strong> (−{currency} 289.45), and <strong>Transport</strong> (−{currency} 104.80).
-          </div>
-          {/* Show SQL toggle */}
-          <div>
-            <button
-              onClick={() => setOpen((o) => !o)}
-              className="btn flex items-center gap-1.5 text-xs transition-opacity duration-150"
-              style={{ color: 'var(--tx-tertiary)', opacity: 0.75 }}
-            >
-              <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▸</span>
-              Show SQL
-            </button>
-            {open && (
-              <pre
-                className="mt-1.5 px-3 py-2.5 rounded-[8px] text-[11px] overflow-x-auto"
-                style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-warm)',
-                  color: 'var(--tx-secondary)',
-                  fontFamily: 'ui-monospace, monospace',
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-all',
-                }}
-              >
-{`SELECT category, SUM(amount) AS total
-FROM "Transaction"
-WHERE amount < 0
-  AND strftime('%Y-%m', date) =
-      strftime('%Y-%m', date('now','-1 month'))
-  AND status IN ('committed','reconciled')
-GROUP BY category
-ORDER BY total ASC
-LIMIT 3`}
-              </pre>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function ReimbursementDemo({ currency }: { currency: string }) {
-  const [settled, setSettled] = useState(false)
-  return (
-    <div className="w-full space-y-2">
-      {/* Pending banner */}
-      {!settled && (
-        <div
-          className="flex items-center gap-2.5 px-3 py-2.5 rounded-[8px] text-xs"
-          style={{ backgroundColor: 'var(--bg-badge-review)', border: '1px solid var(--border-warm)', color: 'var(--tx-badge-review)' }}
-        >
-          <RotateCcw size={13} style={{ flexShrink: 0 }} />
-          <span>1 pending reimbursement awaiting settlement — {currency} 500.00 outstanding</span>
-          <span className="ml-auto" style={{ color: 'var(--tx-secondary)' }}>Filter</span>
-        </div>
-      )}
-
-      {/* Expense row */}
-      <div
-        className="flex items-center gap-3 px-3 py-2.5 rounded-[6px] text-sm"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
-      >
-        <span className="w-24 shrink-0 font-mono text-[11px]" style={{ color: 'var(--tx-tertiary)' }}>2024-03-10</span>
-        <span className="flex-1 flex items-center gap-1.5 min-w-0" style={{ color: 'var(--tx-primary)' }}>
-          <span className="truncate">Dubai Hospital</span>
-          {settled
-            ? <CheckCircle2 size={11} style={{ color: '#34d399', flexShrink: 0 }} />
-            : <RotateCcw size={11} style={{ color: 'var(--tx-faint)', flexShrink: 0 }} />}
-        </span>
-        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0" style={{ background: '#0E7490', color: '#fff' }}>
-          Healthcare
-        </span>
-        <div className="font-mono text-sm shrink-0 text-right" style={{ letterSpacing: '-0.275px' }}>
-          <div style={{ color: '#f87171' }}>−{currency} 500.00</div>
-          {settled && (
-            <div className="text-[10px] font-normal" style={{ color: 'var(--tx-secondary)', letterSpacing: 0 }}>
-              net −{currency} 50.00
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Settlement credit — visible once linked */}
-      {settled && (
-        <div
-          className="flex items-center gap-3 px-3 py-2 ml-6 rounded-[6px] text-sm"
-          style={{ background: 'var(--bg-page)', border: '1px solid var(--border-warm)' }}
-        >
-          <span className="w-24 shrink-0 font-mono text-[11px]" style={{ color: 'var(--tx-tertiary)' }}>2024-03-24</span>
-          <span className="flex-1 flex items-center gap-1.5" style={{ color: 'var(--tx-secondary)' }}>
-            <RotateCcw size={10} style={{ color: '#34d399' }} />
-            Insurance Refund
-          </span>
-          <span className="font-mono text-sm" style={{ color: '#34d399', letterSpacing: '-0.275px' }}>
-            +{currency} 450.00
-          </span>
-        </div>
-      )}
-
-      {/* Action */}
-      <div className="flex justify-center pt-1">
-        {settled ? (
-          <button
-            onClick={() => setSettled(false)}
-            className="btn text-xs transition-opacity duration-150 hover:opacity-100"
-            style={{ color: 'var(--tx-tertiary)', opacity: 0.6 }}
-          >
-            Reset
-          </button>
-        ) : (
-          <button
-            onClick={() => setSettled(true)}
-            className="btn text-xs px-3 py-1.5 rounded-[6px] transition-colors duration-150"
-            style={{ background: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-          >
-            Link reimbursement →
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ── Tip box ───────────────────────────────────────────────────────────────────
 
 function Tip({ children }: { children: React.ReactNode }) {
@@ -647,51 +413,6 @@ function BudgetProgressDemo({ currency }: { currency: string }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function GuideView({ currency }: { currency: string }) {
-  const [active, setActive] = useState('overview')
-  const contentRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const observers: IntersectionObserver[] = []
-    const entries = new Map<string, boolean>()
-
-    const atBottom = () =>
-      window.innerHeight + window.scrollY >=
-      document.documentElement.scrollHeight - 32
-
-    SECTIONS.forEach(({ id }) => {
-      const el = document.getElementById(id)
-      if (!el) return
-      const obs = new IntersectionObserver(
-        ([entry]) => {
-          entries.set(id, entry.isIntersecting)
-          // Don't override when already pinned at the bottom
-          if (atBottom()) return
-          // Pick the topmost visible section
-          const first = SECTIONS.find((s) => entries.get(s.id))
-          if (first) setActive(first.id)
-        },
-        { rootMargin: '-20% 0px -60% 0px' }
-      )
-      obs.observe(el)
-      observers.push(obs)
-    })
-
-    // When scrolled to the bottom, activate the last section
-    const onScroll = () => {
-      if (atBottom()) setActive(SECTIONS[SECTIONS.length - 1].id)
-    }
-    window.addEventListener('scroll', onScroll, { passive: true })
-
-    return () => {
-      observers.forEach((o) => o.disconnect())
-      window.removeEventListener('scroll', onScroll)
-    }
-  }, [])
-
-  const scrollTo = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
-
   return (
     <div className="flex-1" style={{ background: 'var(--bg-page)' }}>
       <div className="max-w-5xl mx-auto px-6 md:px-10 py-10">
@@ -718,59 +439,10 @@ export function GuideView({ currency }: { currency: string }) {
 
         <div className="flex gap-12 items-start">
 
-          {/* ── Sidebar ──────────────────────────────────────────────────── */}
-          <aside className="hidden lg:block shrink-0 w-44 sticky top-24">
-            <nav className="space-y-0.5">
-              {SECTIONS.map((s) => {
-                const isActive = active === s.id
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => scrollTo(s.id)}
-                    className="btn w-full flex items-center gap-2.5 px-3 py-1.5 rounded-[6px] text-left transition-all duration-150 group"
-                    style={{
-                      background: isActive ? 'var(--bg-card-alt)' : 'transparent',
-                      color: isActive ? 'var(--tx-primary)' : 'var(--tx-tertiary)',
-                    }}
-                  >
-                    <span
-                      className="font-mono text-[10px] shrink-0 transition-colors duration-150"
-                      style={{ color: isActive ? '#f54e00' : 'var(--tx-faint)' }}
-                    >
-                      {s.num}
-                    </span>
-                    <span className="text-sm">{s.label}</span>
-                  </button>
-                )
-              })}
-            </nav>
-
-            {/* Quick links */}
-            <div className="mt-8 pt-6" style={{ borderTop: '1px solid var(--border-warm)' }}>
-              <div className="text-[10px] uppercase tracking-widest mb-2" style={{ color: 'var(--tx-faint)', letterSpacing: '0.08em' }}>
-                Jump to
-              </div>
-              {[
-                { href: '/settings', label: 'Settings' },
-                { href: '/upload', label: 'Upload' },
-                { href: '/ledger', label: 'Ledger' },
-                { href: '/chat', label: 'Chat' },
-              ].map((l) => (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className="flex items-center gap-1.5 py-1 text-sm transition-colors duration-150 hover:opacity-100"
-                  style={{ color: 'var(--tx-tertiary)', opacity: 0.8 }}
-                >
-                  <ArrowRight size={12} style={{ color: '#f54e00' }} />
-                  {l.label}
-                </Link>
-              ))}
-            </div>
-          </aside>
+          <GuideNav />
 
           {/* ── Main content ─────────────────────────────────────────────── */}
-          <div ref={contentRef} className="flex-1 min-w-0 space-y-16">
+          <div className="flex-1 min-w-0 space-y-16">
 
             {/* 00 — Overview */}
             <Section id="overview" num="00" title="Overview">

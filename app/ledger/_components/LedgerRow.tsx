@@ -100,6 +100,7 @@ function LedgerRowInner({
   onUpdate,
   onUpdateById,
   onDelete,
+  onRestore,
   selected,
   onToggleSelect,
 }: {
@@ -109,6 +110,8 @@ function LedgerRowInner({
   onUpdate: (updated: Transaction) => void
   onUpdateById?: (id: number, patch: Partial<Transaction>) => void
   onDelete: (id: number) => void
+  /** Called after a delete is undone, so the ledger can refetch and show the restored row. */
+  onRestore?: () => void
   selected?: boolean
   onToggleSelect?: (id: number) => void
 }) {
@@ -205,7 +208,96 @@ function LedgerRowInner({
       if (!res.ok) throw new Error(`Server returned ${res.status}`)
       setConfirmingDelete(false)
       onDelete(transaction.id)
-      toast.success('Transaction deleted')
+
+      // Snapshot the deleted row so Undo can re-POST it. Recreated rows get a
+      // new id and lose split-leg/transfer ids, but this is cheaper than
+      // soft-delete and good enough for home use.
+      const restore = {
+        date: typeof transaction.date === 'string' ? transaction.date : transaction.date.toISOString(),
+        amount: transaction.amount,
+        description: transaction.description,
+        transactionType: transaction.transactionType,
+        category: transaction.category,
+        accountId: transaction.accountId,
+        notes: transaction.notes ?? undefined,
+        status: transaction.status,
+        transferCounterpartAccountId: transaction.transferCounterpartAccountId ?? undefined,
+        reimbursableFor: transaction.reimbursableFor ?? undefined,
+      }
+      const splitLegs = transaction.splitLegs
+
+      // Reimbursement pairing lives on a separate FK (reimbursementTxId), not
+      // something `/manual` create can set directly. Remember which side of
+      // the pair this row was so Undo can re-link it via the reimburse
+      // endpoint after recreating the row.
+      const reimbursementLink = transaction.reimbursementTxId
+        ? { role: 'expense' as const, counterpartId: transaction.reimbursementTxId }
+        : transaction.reimbursedExpense
+          ? { role: 'settlement' as const, counterpartId: transaction.reimbursedExpense.id }
+          : null
+
+      toast.success('Transaction deleted', {
+        duration: 5000,
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            let recreated: { id: number }
+            try {
+              const recreateRes = await fetch('/api/transactions/manual', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(restore),
+              })
+              if (!recreateRes.ok) throw new Error(`Server returned ${recreateRes.status}`)
+              recreated = await recreateRes.json()
+            } catch (e) {
+              toast.error(`Could not restore transaction: ${e instanceof Error ? e.message : String(e)}`)
+              return
+            }
+
+            // Parent row is back at this point — any failure below is a
+            // partial-restore, not a total one, and should be reported as such.
+            const warnings: string[] = []
+
+            if (splitLegs && splitLegs.length > 0) {
+              try {
+                const splitRes = await fetch(`/api/transactions/${recreated.id}/split`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    legs: splitLegs.map((l) => ({ amount: l.amount, category: l.category, description: l.description })),
+                  }),
+                })
+                if (!splitRes.ok) throw new Error()
+              } catch {
+                warnings.push("its split legs couldn't be restored — you'll need to re-split it manually")
+              }
+            }
+
+            if (reimbursementLink) {
+              try {
+                const expenseId = reimbursementLink.role === 'expense' ? recreated.id : reimbursementLink.counterpartId
+                const targetId = reimbursementLink.role === 'expense' ? reimbursementLink.counterpartId : recreated.id
+                const relinkRes = await fetch(`/api/transactions/${expenseId}/reimburse`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ targetId }),
+                })
+                if (!relinkRes.ok) throw new Error()
+              } catch {
+                warnings.push("its reimbursement link couldn't be restored — you'll need to re-link it manually")
+              }
+            }
+
+            onRestore?.()
+            if (warnings.length > 0) {
+              toast.error(`Transaction restored, but ${warnings.join('; and ')}.`)
+            } else {
+              toast.success('Transaction restored')
+            }
+          },
+        },
+      })
     } catch (e) {
       toast.error(`Could not delete transaction: ${e instanceof Error ? e.message : String(e)}`)
     } finally {

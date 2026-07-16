@@ -31,6 +31,7 @@ export function ChatPane({
   const [focused, setFocused] = useState(false)
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const threadRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sessionIdRef = useRef<number | null>(sessionId)
   const abortRef = useRef<AbortController | null>(null)
@@ -43,8 +44,15 @@ export function ChatPane({
   }, [sessionId, initialMessages])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    const thread = threadRef.current
+    // Scrolling instantly on every streamed token avoids the jitter `smooth`
+    // causes when new frames arrive faster than the scroll animation. Only
+    // auto-scroll if the user hasn't scrolled away to read earlier messages.
+    const nearBottom = !thread || thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120
+    if (nearBottom) {
+      bottomRef.current?.scrollIntoView({ behavior: loading ? 'auto' : 'smooth' })
+    }
+  }, [messages, loading])
 
   const updateMessages = (updater: (prev: Message[]) => Message[]) => {
     setMessages((prev) => updater(prev))
@@ -236,7 +244,7 @@ export function ChatPane({
       padding: '0 16px',
     }}>
       {/* Message thread */}
-      <div style={{
+      <div ref={threadRef} style={{
         flex: 1,
         overflowY: 'auto',
         paddingTop: '24px',
