@@ -31,7 +31,7 @@ vi.mock('@/lib/prisma', () => {
     return { ...row, splitLegs, linkedTransfer }
   }
 
-  const tx = {
+  const txClient = {
     transaction: {
       update: async ({ where: { id }, data }: { where: { id: number }; data: Partial<Row> }) => {
         const row = store.get(id)
@@ -51,7 +51,7 @@ vi.mock('@/lib/prisma', () => {
   return {
     prisma: {
       transaction: { findUnique },
-      $transaction: async (cb: (tx: typeof tx) => Promise<void>) => cb(tx),
+      $transaction: async (cb: (tx: typeof txClient) => Promise<void>) => cb(txClient),
     },
   }
 })
