@@ -1,6 +1,44 @@
 export const runtime = 'nodejs'
 
 import { prisma, executeReadonlyQuery, ReadonlyQueryError } from '@/lib/prisma'
+import { getLlmConfig } from '@/lib/llm-config'
+
+// Thrown when Ollama is unreachable or errors during SQL generation, so the
+// caller can distinguish a transport failure (503) from a bad query (422).
+class OllamaUnavailable extends Error {}
+
+// Generate a SQL statement from a prompt via Ollama (non-streaming, temp 0).
+// Cleans markdown fences and quotes bare Transaction references. Shared by the
+// initial generation and the one-shot repair retry.
+async function generateSql(
+  ollamaUrl: string, model: string, prompt: string, signal: AbortSignal,
+): Promise<string> {
+  let res: Response
+  try {
+    res = await fetch(`${ollamaUrl}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        system: SQL_SYSTEM_PROMPT,
+        prompt,
+        stream: false,
+        options: { temperature: 0 },
+      }),
+      signal,
+    })
+  } catch {
+    throw new OllamaUnavailable(`Could not connect to Ollama at ${ollamaUrl}`)
+  }
+  if (!res.ok) throw new OllamaUnavailable(`Ollama returned ${res.status}`)
+
+  const json = await res.json()
+  const rawSql = (json.response as string ?? '').trim()
+  let sql = rawSql.replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '').trim()
+  sql = sql.replace(/\bFROM\s+Transaction\b/gi, 'FROM "Transaction"')
+  sql = sql.replace(/\bJOIN\s+Transaction\b/gi, 'JOIN "Transaction"')
+  return sql
+}
 
 const SQL_SYSTEM_PROMPT = `You are a SQLite query generator. Output ONLY a single raw SQL SELECT statement (or WITH ... SELECT) -- no markdown, no explanation, no code fences, no backticks.
 
@@ -80,8 +118,8 @@ export async function POST(request: Request) {
   const baseCurrencySetting = await prisma.setting.findFirst({ where: { key: 'baseCurrency' } })
   const baseCurrency = baseCurrencySetting?.value ?? 'USD'
 
-  const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434'
-  const chatModel = process.env.CHAT_MODEL ?? 'qwen2.5:32b'
+  const { ollamaUrl, chatModel } = await getLlmConfig()
+  const signal = ollamaSignal(request.signal)
 
   const trimmedHistory = trimHistory(history)
 
@@ -94,42 +132,16 @@ export async function POST(request: Request) {
 
   // Phase 1: generate SQL (non-streaming). temperature 0 — SQL generation wants
   // determinism, not creativity.
-  let sqlGenRes: Response
+  let sql: string
   try {
-    sqlGenRes = await fetch(`${ollamaUrl}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: chatModel,
-        system: SQL_SYSTEM_PROMPT,
-        prompt: sqlPrompt,
-        stream: false,
-        options: { temperature: 0 },
-      }),
-      signal: ollamaSignal(request.signal),
-    })
-  } catch {
+    sql = await generateSql(ollamaUrl, chatModel, sqlPrompt, signal)
+  } catch (e) {
+    const message = e instanceof OllamaUnavailable ? e.message : `Could not connect to Ollama at ${ollamaUrl}`
     return new Response(
-      JSON.stringify({ type: 'error', message: `Could not connect to Ollama at ${ollamaUrl}` }),
+      JSON.stringify({ type: 'error', message }),
       { status: 503, headers: { 'Content-Type': 'application/json' } }
     )
   }
-
-  if (!sqlGenRes.ok) {
-    return new Response(
-      JSON.stringify({ type: 'error', message: `Ollama returned ${sqlGenRes.status}` }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } }
-    )
-  }
-
-  const sqlGenJson = await sqlGenRes.json()
-  const rawSql = (sqlGenJson.response as string ?? '').trim()
-
-  // Strip accidental markdown fences and ensure Transaction is quoted
-  let sql = rawSql.replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '').trim()
-  // Safety net: quote bare Transaction references the model may have missed
-  sql = sql.replace(/\bFROM\s+Transaction\b/gi, 'FROM "Transaction"')
-  sql = sql.replace(/\bJOIN\s+Transaction\b/gi, 'JOIN "Transaction"')
 
   // Accept both SELECT ... and WITH ... SELECT. The read-only driver is the
   // actual safety boundary; the guard is a cheap rejection of obvious
@@ -141,7 +153,10 @@ export async function POST(request: Request) {
     )
   }
 
-  // Execute the SQL on a read-only connection to prevent mutations
+  // Execute the SQL on a read-only connection to prevent mutations. On a SQLite
+  // error, give the model exactly ONE repair round-trip (feed it the failed SQL
+  // and the error) before surfacing the failure — models frequently mis-name a
+  // column or forget a quote and fix it correctly when shown the message.
   let rows: unknown[]
   let dbTruncated = false
   try {
@@ -149,12 +164,43 @@ export async function POST(request: Request) {
     rows = result.rows
     dbTruncated = result.truncated
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    const status = err instanceof ReadonlyQueryError ? 422 : 422
-    return new Response(
-      JSON.stringify({ type: 'error', message: `SQL error: ${msg}`, sql }),
-      { status, headers: { 'Content-Type': 'application/json' } }
-    )
+    const firstMsg = err instanceof Error ? err.message : String(err)
+
+    const repairPrompt =
+      `${sqlPrompt}\n\nYou previously generated this SQLite query:\n${sql}\n\n` +
+      `Executing it failed with this error:\n${firstMsg}\n\n` +
+      `Return a corrected SQLite SELECT (or WITH ... SELECT) that fixes the error. Output only the SQL.`
+
+    let repaired: string
+    try {
+      repaired = await generateSql(ollamaUrl, chatModel, repairPrompt, signal)
+    } catch {
+      // Repair round-trip couldn't reach the model — surface the original error.
+      return new Response(
+        JSON.stringify({ type: 'error', message: `SQL error: ${firstMsg}`, sql }),
+        { status: err instanceof ReadonlyQueryError ? 422 : 422, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (!/^\s*(SELECT|WITH)\b/i.test(repaired)) {
+      return new Response(
+        JSON.stringify({ type: 'error', message: `SQL error: ${firstMsg}`, sql }),
+        { status: 422, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
+
+    try {
+      const result = executeReadonlyQuery(repaired)
+      rows = result.rows
+      dbTruncated = result.truncated
+      sql = repaired // the corrected query is what actually ran; report it
+    } catch (err2) {
+      const msg2 = err2 instanceof Error ? err2.message : String(err2)
+      return new Response(
+        JSON.stringify({ type: 'error', message: `SQL error: ${msg2}`, sql: repaired }),
+        { status: 422, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
   }
 
   // Build conversation context for narration

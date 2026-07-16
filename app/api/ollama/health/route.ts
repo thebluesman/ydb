@@ -1,11 +1,15 @@
 export const runtime = 'nodejs'
 
-// Lightweight liveness probe for Ollama. The UI uses this to show a clear
-// "Ollama is not running" state up front instead of failing mid-generation.
-// Pings ${OLLAMA_URL}/api/tags with a short timeout and reports reachability
-// plus the list of installed model names.
+import { getLlmConfig } from '@/lib/llm-config'
+
+// Lightweight liveness probe for Ollama, doubling as the model-list proxy for
+// the Settings UI. The UI uses this to show a clear "Ollama is not running"
+// state up front instead of failing mid-generation, and to populate the
+// Advanced model picker. Pings ${ollamaUrl}/api/tags (resolved from the same
+// Setting→env→default precedence the generation routes use) with a short
+// timeout and reports reachability plus the list of installed model names.
 export async function GET() {
-  const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434'
+  const { ollamaUrl } = await getLlmConfig()
 
   try {
     const res = await fetch(`${ollamaUrl}/api/tags`, {

@@ -45,6 +45,9 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
   // step so a mis-detected credit-card/bank-account format (which flips amount
   // signs) can be corrected before it reaches the model.
   const ocrTextRef = React.useRef<string>('')
+  // Per-page text, kept alongside the concatenated ocrTextRef so long
+  // statements can be sent to the model one page at a time (see runParse).
+  const ocrPagesRef = React.useRef<string[]>([])
   const [detectedFormat, setDetectedFormat] = useState<FormatType>('unknown')
   const [chosenFormat, setChosenFormat] = useState<FormatType>('unknown')
 
@@ -53,12 +56,14 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
     setOcrPage({ current: 0, total: 0 }); setDrafts([]); setError('')
     setPdfPassword(''); setPasswordPhase('none')
     ocrTextRef.current = ''
+    ocrPagesRef.current = []
   }
 
   const handleProcess = async () => {
     if (!file || !selectedAccountId) return
     setError(''); setPhase('ocr')
     let ocrText = ''
+    const pageTexts: string[] = []
 
     try {
       if (file.type === 'application/pdf') {
@@ -130,6 +135,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
             const pageText = lines.map(l => l.join(' ').replace(/\s+/g, ' ').trim()).join('\n') + '\n'
             console.log(`[ocr] page ${i}: native text, ${pageText.length} chars, ${lines.length} lines`)
             ocrText += pageText
+            pageTexts.push(pageText)
           } else {
             // Scanned page — fall back to Tesseract OCR
             if (!ocrWorker) {
@@ -143,7 +149,9 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
             const canvas = document.createElement('canvas')
             canvas.width = viewport.width; canvas.height = viewport.height
             await page.render({ canvas, viewport }).promise
-            ocrText += (await ocrWorker!.recognize(canvas)).data.text + '\n'
+            const scannedText = (await ocrWorker!.recognize(canvas)).data.text + '\n'
+            ocrText += scannedText
+            pageTexts.push(scannedText)
           }
         }
         if (ocrWorker) await ocrWorker.terminate()
@@ -156,6 +164,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
           },
         })
         ocrText = (await worker.recognize(file)).data.text
+        pageTexts.push(ocrText)
         await worker.terminate()
       }
     } catch (e) {
@@ -170,11 +179,106 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
     // parsing (mis-detection silently flips amount signs).
     const detected = detectFormat(ocrText).type
     ocrTextRef.current = ocrText
+    ocrPagesRef.current = pageTexts.filter((p) => p.trim().length > 0)
     setDetectedFormat(detected)
     setChosenFormat(detected)
     setPasswordPhase('none')
     setPhase('confirm-format')
   }
+
+  type RawTxn = { date: string; description: string; amount: number; category: string }
+
+  // Parse one model response body into transaction rows. Structured output
+  // (Ollama `format`) makes the whole-array JSON.parse succeed almost always;
+  // the brace-walking salvage below stays as a PERMANENT fallback for the rare
+  // malformed/truncated stream — never rely on structured output alone.
+  const parseModelOutput = (accumulated: string): RawTxn[] => {
+    const clean = accumulated.replace(/```json|```/g, '').trim()
+    let parsed: RawTxn[] = []
+    const arrStart = clean.indexOf('[')
+    const arrEnd = clean.lastIndexOf(']')
+    if (arrStart !== -1 && arrEnd !== -1) {
+      try {
+        parsed = JSON.parse(clean.slice(arrStart, arrEnd + 1))
+      } catch { /* fall through to salvage */ }
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      const salvaged: RawTxn[] = []
+      let depth = 0, objStart = -1, inString = false, escape = false
+      const src = arrStart !== -1 ? clean.slice(arrStart) : clean
+      for (let i = 0; i < src.length; i++) {
+        const c = src[i]
+        if (escape) { escape = false; continue }
+        if (c === '\\') { escape = true; continue }
+        if (c === '"') { inString = !inString; continue }
+        if (inString) continue
+        if (c === '{') { if (depth === 0) objStart = i; depth++ }
+        else if (c === '}') {
+          depth--
+          if (depth === 0 && objStart !== -1) {
+            try {
+              const obj = JSON.parse(src.slice(objStart, i + 1))
+              if (obj && typeof obj === 'object' && 'description' in obj) salvaged.push(obj as RawTxn)
+            } catch { /* skip malformed */ }
+            objStart = -1
+          }
+        }
+      }
+      parsed = salvaged
+    }
+    return Array.isArray(parsed) ? parsed : []
+  }
+
+  // Stream one chunk of statement text through the extractor and return its
+  // parsed rows. `progressPrefix` labels the parse-log line (e.g. "Page 2/5 · ").
+  const extractChunk = async (
+    text: string, fmt: StatementFormat, signal: AbortSignal, progressPrefix: string,
+  ): Promise<RawTxn[]> => {
+    const chunkStart = performance.now()
+    setParseLog(`${progressPrefix}sending ${(text.length / 1024).toFixed(1)} KB to Ollama…`)
+    console.log('[ollama] request start —', progressPrefix || '', 'text length:', text.length, 'chars, format:', fmt.type)
+    const res = await fetch('/api/ollama', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, formatHint: fmt.type }),
+      signal,
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error ?? 'Ollama request failed')
+    }
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let accumulated = ''
+    let tokenCount = 0
+    let lastLogAt = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n'); buffer = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          accumulated += JSON.parse(line).message?.content ?? ''
+          tokenCount++
+          if (tokenCount - lastLogAt >= 100) {
+            lastLogAt = tokenCount
+            const elapsed = ((performance.now() - chunkStart) / 1000).toFixed(1)
+            setParseLog(`${progressPrefix}${tokenCount} tokens · ${accumulated.length} chars · ${elapsed}s`)
+          }
+        } catch { /* skip */ }
+      }
+    }
+    const elapsed = ((performance.now() - chunkStart) / 1000).toFixed(1)
+    console.log(`[ollama] chunk done — ${progressPrefix || ''}${tokenCount} tokens, ${accumulated.length} chars, ${elapsed}s`)
+    return parseModelOutput(accumulated)
+  }
+
+  // Long statements are sent one page at a time. A whole 20-page statement in a
+  // single request risks overflowing num_ctx (truncating the extraction); per
+  // page keeps every request well inside the window and improves accuracy.
+  const CHUNK_THRESHOLD = 12 * 1024
 
   const runParse = async () => {
     const ocrText = ocrTextRef.current
@@ -183,99 +287,32 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
     setError('')
     setPhase('parsing')
     setParseLog('Starting…')
-    let accumulated = ''
     const abort = new AbortController()
     abortRef.current = abort
-    const parseStart = performance.now()
 
+    const pages = ocrPagesRef.current
+    const chunked = ocrText.length > CHUNK_THRESHOLD && pages.length > 1
+
+    let parsed: RawTxn[] = []
     try {
-      setParseLog(`Sending ${(ocrText.length / 1024).toFixed(1)} KB of text to Ollama…`)
-      console.log('[ollama] request start — text length:', ocrText.length, 'chars, format:', fmt.type)
-      const res = await fetch('/api/ollama', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: ocrText, formatHint: fmt.type }),
-        signal: abort.signal,
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(err.error ?? 'Ollama request failed')
-      }
-      console.log('[ollama] stream started')
-      setParseLog('Receiving tokens…')
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let tokenCount = 0
-      let lastLogAt = 0
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n'); buffer = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const chunk = JSON.parse(line).message?.content ?? ''
-            accumulated += chunk
-            tokenCount++
-            const elapsed = ((performance.now() - parseStart) / 1000).toFixed(1)
-            if (tokenCount - lastLogAt >= 100) {
-              lastLogAt = tokenCount
-              console.log(`[ollama] ${tokenCount} tokens, ${accumulated.length} chars, ${elapsed}s`)
-              setParseLog(`${tokenCount} tokens · ${accumulated.length} chars · ${elapsed}s`)
-            }
-          } catch { /* skip */ }
+      if (chunked) {
+        console.log(`[ollama] chunked parse — ${pages.length} pages, ${ocrText.length} chars total`)
+        for (let p = 0; p < pages.length; p++) {
+          const rows = await extractChunk(pages[p], fmt, abort.signal, `Page ${p + 1}/${pages.length} · `)
+          parsed.push(...rows)
         }
+        setParseLog(`Done — ${parsed.length} transactions across ${pages.length} pages`)
+      } else {
+        parsed = await extractChunk(ocrText, fmt, abort.signal, '')
+        setParseLog(`Done — ${parsed.length} transactions`)
       }
-      const elapsed = ((performance.now() - parseStart) / 1000).toFixed(1)
-      console.log(`[ollama] stream done — ${tokenCount} tokens, ${accumulated.length} chars, ${elapsed}s`)
-      setParseLog(`Done — ${tokenCount} tokens in ${elapsed}s`)
     } catch (e) {
       if ((e as { name?: string }).name === 'AbortError') { setPhase('idle'); setParseLog(''); return }
       setError(`Parsing failed: ${String(e)}`); setPhase('idle'); return
     }
 
     try {
-      // The prompt ends with '[' to prime JSON array output, so prepend it back
-      const clean = ('[' + accumulated).replace(/```json|```/g, '').trim()
-      type RawTxn = { date: string; description: string; amount: number; category: string }
-      let parsed: RawTxn[] = []
-      const arrStart = clean.indexOf('[')
-      const arrEnd = clean.lastIndexOf(']')
-      if (arrStart !== -1 && arrEnd !== -1) {
-        try {
-          parsed = JSON.parse(clean.slice(arrStart, arrEnd + 1))
-        } catch { /* fall through to salvage */ }
-      }
-      // Salvage path: walk the buffer and extract every well-formed top-level
-      // object. The model occasionally emits a malformed entry mid-stream
-      // (mismatched quotes, truncation); without this, one bad row would
-      // discard the entire statement.
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        const salvaged: RawTxn[] = []
-        let depth = 0, objStart = -1, inString = false, escape = false
-        const src = arrStart !== -1 ? clean.slice(arrStart) : clean
-        for (let i = 0; i < src.length; i++) {
-          const c = src[i]
-          if (escape) { escape = false; continue }
-          if (c === '\\') { escape = true; continue }
-          if (c === '"') { inString = !inString; continue }
-          if (inString) continue
-          if (c === '{') { if (depth === 0) objStart = i; depth++ }
-          else if (c === '}') {
-            depth--
-            if (depth === 0 && objStart !== -1) {
-              try {
-                const obj = JSON.parse(src.slice(objStart, i + 1))
-                if (obj && typeof obj === 'object' && 'description' in obj) salvaged.push(obj as RawTxn)
-              } catch { /* skip malformed */ }
-              objStart = -1
-            }
-          }
-        }
-        parsed = salvaged
-      }
-      if (!Array.isArray(parsed) || parsed.length === 0) {
+      if (parsed.length === 0) {
         setError('The model found no transactions in this document.'); setPhase('idle'); return
       }
       const normalized = normalizeTransactions(parsed, fmt)
@@ -313,7 +350,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
       }))
       setPhase('review')
     } catch (e) {
-      setError(`Could not parse model output.\n\n${accumulated.slice(0, 500)}\n\nError: ${String(e)}`)
+      setError(`Could not process extracted transactions.\n\nError: ${String(e)}`)
       setPhase('idle')
     }
   }

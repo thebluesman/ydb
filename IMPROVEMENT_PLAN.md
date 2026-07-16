@@ -351,6 +351,44 @@ for both prompts, and cap each message's length.
   send one repair round-trip to the model ("The query failed with: <error>. Return a corrected
   SQLite SELECT.") before surfacing the error. One retry max.
 
+> **M4b status (Phase 5): DONE.** Implemented on `claude/m4b-llm-pipeline`.
+>
+> 1. **Settings-driven config — done.** `lib/llm-config.ts` `getLlmConfig()` resolves
+>    `ollamaUrl`/`extractionModel`/`chatModel` with **Setting → env var → shipped default**
+>    precedence, read fresh per request (no module cache, so a Settings change takes effect on the
+>    next request). Both routes (`app/api/ollama/route.ts`, `app/api/chat/route.ts`) and
+>    `/api/ollama/health` (which doubles as the model-list proxy for `${ollamaUrl}/api/tags`) use
+>    it. UI is defaults-first: `app/settings/_components/ModelSettings.tsx` (mounted in
+>    `PreferencesForm`) shows each role with its current value + a recommendation line; an
+>    **Advanced** disclosure lists installed models annotated via `annotateModel()`
+>    (known-good ones labelled, unknown ones selectable-but-unannotated) plus an Ollama-URL field.
+>    Client-safe metadata lives in `lib/llm-models.ts` (no prisma import). README `## Models`
+>    section documents the recommendations and precedence. Shipped defaults unchanged.
+> 2. **Structured extraction — VALIDATED, WORKS.** Tested `format` (JSON-schema `{ type: 'array',
+>    items: {...} }`) against the configured/default extraction model **qwen2.5-coder:14b** on the
+>    running local Ollama with realistic credit-card statement text. Result: the JSON-schema
+>    `format` works **reliably** — output was a complete, valid JSON array (parsed first try, 7/7
+>    rows), correct signs (plain→negative, CR→positive), skipped OPENING BALANCE / END OF STATEMENT,
+>    and concatenated a multi-line description. Confirmed it also holds under **streaming** and the
+>    model **self-starts the `[`**, so the `'['` assistant-priming hack was removed (route no longer
+>    sends the priming message; client no longer re-prepends `[`). Note: `format: 'json'` (the bare
+>    string form) misbehaved — it returned a single object, not an array — so only the JSON-schema
+>    form is used. The brace-walking **salvage parser in `UploadFlow` is kept as a permanent
+>    fallback** regardless. Also set `temperature: 0` on the extraction call.
+> 3. **Chunk long statements — done.** OCR now retains per-page text (`ocrPagesRef`). In
+>    `UploadFlow.runParse`, statements over ~12 KB with >1 page are sent one request per page and the
+>    parsed arrays concatenated; the parse log shows "Page 2/5 · N tokens …". Short/single-page
+>    statements keep the single-request path.
+> 4. **SQL retry loop — done, validated.** `app/api/chat/route.ts` now gives a failed model query
+>    exactly one repair round-trip (failed SQL + SQLite error → "Return a corrected SQLite SELECT")
+>    before surfacing the error; the corrected query is what runs and what's reported. Verified live
+>    against **qwen2.5:32b**: fed a query with `SUM(amt)` → error `no such column: amt`, the model
+>    returned `SUM(amount)` (valid, corrected).
+>
+> Tests: `tests/llmModels.test.ts` pins the role/annotation metadata. `npm run test:run` green
+> (89 passed). `npm run build` compiles clean. `npm run lint` unchanged from baseline (16 pre-existing
+> errors in untouched files — Phase U2/U4 debt; zero introduced by this work).
+
 ### Phase 6 — Data integrity (implements FOLLOWUPS.md)
 
 - **6.1 Soften transfer delete cascade** (FOLLOWUPS §2): add `createdVia String @default("import")`
