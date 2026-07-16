@@ -30,7 +30,14 @@ A personal finance tracker with AI-powered natural language querying. Import ban
 ## Prerequisites
 
 - Node.js 20+
-- [Ollama](https://ollama.com) running locally with a model pulled (Qwen2.5:32b recommended for best SQL accuracy)
+- [Ollama](https://ollama.com) running locally with the two models below pulled:
+
+  ```bash
+  ollama pull qwen2.5-coder:14b   # statement extraction
+  ollama pull qwen2.5:32b         # chat / Text-to-SQL
+  ```
+
+  See [Models](#models) for why these two and how to change them.
 
 ## Getting Started
 
@@ -89,8 +96,39 @@ The chat feature uses a two-step Text-to-SQL pipeline:
 2. The query result is sent back to Ollama, which narrates a plain English answer
 
 Each response includes a "Show SQL" toggle so you can verify the query that produced the answer.
+If a generated query fails, the app sends the model one repair round-trip (the failed query + the
+SQLite error) before surfacing the error to you.
 
-> **Note:** The AI chat requires Ollama to be running locally. Set your preferred model in Settings.
+> **Note:** The AI chat requires Ollama to be running locally.
+
+## Models
+
+ydb drives Ollama for two distinct jobs, each configurable in **Settings → Preferences → Local
+models**. The picker is defaults-first: each role shows a recommendation, and an **Advanced**
+disclosure lists your installed models (annotated) if you want to change them.
+
+| Role | Setting key | Default | Why |
+|------|-------------|---------|-----|
+| **Extraction** | `extractionModel` | `qwen2.5-coder:14b` | Reads statement text into a structured transaction array. This model reliably honours Ollama's structured-output (`format`) constraint — verified against real statement text — and fits modest VRAM. |
+| **Chat / SQL** | `chatModel` | `qwen2.5:32b` | Generates SQLite from natural language. The 32b is the most accurate here; drop to `qwen2.5-coder:14b` if the box is short on memory. |
+
+Resolution precedence per role is **Setting → environment variable → shipped default**, so an
+un-configured install still works out of the box:
+
+- `OLLAMA_URL` (default `http://localhost:11434`) — override with the `ollamaUrl` setting
+- `OLLAMA_MODEL` — extraction model fallback
+- `CHAT_MODEL` — chat/SQL model fallback
+
+Settings changes take effect on the next request (no restart), since the config is resolved
+per-request rather than cached.
+
+### Structured extraction
+
+Extraction requests pass a JSON-schema `format` to Ollama so the model is grammar-constrained to
+emit a valid transaction array. This was validated against `qwen2.5-coder:14b` and works reliably;
+a brace-walking salvage parser remains as a permanent fallback for the rare malformed stream. Long
+statements (>12 KB of text) are sent one page at a time and the parsed arrays concatenated, keeping
+every request well inside the model's context window.
 
 ## License
 

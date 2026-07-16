@@ -1,6 +1,26 @@
 export const runtime = 'nodejs'
 
 import { prisma } from '@/lib/prisma'
+import { getLlmConfig } from '@/lib/llm-config'
+
+// JSON-schema constraint passed to Ollama's `format` parameter so the model is
+// grammar-constrained to emit a valid array of transaction objects. Validated
+// against qwen2.5-coder:14b (the configured/default extraction model) with real
+// statement text — see IMPROVEMENT_PLAN.md Phase 5. The salvage parser in
+// UploadFlow remains the permanent fallback regardless.
+const EXTRACTION_FORMAT = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      date: { type: 'string' },
+      description: { type: 'string' },
+      amount: { type: 'number' },
+      category: { type: 'string' },
+    },
+    required: ['date', 'description', 'amount', 'category'],
+  },
+} as const
 
 // Extraction can legitimately take minutes on a large statement + big model, so
 // use a generous ceiling — but still bounded, and still forwarding the client's
@@ -106,8 +126,7 @@ export async function POST(request: Request) {
     })
   }
 
-  const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434'
-  const model = process.env.OLLAMA_MODEL ?? 'qwen2.5-coder:14b'
+  const { ollamaUrl, extractionModel: model } = await getLlmConfig()
 
   const systemPrompt = await buildSystemPrompt(formatHint)
 
@@ -121,10 +140,14 @@ export async function POST(request: Request) {
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Extract all transactions from this bank statement text:\n\n${text}` },
-          { role: 'assistant', content: '[' },
         ],
         stream: true,
-        options: { num_ctx: 32768, num_predict: -1 },
+        // Grammar-constrain the output to a valid transaction array. Confirmed
+        // reliable on qwen2.5-coder:14b, so the '[' assistant-priming hack is
+        // no longer needed (the model self-starts the array). The salvage
+        // parser in UploadFlow stays as a permanent fallback.
+        format: EXTRACTION_FORMAT,
+        options: { num_ctx: 32768, num_predict: -1, temperature: 0 },
       }),
       signal: ollamaSignal(request.signal),
     })
