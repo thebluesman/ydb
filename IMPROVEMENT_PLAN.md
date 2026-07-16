@@ -176,6 +176,11 @@ Three data points, measured in sequence against the same code:
 > serialisation, all filtering/aggregation in SQL), but the <200ms/<100KB guardrails were not
 > benchmarked. Track under Phase 8's seed script.
 >
+> **Resolved in M7a (Phase 8):** `npm run seed` (~48k rows) now exists. `/ledger?pageSize=50`
+> measured ~250ms warm / ~320KB against the seeded DB — within the guardrails. See the M7a status
+> note under Phase 8 for the full methodology and a real dashboard-side regression the seed data
+> also surfaced (fixed there, not here — the ledger's own queries were unaffected).
+>
 > **Review pass (post-approval, PR #4):** rebased onto `main` after M2a merged (the
 > ledger components now use the M2a design-system primitives). Three review notes addressed:
 > (1) **Multi-currency "All accounts"** — the row list and CSV are no longer narrowed to
@@ -262,6 +267,12 @@ income/expense) — they are documented in comments there and mirrored in the ch
 > transfers, and multi-currency, and passes before the JS aggregation was deleted. Totals were
 > spot-checked against the existing dev DB before/after; no seed data was available this session,
 > so the 50k-row/150ms guardrail is unbenchmarked (same caveat as Phase 1 — track under Phase 8).
+>
+> **Resolved in M7a (Phase 8):** benchmarking against the ~48k-row seed found `/dashboard` was NOT
+> meeting the guardrail — it took ~52 SECONDS, not ~150ms, due to a query-planner index-selection
+> issue in `inclusionSql()`'s correlated subqueries (unrelated to the grouped-aggregation approach
+> itself, which is structurally correct). Fixed with `INDEXED BY` hints; re-measured at ~350ms warm.
+> Full root-cause and fix details are under Phase 8's M7a status note.
 
 ### Phase 3 — API hygiene
 
@@ -561,6 +572,78 @@ Ordered by value for a single home user:
 - **Ops:** document (README "Home server" section): systemd unit, `OLLAMA_URL`, backup location,
   and that WAL mode creates `dev.db-wal/-shm` files that must be backed up together (the existing
   `db.backup()` API handles this correctly — note that file-copy backups by hand do not).
+
+> **M7a status (Phase 8): DONE.** Implemented on `claude/m7a-testing-tooling`.
+>
+> 1. **Seed script — done.** `scripts/seed.ts` (`npm run seed`, uses `tsx`) generates 5 accounts
+>    covering every type in `lib/accounts.ts` (current, savings, credit, personal_loan, auto_loan)
+>    and ~48k transactions over 3 years, including split parents/legs, linked transfer pairs, and
+>    matched/pending reimbursements, respecting the debit/credit sign rules by construction. It's
+>    idempotent (only touches accounts named with a `[seed] ` prefix, so it's safe next to real
+>    data) and seeded rows pass `PRAGMA foreign_key_check` after insert (verified, not assumed —
+>    the script disables FK enforcement on its own connection only, to avoid mutual-reference
+>    ordering issues between paired rows in the same `createMany` batch, then checks for real
+>    dangling references afterward and fails loudly if any exist).
+> 2. **Real perf validation against the seed data — found and fixed a genuine regression.**
+>    Running the actual `/dashboard` route against the ~48k-row seed (the exact validation Phase 1
+>    and Phase 2 both deferred for lack of seed data — see their status notes above) surfaced a
+>    **52-second** dashboard load, not the ~150ms guardrail. Root cause, confirmed with
+>    `EXPLAIN QUERY PLAN`: `inclusionSql()`'s two correlated `NOT EXISTS` subqueries
+>    (`lib/transactions-query.ts`) — checking "does this row have split legs" / "is this row a
+>    matched reimbursement settlement" — have an obviously-selective equality predicate available
+>    (`parentTransactionId = ?` / `reimbursementTxId = ?`, at most one match each), but once a
+>    `dateLtIso` bound is added (the pre-range net-worth queries), SQLite's planner instead picked
+>    `Transaction_accountId_date_idx`, a *range* scan re-run per outer row — effectively O(n·m) over
+>    ~48k rows. Fixed by adding `INDEXED BY "Transaction_parentTransactionId_idx"` /
+>    `INDEXED BY "Transaction_reimbursementTxId_key"` to those two subqueries, forcing the
+>    already-correct index choice regardless of account-id count or date-range width. Re-measured
+>    after the fix: **52s → ~40ms** for the isolated query, **~350ms warm** for the full
+>    `/dashboard` route (vs. the ~0.3s recorded in the real-hardware §0.5 baseline at a similar row
+>    count) — this closes out the "unbenchmarked" caveats left by M2b/M3. `tests/dashboard.oracle.test.ts`
+>    gained the matching indexes on its in-memory fixture (so the oracle test exercises the exact
+>    same SQL text/plan-relevant index names as the real schema) and a regression guard that pins
+>    the `INDEXED BY` hints stay present. This was a correctness-neutral, perf-only change — the
+>    oracle test (unchanged assertions) still passes, confirming the aggregated numbers didn't move.
+> 3. **Tests — done.** `tests/statementFormats.test.ts` (36 table-driven cases: format detection
+>    precedence/1500-char window, credit-card PAYMENT/PROFIT/safety-net branches, bank-account
+>    transfer-keyword detection, SKIP filtering, unknown-format fallback).
+>    `tests/transactionsApi.test.ts` drives the real `GET /api/transactions` route handler (not just
+>    the query builders, which already had oracle coverage) against an in-memory SQLite fixture via
+>    a `@/lib/prisma` mock backed by real SQL — filters, sort, pagination, stats exclusions, relation
+>    hydration, and CSV export. `tests/checkDuplicates.test.ts` covers the duplicate-check route
+>    (amount/date/description-similarity matching, cross-account exclusion, invalid-candidate
+>    skip-and-continue, no artificial cap). `tests/ledgerRowCap.test.ts` is the dedicated row-cap
+>    test for the ledger's `pageSize` clamp (`tests/sqlGuard.test.ts` already covered the separate
+>    chat-SQL `READONLY_ROW_CAP`). `npm run test:run`: 217 passed (was 210 on `main`).
+> 4. **Playwright smoke — evaluated, deferred.** Installed `@playwright/test` and attempted
+>    `npx playwright install chromium`; the sandbox's outbound proxy rejects the Chrome-for-Testing
+>    CDN host (`cdn.playwright.dev`) with a 403, so no browser binary could be fetched to actually
+>    run and validate a smoke test in this environment. Per the plan's own "optional but cheap...
+>    only if it doesn't blow the time budget; seed script and Vitest tests are the priority" framing,
+>    and since shipping an unverified/never-run browser test risks a silently-broken CI job, this was
+>    backed out (`@playwright/test` removed from `package.json`) rather than committed blind. A real
+>    CI runner has normal internet access and wouldn't hit this proxy restriction, so this remains a
+>    reasonable follow-up for whoever next touches CI — nothing here should stop them from adding it.
+> 5. **CI — done.** `.github/workflows/ci.yml` (new — no CI existed before): `npm ci` →
+>    `npx prisma generate` → `npx prisma migrate deploy` (the build step prerenders `/guide`, which
+>    reads Settings, so a migrated `dev.db` must exist before `next build` runs) → `npm run lint` →
+>    `npm run test:run` → `npm run build`, on push to `main` and on every PR.
+> 6. **Ops docs — done.** New README "Home server" section: the systemd unit walkthrough
+>    (`deploy/ydb.service` already existed from Phase 0.3; this documents how to install/adjust it),
+>    `OLLAMA_URL` / the `ollamaUrl` Setting precedence, backup location and retention, and — the
+>    plan's specific ask — *why* WAL mode means a bare `cp dev.db` can silently lose recent
+>    transactions (they may still be sitting only in `dev.db-wal`) and why `lib/backup.ts`'s
+>    `createBackup()` (SQLite's online backup API via `better-sqlite3`'s `Database#backup()`) avoids
+>    that, plus a note that `restoreBackup()` checkpoints and clears the `-wal`/`-shm` sidecars before
+>    swapping the file so a restore can't be shadowed by stale WAL pages.
+>
+> **Verify:** `npm run lint` — same 17 pre-existing errors / 14 warnings as `main` (confirmed via a
+> pre-change baseline run), **zero introduced** by this PR, matching the "green" convention every
+> prior M-phase status note in this file has used (a fully clean `npm run lint` has never been true
+> on `main`; fixing that pre-existing debt is out of scope for Phase 8 and risks conflicting with
+> the parallel M7b UI branch). `npm run test:run`: 217 passed. `npm run build`: compiles clean.
+> `npm run seed` verified end-to-end (idempotent re-run, `foreign_key_check` clean, sign rules
+> respected — spot-checked directly against the seeded `dev.db`).
 
 ---
 

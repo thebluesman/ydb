@@ -6,6 +6,7 @@ import {
   categorySql,
   categoryTrendSql,
   preRangeAssetSumSql,
+  inclusionSql,
 } from '@/lib/transactions-query'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,6 +211,12 @@ beforeAll(() => {
     parentTransactionId INTEGER,
     reimbursementTxId INTEGER
   )`)
+  // Real schema names these indexes explicitly and inclusionSql() (Phase 8
+  // perf fix) forces the query planner onto them via INDEXED BY — mirror the
+  // names here so the fixture exercises the exact same SQL text as the app.
+  db.exec(`CREATE UNIQUE INDEX "Transaction_reimbursementTxId_key" ON "Transaction"("reimbursementTxId")`)
+  db.exec(`CREATE INDEX "Transaction_parentTransactionId_idx" ON "Transaction"("parentTransactionId")`)
+  db.exec(`CREATE INDEX "Transaction_accountId_status_date_idx" ON "Transaction"("accountId","status","date")`)
   const ins = db.prepare(
     `INSERT INTO "Transaction" (id,date,amount,transactionType,category,accountId,status,parentTransactionId,reimbursementTxId)
      VALUES (@id,@date,@amount,@transactionType,@category,@accountId,@status,@parentTransactionId,@reimbursementTxId)`,
@@ -294,5 +301,21 @@ describe('dashboard SQL aggregation vs JS oracle', () => {
     expect(categories.has('Health')).toBe(false)
     // transfers excluded, USD ignored, review ignored, out-of-range ignored
     expect(summary.totalIncome).toBe(5000) // only the Jan credit; settlement credit hidden
+  })
+})
+
+// Regression guard (Phase 8 seed-script finding): without INDEXED BY on the
+// two correlated subqueries, SQLite's planner can pick a range-scan index
+// instead of the highly-selective parentTransactionId/reimbursementTxId
+// equality lookup, turning the pre-range net-worth queries into an O(n·m)
+// scan — ~52 SECONDS on a 48k-row seeded DB, ~40ms with the hint. This test
+// only pins the SQL text (a full timing assertion would be flaky in CI), but
+// it fails loudly if a future edit drops the hint rather than silently
+// reintroducing the regression.
+describe('inclusionSql forces the selective indexes for its correlated subqueries', () => {
+  it('includes INDEXED BY hints for both EXISTS subqueries', () => {
+    const sql = inclusionSql('main', [1, 2], '2024-01-01T00:00:00.000+00:00')
+    expect(sql).toContain('INDEXED BY "Transaction_parentTransactionId_idx"')
+    expect(sql).toContain('INDEXED BY "Transaction_reimbursementTxId_key"')
   })
 })
