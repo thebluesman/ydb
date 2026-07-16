@@ -9,6 +9,7 @@ import { SplitForm } from './SplitForm'
 import { Select, Badge, Button, Modal, useToast } from '@/app/_components/ui'
 import type { BadgeVariant } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
+import { deleteWithUndo } from './deleteWithUndo'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
 
@@ -100,6 +101,7 @@ function LedgerRowInner({
   onUpdate,
   onUpdateById,
   onDelete,
+  onRestore,
   selected,
   onToggleSelect,
 }: {
@@ -109,6 +111,8 @@ function LedgerRowInner({
   onUpdate: (updated: Transaction) => void
   onUpdateById?: (id: number, patch: Partial<Transaction>) => void
   onDelete: (id: number) => void
+  /** Called after a delete is undone, so the ledger can refetch and show the restored row. */
+  onRestore?: () => void
   selected?: boolean
   onToggleSelect?: (id: number) => void
 }) {
@@ -201,11 +205,8 @@ function LedgerRowInner({
   const handleDelete = async () => {
     setDeleting(true)
     try {
-      const res = await fetch(`/api/transactions/${transaction.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      await deleteWithUndo(transaction, toast, onDelete, onRestore)
       setConfirmingDelete(false)
-      onDelete(transaction.id)
-      toast.success('Transaction deleted')
     } catch (e) {
       toast.error(`Could not delete transaction: ${e instanceof Error ? e.message : String(e)}`)
     } finally {

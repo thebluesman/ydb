@@ -4,6 +4,7 @@ import { useState } from 'react'
 import * as Select from '@radix-ui/react-select'
 import { ChevronDown } from 'lucide-react'
 import { useToast } from '@/app/_components/ui'
+import { ModelSettings } from './ModelSettings'
 
 const CURRENCIES = ['GBP', 'USD', 'EUR', 'AED', 'JPY', 'CAD', 'AUD', 'SGD', 'CHF']
 
@@ -84,6 +85,8 @@ export function PreferencesForm({ initialSettings }: { initialSettings: Setting[
           <span className="text-xs" style={{ color: 'var(--tx-success)' }}>Saved</span>
         )}
       </div>
+
+      <ModelSettings initialSettings={initialSettings} />
     </div>
   )
 }

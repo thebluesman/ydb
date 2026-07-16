@@ -310,17 +310,26 @@ for both prompts, and cap each message's length.
 > capped to the last 8 messages), 3.6 (timeouts, abort forwarding, `temperature: 0` for SQL gen,
 > `GET /api/ollama/health`).
 
-### Phase 4 — Client rendering cleanups
+### Phase 4 — Client rendering cleanups ✅ (M4)
 
-- **Guide:** remove `'use client'` from `GuideView.tsx` (extract any interactive bits into small
-  client leaf components) so 1,500 lines of static JSX render on the server and leave the bundle.
-- **Ledger:** done in Phase 1 (memo + debounce). Also replace `alert()`/`confirm()`
-  (`LedgerView.tsx:246`, `LedgerRow.tsx:266`) with an inline confirm popover and a toast component;
-  add "Undo" to delete by keeping the deleted row payload client-side and re-POSTing on undo (5 s
-  window) — cheaper than soft-delete and good enough for home use.
-- **Chat:** `bottomRef.scrollIntoView({behavior:'smooth'})` on every token causes jitter — scroll
-  instantly while streaming, and only if the user is already near the bottom.
-- **Dashboard:** memoize chart data transforms if profiling shows re-render cost; otherwise leave.
+- **Guide:** ✅ removed `'use client'` from `GuideView.tsx`. The four interactive demo widgets
+  (`FormatDemo`, `TransactionRowDemo`, `ChatConversationDemo`, `ReimbursementDemo`) moved to
+  `GuideDemos.tsx`; the scrollspy sidebar nav moved to `GuideNav.tsx`. `GuideView.tsx` is now a
+  Server Component — confirmed by the build output showing `/guide` as `○ (Static)`.
+- **Ledger:** done in Phase 1 (memo + debounce). `alert()`/`confirm()` had already been replaced by
+  a `Modal`-based confirm dialog + toast system during M3 (no native dialogs remained by the time
+  this phase started). ✅ Added "Undo" to delete: `LedgerRow.tsx` snapshots the deleted row
+  (including split legs and transfer counterpart id) before calling `DELETE`, then shows a 5s toast
+  with an Undo action that re-POSTs to `/api/transactions/manual` (and replays `/[id]/split` for
+  split legs) and triggers a ledger refetch. Recreated rows get new ids — acceptable per the plan's
+  own "cheaper than soft-delete, good enough for home use" framing.
+- **Chat:** ✅ fixed. `ChatPane.tsx` now checks whether the message thread is scrolled near the
+  bottom before auto-scrolling, and uses `behavior: 'auto'` (instant) while a response is streaming,
+  `'smooth'` once it's done — eliminates the per-token jitter from `smooth` scrolling on every chunk.
+- **Dashboard:** verified — no client-side chart data transform pipeline exists to memoize. Chart
+  components (`DashboardView.tsx`, `NetWorthWidget.tsx`, `CategoryTrendChart.tsx`) receive
+  pre-aggregated data straight from server props (Phase 2's SQL aggregation) and pass it directly to
+  `recharts`. Left as-is per the plan's own "otherwise leave" branch.
 
 ### Phase 5 — LLM pipeline quality
 
@@ -350,6 +359,80 @@ for both prompts, and cap each message's length.
 - **SQL retry loop.** In `app/api/chat/route.ts`, when `executeReadonlyQuery` throws a SQLite error,
   send one repair round-trip to the model ("The query failed with: <error>. Return a corrected
   SQLite SELECT.") before surfacing the error. One retry max.
+
+> **M4b status (Phase 5): DONE.** Implemented on `claude/m4b-llm-pipeline`.
+>
+> 1. **Settings-driven config — done.** `lib/llm-config.ts` `getLlmConfig()` resolves
+>    `ollamaUrl`/`extractionModel`/`chatModel` with **Setting → env var → shipped default**
+>    precedence, read fresh per request (no module cache, so a Settings change takes effect on the
+>    next request). Both routes (`app/api/ollama/route.ts`, `app/api/chat/route.ts`) and
+>    `/api/ollama/health` (which doubles as the model-list proxy for `${ollamaUrl}/api/tags`) use
+>    it. UI is defaults-first: `app/settings/_components/ModelSettings.tsx` (mounted in
+>    `PreferencesForm`) shows each role with its current value + a recommendation line; an
+>    **Advanced** disclosure lists installed models annotated via `annotateModel()`
+>    (known-good ones labelled, unknown ones selectable-but-unannotated) plus an Ollama-URL field.
+>    Client-safe metadata lives in `lib/llm-models.ts` (no prisma import). README `## Models`
+>    section documents the recommendations and precedence. Shipped defaults unchanged.
+> 2. **Structured extraction — VALIDATED, WORKS.** Tested `format` (JSON-schema `{ type: 'array',
+>    items: {...} }`) against the configured/default extraction model **qwen2.5-coder:14b** on the
+>    running local Ollama with realistic credit-card statement text. Result: the JSON-schema
+>    `format` works **reliably** — output was a complete, valid JSON array (parsed first try, 7/7
+>    rows), correct signs (plain→negative, CR→positive), skipped OPENING BALANCE / END OF STATEMENT,
+>    and concatenated a multi-line description. Confirmed it also holds under **streaming** and the
+>    model **self-starts the `[`**, so the `'['` assistant-priming hack was removed (route no longer
+>    sends the priming message; client no longer re-prepends `[`). Note: `format: 'json'` (the bare
+>    string form) misbehaved — it returned a single object, not an array — so only the JSON-schema
+>    form is used. The brace-walking **salvage parser in `UploadFlow` is kept as a permanent
+>    fallback** regardless. Also set `temperature: 0` on the extraction call.
+> 3. **Chunk long statements — done, with a documented boundary limitation (PR #7 review).** OCR
+>    retains per-page text (`ocrPagesRef`). In `UploadFlow.runParse`, statements over the
+>    `CHUNK_THRESHOLD` with >1 page are sent one request per page and the parsed arrays
+>    concatenated; the parse log shows "Page 2/5 · N tokens …". Short statements keep the
+>    single-request path.
+>
+>    **Boundary manual test (the unchecked Test Plan item — now actually run).** Built a
+>    synthetic-but-realistic 3-page credit-card statement (>12 KB total, so the >12 KB gate opened)
+>    with ONE transaction deliberately straddling the page-1/page-2 break: `28 Mar DUBAI DUTY FREE
+>    TERMINAL 3 … CONTINUED` ends page 1 (no amount yet), and `PERFUME AND ACCESSORIES DUTY FREE
+>    417.00` opens page 2. Drove the real chunked path against the configured extraction model
+>    (**qwen2.5-coder:14b** on local Ollama), replicating `/api/ollama` exactly (credit-card system
+>    prompt, JSON-schema `format`, `num_ctx: 32768`, `temperature: 0`), concatenating per-page as
+>    `runParse` does.
+>
+>    **Result: the reviewer's concern is real and reproducible.** In every chunked run the straddling
+>    transaction was corrupted, while a single-request extraction of the same text got it right:
+>    - At ~12.6 KB (chunking active): page 1 **dropped** the first half entirely (incomplete row, no
+>      amount); page 2 emitted `{date:"", description:"PERFUME AND ACCESSORIES DUTY FREE",
+>      amount:-417}` — **blank date, truncated description** (lost the "DUBAI DUTY FREE TERMINAL 3 …
+>      REF 88213" half).
+>    - At a smaller size (forced per-page): the SAME transaction became **two** corrupt rows — a
+>      phantom `amount: 0` row on page 1 and a mis-dated (`01 Jan`, bled from a neighbour) `-417` row
+>      on page 2.
+>    - **Control, single request over the whole text:** ONE correct row — full description, correct
+>      `2024-03-28` date, `-417`. So the single-request path is boundary-safe; per-page chunking is not.
+>    The zero-amount / blank-date fragments pass through the salvage parser and `normalizeTransactions`
+>    silently, exactly as predicted.
+>
+>    **Mitigation shipped (low-cost, scoped).** Raised `CHUNK_THRESHOLD` 12 KB → 24 KB. Chunking only
+>    ever existed to stay inside the context window, but `/api/ollama` runs `num_ctx: 32768` (~32 KB
+>    of text) — 12 KB was far more conservative than needed, needlessly routing ordinary multi-page
+>    statements through the boundary-unsafe path. At 24 KB, realistic statements (typically 5–20 KB)
+>    now take the single-request path that extracts boundary transactions correctly, while still
+>    chunking genuinely huge statements before they can overflow context. A **full** fix (cross-page
+>    continuation — feeding the previous page's trailing partial row as context, with dedup) is
+>    deferred as out of scope for this turnaround: for the now-rare huge statements that still chunk,
+>    the residual error is one corrupt row per physical page break, small relative to the whole. The
+>    limitation and rationale are documented in a code comment on `CHUNK_THRESHOLD` in
+>    `UploadFlow.tsx`, so it does not ship as an unstated assumption.
+> 4. **SQL retry loop — done, validated.** `app/api/chat/route.ts` now gives a failed model query
+>    exactly one repair round-trip (failed SQL + SQLite error → "Return a corrected SQLite SELECT")
+>    before surfacing the error; the corrected query is what runs and what's reported. Verified live
+>    against **qwen2.5:32b**: fed a query with `SUM(amt)` → error `no such column: amt`, the model
+>    returned `SUM(amount)` (valid, corrected).
+>
+> Tests: `tests/llmModels.test.ts` pins the role/annotation metadata. `npm run test:run` green
+> (89 passed). `npm run build` compiles clean. `npm run lint` unchanged from baseline (16 pre-existing
+> errors in untouched files — Phase U2/U4 debt; zero introduced by this work).
 
 ### Phase 6 — Data integrity (implements FOLLOWUPS.md)
 
