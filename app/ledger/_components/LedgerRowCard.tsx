@@ -51,6 +51,12 @@ function formatDate(d: string | Date) {
   return new Date(d).toISOString().split('T')[0]
 }
 
+// Keeps the checkbox's accessible name terse for long descriptions rather
+// than reading out the whole thing through a screen reader.
+function truncateForLabel(s: string, max = 40) {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
 /**
  * Mobile sibling of LedgerRow — same handler contract, stacked-card layout
  * instead of a table row. Full split/transfer-link editing stays a
@@ -162,6 +168,7 @@ export function LedgerRowCard({
             checked={!!selected}
             onChange={() => onToggleSelect(transaction.id)}
             className="mt-1 cursor-pointer shrink-0"
+            aria-label={`Select transaction: ${truncateForLabel(transaction.description)}`}
           />
         )}
 
@@ -192,7 +199,7 @@ export function LedgerRowCard({
               <span title="Split transaction" style={{ color: 'var(--tx-tertiary)' }}><Scissors size={12} /></span>
             )}
             {transaction.account.name && (
-              <span className="text-[11px]" style={{ color: 'var(--tx-faint)' }}>{transaction.account.name}</span>
+              <span className="text-xs" style={{ color: 'var(--tx-faint)' }}>{transaction.account.name}</span>
             )}
           </div>
         </div>

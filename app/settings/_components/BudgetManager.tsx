@@ -113,6 +113,7 @@ export function BudgetManager({
           </label>
           <Select.Root value={newCategory} onValueChange={(v) => { setNewCategory(v); setError('') }}>
             <Select.Trigger
+              aria-label="Category"
               className="w-full flex items-center justify-between px-3 py-2 text-sm rounded-[8px] outline-none"
               style={inputStyle}
             >

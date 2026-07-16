@@ -239,7 +239,7 @@ export function DashboardView({
                 </span>
               </div>
               {liab && (
-                <p className="text-[10px] mb-0.5" style={{ color: 'var(--tx-faint)' }}>
+                <p className="text-xs mb-0.5" style={{ color: 'var(--tx-faint)' }}>
                   {acc.accountType === 'credit' ? 'owed' : 'outstanding'}
                 </p>
               )}
@@ -264,21 +264,21 @@ export function DashboardView({
                 const barColor = utilPct >= 90 ? 'var(--tx-error)' : utilPct >= 30 ? 'var(--tx-badge-review)' : 'var(--tx-success)'
                 return (
                   <div className="mt-3 space-y-1">
-                    <div className="flex justify-between text-[10px]" style={{ color: 'var(--tx-faint)' }}>
+                    <div className="flex justify-between text-xs" style={{ color: 'var(--tx-faint)' }}>
                       <span>{utilPct}% used</span>
                       <span>{fromCents(availableCents).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} available</span>
                     </div>
                     <div className="rounded-full overflow-hidden" style={{ height: 4, backgroundColor: 'var(--border-warm-md)' }}>
                       <div style={{ width: `${utilPct}%`, height: '100%', backgroundColor: barColor, borderRadius: 9999, transition: 'width 0.3s' }} />
                     </div>
-                    <p className="text-[10px]" style={{ color: 'var(--tx-faint)' }}>
+                    <p className="text-xs" style={{ color: 'var(--tx-faint)' }}>
                       of {fromCents(acc.creditLimit).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} limit
                     </p>
                   </div>
                 )
               })()}
               {acc.openingBalanceDate && (
-                <p className="text-[10px] mt-1" style={{ color: 'var(--tx-faint)' }}>
+                <p className="text-xs mt-1" style={{ color: 'var(--tx-faint)' }}>
                   since {acc.openingBalanceDate}
                 </p>
               )}

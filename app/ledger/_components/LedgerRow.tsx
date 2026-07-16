@@ -83,6 +83,12 @@ function formatDate(d: string | Date) {
   return new Date(d).toISOString().split('T')[0]
 }
 
+// Keeps the checkbox's accessible name terse for long descriptions rather
+// than reading out the whole thing through a screen reader.
+function truncateForLabel(s: string, max = 40) {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
 const STATUS_BADGE: Record<string, { variant: BadgeVariant; label: string }> = {
   committed:  { variant: 'positive', label: 'Committed' },
   reconciled: { variant: 'info',     label: 'Reconciled' },
@@ -568,7 +574,13 @@ function LedgerRowInner({
       >
         {/* 1 · Checkbox */}
         <td className="px-3 py-3 w-10">
-          <input type="checkbox" checked={!!selected} onChange={() => onToggleSelect?.(transaction.id)} className="cursor-pointer" />
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={() => onToggleSelect?.(transaction.id)}
+            className="cursor-pointer"
+            aria-label={`Select transaction: ${truncateForLabel(transaction.description)}`}
+          />
         </td>
 
         {/* 2 · Date */}
@@ -584,7 +596,7 @@ function LedgerRowInner({
             </div>
             {transaction.originalDescription && transaction.originalDescription !== transaction.description && (
               <div
-                className="text-[10px] truncate mt-0.5"
+                className="text-xs truncate mt-0.5"
                 style={{ color: 'var(--tx-faint)' }}
                 title={transaction.originalDescription}
               >
@@ -592,7 +604,7 @@ function LedgerRowInner({
               </div>
             )}
             {transaction.notes && (
-              <div className="text-[11px] truncate mt-0.5 italic" style={{ color: 'var(--tx-faint)' }}>
+              <div className="text-xs truncate mt-0.5 italic" style={{ color: 'var(--tx-faint)' }}>
                 {transaction.notes}
               </div>
             )}
@@ -695,7 +707,7 @@ function LedgerRowInner({
 
         {/* 8 · Actions (hover-reveal) */}
         <td className="px-3 py-3">
-          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          <div className="flex items-center gap-2 opacity-40 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-150">
             <button
               onClick={() => setEditing(true)}
               className="btn text-xs transition-colors duration-150 hover:text-accent"
@@ -710,6 +722,7 @@ function LedgerRowInner({
                 className="text-xs transition-colors duration-150 hover:text-error disabled:opacity-40"
                 style={{ color: 'var(--tx-tertiary)' }}
                 title="Unlink transfer"
+                aria-label="Unlink transfer"
               >
                 <Unlink size={13} />
               </button>
@@ -719,6 +732,7 @@ function LedgerRowInner({
                 className="text-xs transition-colors duration-150 hover:text-accent"
                 style={{ color: 'var(--tx-tertiary)' }}
                 title="Link as transfer"
+                aria-label="Link as transfer"
               >
                 <Link2 size={13} />
               </button>
@@ -730,6 +744,7 @@ function LedgerRowInner({
                   className="text-xs transition-colors duration-150 hover:text-error disabled:opacity-40"
                   style={{ color: 'var(--tx-tertiary)' }}
                   title="Unlink reimbursement"
+                  aria-label="Unlink reimbursement"
                 >
                   <Unlink size={13} />
                 </button>
@@ -739,6 +754,7 @@ function LedgerRowInner({
                   className="text-xs transition-colors duration-150 hover:text-accent"
                   style={{ color: 'var(--tx-tertiary)' }}
                   title="Link reimbursement transaction"
+                  aria-label="Link reimbursement transaction"
                 >
                   <RotateCcw size={13} />
                 </button>
@@ -750,6 +766,7 @@ function LedgerRowInner({
                 className="text-xs transition-colors duration-150 hover:text-accent"
                 style={{ color: showSplitForm ? 'var(--tx-secondary)' : 'var(--tx-tertiary)' }}
                 title="Split transaction"
+                aria-label="Split transaction"
               >
                 <Scissors size={13} />
               </button>
