@@ -7,6 +7,17 @@ const DB_PATH = path.join(process.cwd(), 'prisma/dev.db')
 
 function createPrismaClient() {
   const adapter = new PrismaBetterSqlite3({ url: DB_PATH })
+
+  // Tune SQLite for concurrent read/write access. WAL is persisted in the
+  // database file itself, so this only needs to run once per file, but it's
+  // cheap and safe to run on every startup (also covers a fresh dev.db).
+  const pragmaDb = new Database(DB_PATH)
+  pragmaDb.pragma('journal_mode = WAL')
+  pragmaDb.pragma('synchronous = NORMAL')
+  pragmaDb.pragma('busy_timeout = 5000')
+  pragmaDb.pragma('foreign_keys = ON')
+  pragmaDb.close()
+
   return new PrismaClient({ adapter })
 }
 

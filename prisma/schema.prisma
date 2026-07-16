@@ -64,6 +64,7 @@ model Transaction {
 
   @@index([date])
   @@index([accountId, date])
+  @@index([accountId, status, date])
   @@index([status])
   @@index([category])
   @@index([parentTransactionId])
