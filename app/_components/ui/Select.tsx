@@ -18,9 +18,9 @@ export type SelectOption = {
 type Size = 'xs' | 'sm' | 'md'
 
 const TRIGGER_BY_SIZE: Record<Size, string> = {
-  xs: 'gap-1.5 px-2 py-1 text-xs rounded-[4px]',
-  sm: 'gap-1.5 px-2 py-1.5 text-sm rounded-[6px]',
-  md: 'gap-2 px-3 py-2 text-sm rounded-[8px]',
+  xs: 'gap-1.5 px-2 py-1 text-xs rounded-[var(--radius-xs)]',
+  sm: 'gap-1.5 px-2 py-1.5 text-sm rounded-[var(--radius-sm)]',
+  md: 'gap-2 px-3 py-2 text-sm rounded-[var(--radius-md)]',
 }
 const CHEVRON_BY_SIZE: Record<Size, number> = { xs: 10, sm: 12, md: 14 }
 
@@ -45,7 +45,7 @@ const CONTENT_STYLE: React.CSSProperties = {
   backgroundColor: 'var(--bg-card)',
   border: '1px solid var(--border-warm)',
   boxShadow: 'var(--shadow-ambient)',
-  borderRadius: '8px',
+  borderRadius: 'var(--radius-md)',
   zIndex: 9999,
 }
 
@@ -103,7 +103,7 @@ export function Select({
               <RSelect.Item
                 key={opt.value}
                 value={opt.value}
-                className="ui-select-item flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
+                className="ui-select-item flex items-center gap-2 px-3 py-1.5 text-sm rounded-[var(--radius-sm)] cursor-pointer outline-none select-none transition-colors duration-100"
                 style={{ color: opt.itemColor ?? 'var(--tx-primary)' }}
               >
                 {opt.dot && (

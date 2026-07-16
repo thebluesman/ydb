@@ -48,10 +48,15 @@ const cardStyle: React.CSSProperties = {
 const tooltipStyle: React.CSSProperties = {
   backgroundColor: 'var(--bg-card)',
   border: '1px solid var(--border-warm)',
-  borderRadius: '6px',
+  borderRadius: 'var(--radius-sm)',
   fontSize: '12px',
   color: 'var(--tx-primary)',
 }
+
+// Tick/grid/cursor colors come from CSS custom properties (globals.css)
+// rather than a JS isDark branch, so charts re-theme for free when the
+// .dark class toggles — no re-render needed for color alone.
+const CHART_TICK_STYLE = { fontSize: 11, fill: 'var(--chart-tick)' }
 
 export function DashboardView({
   categoryBreakdown,
@@ -96,7 +101,6 @@ export function DashboardView({
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [isDark, setIsDark] = useState(false)
   const [startDate, setStartDate] = useState(currentStartDate)
   const [endDate, setEndDate] = useState(currentEndDate)
   const balScrollRef = useRef<HTMLDivElement>(null)
@@ -114,19 +118,6 @@ export function DashboardView({
   useEffect(() => {
     updateBalScroll()
   }, [accountBalances])
-
-  useEffect(() => {
-    const el = document.documentElement
-    const check = () => setIsDark(el.classList.contains('dark'))
-    check()
-    const obs = new MutationObserver(check)
-    obs.observe(el, { attributes: true, attributeFilter: ['class'] })
-    return () => obs.disconnect()
-  }, [])
-
-  const tick   = isDark ? 'rgba(242,241,237,0.45)' : 'rgba(38,37,30,0.45)'
-  const grid   = isDark ? 'rgba(242,241,237,0.07)' : 'rgba(38,37,30,0.07)'
-  const cursor = isDark ? 'rgba(242,241,237,0.06)' : 'rgba(38,37,30,0.04)'
 
   // All incoming values are integer cents; route through the shared money
   // helpers (lib/money.ts) instead of hand-rolled toLocaleString/toFixed calls.
@@ -316,7 +307,6 @@ export function DashboardView({
           </div>
           {/* Gradient fades */}
           {(() => {
-            const bg = isDark ? '#1a1917' : '#f2f1ed'
             const fadeStyle = (dir: 'left' | 'right'): React.CSSProperties => ({
               position: 'absolute',
               top: 0,
@@ -325,7 +315,7 @@ export function DashboardView({
               height: '100%',
               pointerEvents: 'none',
               transition: 'opacity 0.2s',
-              background: `linear-gradient(to ${dir === 'left' ? 'right' : 'left'}, ${bg}, transparent)`,
+              background: `linear-gradient(to ${dir === 'left' ? 'right' : 'left'}, var(--bg-page), transparent)`,
             })
             return (
               <>
@@ -397,10 +387,10 @@ export function DashboardView({
         ) : (
           <ResponsiveContainer width="100%" height={Math.max(categoryBreakdown.length * 38, 200)}>
             <BarChart data={categoryBreakdown} layout="vertical" margin={{ top: 0, right: 24, bottom: 0, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={grid} />
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--chart-grid)" />
               <XAxis
                 type="number"
-                tick={{ fontSize: 11, fill: tick }}
+                tick={CHART_TICK_STYLE}
                 tickFormatter={(v) => `${currency} ${fmtShort(v)}`}
                 axisLine={false}
                 tickLine={false}
@@ -409,7 +399,7 @@ export function DashboardView({
                 type="category"
                 dataKey="category"
                 width={120}
-                tick={{ fontSize: 11, fill: tick }}
+                tick={CHART_TICK_STYLE}
                 axisLine={false}
                 tickLine={false}
               />
@@ -417,7 +407,7 @@ export function DashboardView({
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
               formatter={(value: any) => [fmt(Number(value)), 'Spent']}
                 contentStyle={tooltipStyle}
-                cursor={{ fill: cursor }}
+                cursor={{ fill: 'var(--chart-cursor)' }}
               />
               <Bar dataKey="total" fill={SERIES.category} radius={[0, 4, 4, 0]} />
             </BarChart>
@@ -436,10 +426,10 @@ export function DashboardView({
         ) : (
         <ResponsiveContainer width="100%" height={320}>
           <ComposedChart data={monthlyData} margin={{ top: 8, right: 24, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={grid} />
-            <XAxis dataKey="month" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
+            <XAxis dataKey="month" tick={CHART_TICK_STYLE} axisLine={false} tickLine={false} />
             <YAxis
-              tick={{ fontSize: 11, fill: tick }}
+              tick={CHART_TICK_STYLE}
               tickFormatter={(v) => `${currency} ${fmtShort(v)}`}
               axisLine={false}
               tickLine={false}
@@ -449,9 +439,9 @@ export function DashboardView({
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               formatter={((value: any, name: any) => [fmt(Number(value)), String(name ?? '').charAt(0).toUpperCase() + String(name ?? '').slice(1)]) as any}
               contentStyle={tooltipStyle}
-              cursor={{ fill: cursor }}
+              cursor={{ fill: 'var(--chart-cursor)' }}
             />
-            <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '16px', color: tick }} />
+            <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '16px', color: 'var(--chart-tick)' }} />
             <Bar dataKey="income"   fill={SERIES.income}   name="Income"   radius={[3, 3, 0, 0]} />
             <Bar dataKey="expenses" fill={SERIES.expenses} name="Expenses" radius={[3, 3, 0, 0]} />
             <Line type="monotone" dataKey="net" stroke={SERIES.net} strokeWidth={1.5} dot={false} name="Net" />

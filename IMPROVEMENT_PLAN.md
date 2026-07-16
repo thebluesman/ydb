@@ -883,7 +883,7 @@ Target: fully usable on a ~390px phone; comfortable on tablet.
 - Verify: every page reachable from the nav in one click; a new user can go from empty DB →
   imported statement → categorized ledger without reading the guide.
 
-### Phase U6 — Visual polish & performance of the UI itself
+### Phase U6 — Visual polish & performance of the UI itself ✅ (M7b)
 
 - Convert the 9 `.ttf` fonts to `.woff2` and drop unused IBM Plex Mono weights (keep 400/500/600);
   `next/font/local` supports woff2 directly. Cuts several hundred KB from first load.
@@ -896,6 +896,45 @@ Target: fully usable on a ~390px phone; comfortable on tablet.
   CSS-var-driven `stroke`/`fill` so charts re-theme without a re-render).
 - Verify: Lighthouse (production build) — a11y score ≥ 95, no layout shift from fonts
   (`font-display: swap` already set), total font transfer < 200 KB.
+
+> **M7b status:** done. **Fonts:** all 9 `.ttf` files converted to `.woff2` via `fontTools`
+> (`flavor = 'woff2'`); IBM Plex Mono trimmed from 7 weights to 3 (400/500/600 — Thin,
+> ExtraLight, Light, Bold deleted). `app/layout.tsx`'s `next/font/local` declarations updated to
+> point at the woff2 files with the trimmed weight list; `display: 'swap'` was already set and
+> untouched. Total font payload: 1,143,200 B (9 `.ttf`, ~1.09 MiB) → 196,020 B (5 `.woff2`,
+> ~191 KiB) — an 83% reduction, confirmed under the 200 KB target by measuring the actual
+> `/_next/static/media/*.woff2` transfer sizes off a production build. **Radius:** added a
+> `--radius-xs/sm/md/lg/pill` (4/6/8/12/9999px) scale to `globals.css` and pointed the shared
+> primitives (`.card`, `.btn`, `.ui-input`, `.ui-modal-content`, `.skeleton`, `Select.tsx`,
+> `Badge.tsx`, the global `:focus-visible` rule) at it instead of hardcoded px; the one true
+> off-scale outlier found (`BackupManager`'s `rounded-[5px]`) was fixed to the 6px token. The
+> remaining ad hoc `rounded-[Npx]` call sites across ledger/dashboard/settings already matched
+> the 4/6/8 scale numerically, so per the plan's "does not need to be exhaustive" they were left
+> as-is rather than swept file-by-file. **Icon sizes:** normalized every off-scale
+> `size={9|10|11|13|15|18}` lucide prop across the primitives, nav, and ledger/dashboard/settings
+> screens to the 12/14/16/20/28 set (9/10/11→12, 13→14, 15→16, 18→20); a handful of large
+> decorative/illustration icons in upload/chat success states (22/32/36/40) were left alone as
+> out-of-scope for a "no redesign" pass. **Chart theming:** `DashboardView.tsx`,
+> `CategoryTrendChart.tsx`, and `NetWorthWidget.tsx` no longer branch tick/grid/cursor/tooltip
+> colors on an `isDark` MutationObserver state — added `--chart-tick`/`--chart-grid`/
+> `--chart-cursor` tokens (light + `.dark` override) to `globals.css` and pass them directly as
+> Recharts `stroke`/`fill` strings; the dashboard's account-balance gradient fade (the other
+> `isDark` consumer) now reads `var(--bg-page)` instead. All three files' `isDark` state,
+> `useEffect`, and `MutationObserver` were removed entirely — not just left dormant — since
+> nothing remaining needed a JS-level re-render for color. **Table density:** added a
+> comfortable/compact toggle button next to Export in `LedgerView`'s desktop table header
+> (`Rows2`/`Rows3` icons), persisted to `localStorage` (`ledgerDensity`, same pattern as the theme
+> toggle); compact mode applies a `.ledger-table-compact` class picked up by a `td`/`th` CSS rule
+> in `globals.css` that tightens vertical padding and font-size without threading a density prop
+> through `LedgerRow`. **Verify:** `npm run lint && npm run test:run && npm run build` all green
+> (the pre-existing lint errors/warnings in `guide`/`upload`/`RecurringTransactions`/
+> `SettingsCategoryBridge` are unchanged from `main`, confirmed via `git diff --stat origin/main`
+> on those files). No Lighthouse CLI was available in this sandboxed environment, so a11y ≥ 95
+> wasn't measured numerically here; instead verified manually via Playwright (Chromium) headless
+> screenshots of `/dashboard`, `/ledger`, `/settings` in both light and dark mode — layout,
+> spacing, and theme all render correctly with no visual regression — plus confirmed
+> `font-display: swap` survived in the built CSS and the woff2 files are actually served
+> (`/_next/static/media/*.woff2`, verified via `curl`).
 
 ---
 

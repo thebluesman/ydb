@@ -8,24 +8,20 @@ import { ToastProvider } from "./_components/ui";
 import "./globals.css";
 
 const clashDisplay = localFont({
-  src: "./fonts/ClashDisplay-Variable.ttf",
+  src: "./fonts/ClashDisplay-Variable.woff2",
   variable: "--font-clash-display",
   display: "swap",
 });
 const clashGrotesk = localFont({
-  src: "./fonts/ClashGrotesk-Variable.ttf",
+  src: "./fonts/ClashGrotesk-Variable.woff2",
   variable: "--font-clash-grotesk",
   display: "swap",
 });
 const ibmPlexMono = localFont({
   src: [
-    { path: "./fonts/IBMPlexMono-Thin.ttf",       weight: "100" },
-    { path: "./fonts/IBMPlexMono-ExtraLight.ttf",  weight: "200" },
-    { path: "./fonts/IBMPlexMono-Light.ttf",       weight: "300" },
-    { path: "./fonts/IBMPlexMono-Regular.ttf",     weight: "400" },
-    { path: "./fonts/IBMPlexMono-Medium.ttf",      weight: "500" },
-    { path: "./fonts/IBMPlexMono-SemiBold.ttf",    weight: "600" },
-    { path: "./fonts/IBMPlexMono-Bold.ttf",        weight: "700" },
+    { path: "./fonts/IBMPlexMono-Regular.woff2",   weight: "400" },
+    { path: "./fonts/IBMPlexMono-Medium.woff2",    weight: "500" },
+    { path: "./fonts/IBMPlexMono-SemiBold.woff2",  weight: "600" },
   ],
   variable: "--font-ibm-plex-mono",
   display: "swap",

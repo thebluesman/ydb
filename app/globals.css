@@ -86,6 +86,22 @@
   /* Accent (orange) subtle states — dropzone drag, etc. */
   --border-accent-active: rgba(245, 78, 0, 0.5);
   --bg-accent-subtle:     rgba(245, 78, 0, 0.04);
+
+  /* Radius scale (Design Guide §5): tag/compact, input/skeleton, card/button,
+     modal/featured, pill. Primitives and the most visible screens consume
+     these instead of ad hoc rounded-[Npx] values. */
+  --radius-xs:   4px;
+  --radius-sm:   6px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-pill: 9999px;
+
+  /* Chart theming (Recharts tick/grid/cursor) — consumed directly as
+     stroke/fill so charts re-theme via the .dark class without JS branching
+     on color. */
+  --chart-tick:   rgba(38, 37, 30, 0.45);
+  --chart-grid:   rgba(38, 37, 30, 0.08);
+  --chart-cursor: rgba(38, 37, 30, 0.04);
 }
 
 /* ── Dark mode overrides ─────────────────────────────────────────── */
@@ -135,6 +151,11 @@
   --border-warm:        rgba(242, 241, 237, 0.10);
   --border-warm-md:     rgba(242, 241, 237, 0.20);
   --border-warm-strong: rgba(242, 241, 237, 0.50);
+
+  /* Chart theming — dark */
+  --chart-tick:   rgba(242, 241, 237, 0.45);
+  --chart-grid:   rgba(242, 241, 237, 0.08);
+  --chart-cursor: rgba(242, 241, 237, 0.06);
 
   /* Shadows */
   --shadow-card:   rgba(0,0,0,0.60) 0px 28px 70px,
@@ -262,13 +283,13 @@ main > * {
 }
 .skeleton {
   background-color: var(--border-warm);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   animation: ydb-skeleton-pulse 1.4s ease-in-out infinite;
 }
 .skeleton-card {
   background-color: var(--bg-card);
   border: 1px solid var(--border-warm);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; }
@@ -327,18 +348,31 @@ a:focus-visible,
 summary:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .composer-textarea:focus-visible,
 .dark .composer-textarea:focus-visible {
   box-shadow: none;
 }
 
+/* ── Ledger table density toggle ──────────────────────────────────────── */
+/* Compound selector (class + type) outranks the single-class Tailwind
+   padding/text-size utilities already on the cells, so this overrides them
+   without threading a density prop through every cell. */
+.ledger-table-compact td,
+.ledger-table-compact th {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.ledger-table-compact {
+  font-size: 13px;
+}
+
 /* ── Design-system utility classes ────────────────────────────────────── */
 .card {
   background-color: var(--bg-card);
   border: 1px solid var(--border-warm);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 .text-page-title,
 .h-page {
@@ -385,7 +419,7 @@ summary:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid transparent;
   cursor: pointer;
   white-space: nowrap;
@@ -430,7 +464,7 @@ summary:focus-visible {
   border: 1px solid var(--border-warm);
   background-color: var(--bg-input);
   color: var(--tx-primary);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   font-size: 14px;
   outline: none;
@@ -465,7 +499,7 @@ summary:focus-visible {
   overflow-y: auto;
   background-color: var(--bg-card);
   border: 1px solid var(--border-warm);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   outline: none;
 }

@@ -48,7 +48,7 @@ export function OnboardingCard({
                 border: step.done ? 'none' : '1px solid var(--border-warm)',
               }}
             >
-              {step.done ? <Check size={13} /> : i + 1}
+              {step.done ? <Check size={14} /> : i + 1}
             </span>
             <span
               className="text-sm flex-1"
