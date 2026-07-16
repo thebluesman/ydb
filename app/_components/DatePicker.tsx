@@ -133,7 +133,7 @@ export function DatePicker({ value, onChange, className, style, size = 'md' }: P
       <Popover.Trigger asChild>
         <button
           type="button"
-          className={className}
+          className={`btn ${className || ''}`}
           onMouseEnter={() => setHovTrigger(true)}
           onMouseLeave={() => setHovTrigger(false)}
           style={{

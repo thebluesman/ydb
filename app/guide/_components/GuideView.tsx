@@ -125,7 +125,7 @@ function FormatDemo() {
           <button
             key={f.id}
             onClick={() => setActive(f.id)}
-            className="px-3 py-1.5 text-sm rounded-[8px] transition-all duration-150"
+            className="btn px-3 py-1.5 text-sm rounded-[8px] transition-all duration-150"
             style={{
               background: active === f.id ? 'var(--bg-selected)' : 'var(--bg-btn)',
               color: active === f.id ? 'var(--tx-selected)' : 'var(--tx-secondary)',
@@ -169,7 +169,7 @@ function TransactionRowDemo({ currency }: { currency: string }) {
         </span>
         <button
           onClick={() => setCommitted(!committed)}
-          className="text-xs px-2.5 py-1 rounded-[6px] transition-colors duration-150 shrink-0"
+          className="btn text-xs px-2.5 py-1 rounded-[6px] transition-colors duration-150 shrink-0"
           style={{ background: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
         >
           {committed ? 'Undo' : 'Commit'}
@@ -370,7 +370,7 @@ function ChatConversationDemo({ currency }: { currency: string }) {
           <div>
             <button
               onClick={() => setOpen((o) => !o)}
-              className="flex items-center gap-1.5 text-xs transition-opacity duration-150"
+              className="btn flex items-center gap-1.5 text-xs transition-opacity duration-150"
               style={{ color: 'var(--tx-tertiary)', opacity: 0.75 }}
             >
               <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▸</span>
@@ -469,7 +469,7 @@ function ReimbursementDemo({ currency }: { currency: string }) {
         {settled ? (
           <button
             onClick={() => setSettled(false)}
-            className="text-xs transition-opacity duration-150 hover:opacity-100"
+            className="btn text-xs transition-opacity duration-150 hover:opacity-100"
             style={{ color: 'var(--tx-tertiary)', opacity: 0.6 }}
           >
             Reset
@@ -477,7 +477,7 @@ function ReimbursementDemo({ currency }: { currency: string }) {
         ) : (
           <button
             onClick={() => setSettled(true)}
-            className="text-xs px-3 py-1.5 rounded-[6px] transition-colors duration-150"
+            className="btn text-xs px-3 py-1.5 rounded-[6px] transition-colors duration-150"
             style={{ background: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
           >
             Link reimbursement →
@@ -577,7 +577,7 @@ function TransferDirectionDemo({ currency }: { currency: string }) {
           <span className="w-36 shrink-0 font-medium" style={{ color: 'var(--tx-secondary)' }}>{account}</span>
           <span
             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[4px] text-[10px] shrink-0"
-            style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#92400E' }}
+            style={{ backgroundColor: 'var(--bg-transfer)', color: 'var(--tx-transfer-deep)' }}
           >
             {direction} · {counterpart}
           </span>
@@ -727,7 +727,7 @@ export function GuideView({ currency }: { currency: string }) {
                   <button
                     key={s.id}
                     onClick={() => scrollTo(s.id)}
-                    className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-[6px] text-left transition-all duration-150 group"
+                    className="btn w-full flex items-center gap-2.5 px-3 py-1.5 rounded-[6px] text-left transition-all duration-150 group"
                     style={{
                       background: isActive ? 'var(--bg-card-alt)' : 'transparent',
                       color: isActive ? 'var(--tx-primary)' : 'var(--tx-tertiary)',

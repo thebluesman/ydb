@@ -28,7 +28,7 @@ export function ThemeToggle() {
     <button
       onClick={toggle}
       aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
-      className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs transition-colors duration-150 hover:text-accent"
+      className="btn flex items-center gap-1.5 px-3 py-1 rounded-full text-xs transition-colors duration-150 hover:text-accent"
       style={{
         backgroundColor: 'var(--bg-btn)',
         border: '1px solid var(--border-warm)',

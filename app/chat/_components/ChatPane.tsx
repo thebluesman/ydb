@@ -352,6 +352,7 @@ export function ChatPane({
             <button
               onClick={send}
               disabled={loading || !input.trim()}
+              className="btn"
               style={{
                 width: '34px',
                 height: '34px',

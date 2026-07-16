@@ -58,6 +58,7 @@ export default function GlobalError({
         </p>
         <button
           onClick={reset}
+          className="btn"
           style={{
             padding: '10px 20px',
             borderRadius: 8,

@@ -34,7 +34,7 @@ export function FileDropzone({
         {!disabled && (
           <button
             onClick={onClear}
-            className="text-sm transition-colors duration-150 hover:text-error"
+            className="btn text-sm transition-colors duration-150 hover:text-error"
             style={{ color: 'var(--tx-secondary)' }}
           >
             Remove
@@ -49,8 +49,8 @@ export function FileDropzone({
       {...getRootProps()}
       className="flex flex-col items-center justify-center gap-3 px-6 py-14 rounded-[8px] cursor-pointer transition-colors duration-150"
       style={{
-        border: `2px dashed ${isDragActive ? 'rgba(245,78,0,0.5)' : 'var(--border-warm)'}`,
-        backgroundColor: isDragActive ? 'rgba(245,78,0,0.04)' : 'var(--bg-card)',
+        border: `2px dashed ${isDragActive ? 'var(--border-accent-active)' : 'var(--border-warm)'}`,
+        backgroundColor: isDragActive ? 'var(--bg-accent-subtle)' : 'var(--bg-card)',
       }}
     >
       <input {...getInputProps()} />

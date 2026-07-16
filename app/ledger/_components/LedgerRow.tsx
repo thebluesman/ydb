@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { X, Link2, Unlink, Scissors, ChevronDown, ChevronRight, RotateCcw, CheckCircle2 } from 'lucide-react'
-import * as Select from '@radix-ui/react-select'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { TransferLinkModal } from './TransferLinkModal'
 import { ReimburseLinkModal } from './ReimburseLinkModal'
 import { SplitForm } from './SplitForm'
+import { Select, Badge, Button } from '@/app/_components/ui'
+import type { BadgeVariant } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
@@ -46,53 +47,22 @@ const inputStyle: React.CSSProperties = {
 const fieldInputCls = 'w-full px-2 py-1.5 text-sm rounded-[6px] outline-none'
 const labelCls = 'block text-[10px] font-medium uppercase tracking-wide mb-1'
 
-const selectDropdownStyle: React.CSSProperties = {
-  backgroundColor: 'var(--bg-card)',
-  border: '1px solid var(--border-warm)',
-  boxShadow: 'var(--shadow-card)',
-  borderRadius: '8px',
-  zIndex: 9999,
-}
-
 const TYPE_OPTIONS = [
   { value: 'debit',    label: 'Debit',    dot: 'var(--tx-stat-expense)', color: 'var(--tx-stat-expense)' },
   { value: 'credit',   label: 'Credit',   dot: 'var(--tx-stat-income)',  color: 'var(--tx-stat-income)' },
-  { value: 'transfer', label: 'Transfer', dot: '#F59E0B',                color: '#F59E0B' },
+  { value: 'transfer', label: 'Transfer', dot: 'var(--tx-transfer)',     color: 'var(--tx-transfer)' },
 ]
 
 function TypeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const current = TYPE_OPTIONS.find((o) => o.value === value) ?? TYPE_OPTIONS[0]
   return (
-    <Select.Root value={value} onValueChange={onChange}>
-      <Select.Trigger
-        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
-        style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: current.color }}
-      >
-        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: current.dot }} />
-        <Select.Value />
-        <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-          <ChevronDown size={12} />
-        </Select.Icon>
-      </Select.Trigger>
-      <Select.Portal>
-        <Select.Content position="popper" sideOffset={4} style={{ ...selectDropdownStyle, minWidth: 'var(--radix-select-trigger-width)' }}>
-          <Select.Viewport className="p-1">
-            {TYPE_OPTIONS.map((opt) => (
-              <Select.Item
-                key={opt.value} value={opt.value}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                style={{ color: 'var(--tx-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-              >
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: opt.dot }} />
-                <Select.ItemText>{opt.label}</Select.ItemText>
-              </Select.Item>
-            ))}
-          </Select.Viewport>
-        </Select.Content>
-      </Select.Portal>
-    </Select.Root>
+    <Select
+      value={value}
+      onValueChange={onChange}
+      options={TYPE_OPTIONS}
+      ariaLabel="Transaction type"
+      showDot
+      colorFromOption
+    />
   )
 }
 
@@ -100,64 +70,28 @@ function SimpleSelect({
   value,
   onChange,
   options,
-  className,
 }: {
   value: string
   onChange: (v: string) => void
   options: { value: string; label: string }[]
   className?: string
 }) {
-  return (
-    <Select.Root value={value} onValueChange={onChange}>
-      <Select.Trigger
-        className={`flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none ${className ?? ''}`}
-        style={inputStyle}
-      >
-        <Select.Value />
-        <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-          <ChevronDown size={12} />
-        </Select.Icon>
-      </Select.Trigger>
-      <Select.Portal>
-        <Select.Content position="popper" sideOffset={4} style={{ ...selectDropdownStyle, minWidth: 'var(--radix-select-trigger-width)' }}>
-          <Select.Viewport className="p-1">
-            {options.map((opt) => (
-              <Select.Item
-                key={opt.value} value={opt.value}
-                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                style={{ color: 'var(--tx-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-              >
-                <Select.ItemText>{opt.label}</Select.ItemText>
-              </Select.Item>
-            ))}
-          </Select.Viewport>
-        </Select.Content>
-      </Select.Portal>
-    </Select.Root>
-  )
+  return <Select value={value} onValueChange={onChange} options={options} />
 }
 
 function formatDate(d: string | Date) {
   return new Date(d).toISOString().split('T')[0]
 }
 
+const STATUS_BADGE: Record<string, { variant: BadgeVariant; label: string }> = {
+  committed:  { variant: 'positive', label: 'Committed' },
+  reconciled: { variant: 'info',     label: 'Reconciled' },
+  review:     { variant: 'caution',  label: 'Review' },
+}
+
 function StatusBadge({ status }: { status: string }) {
-  const cfg =
-    status === 'committed'
-      ? { bg: 'var(--bg-badge-committed)', tx: 'var(--tx-badge-committed)', label: 'Committed' }
-      : status === 'reconciled'
-      ? { bg: 'var(--bg-badge-reconciled)', tx: 'var(--tx-badge-reconciled)', label: 'Reconciled' }
-      : { bg: 'var(--bg-badge-review)', tx: 'var(--tx-badge-review)', label: 'Review' }
-  return (
-    <span
-      className="badge-pop inline-flex items-center px-2 py-0.5 rounded-full text-xs"
-      style={{ backgroundColor: cfg.bg, color: cfg.tx }}
-    >
-      {cfg.label}
-    </span>
-  )
+  const cfg = STATUS_BADGE[status] ?? STATUS_BADGE.review
+  return <Badge variant={cfg.variant} pop>{cfg.label}</Badge>
 }
 
 export function LedgerRow({
@@ -346,7 +280,7 @@ export function LedgerRow({
 
   const isTransfer = transaction.transactionType === 'transfer'
   const amtColor = (amt: number) =>
-    isTransfer ? '#F59E0B' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-faint)'
+    isTransfer ? 'var(--tx-transfer)' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-faint)'
 
   const currency =
     accounts.find((a) => a.id === transaction.accountId)?.currency ?? transaction.account.currency
@@ -371,7 +305,7 @@ export function LedgerRow({
               {ruleSuggestion.category}
             </span>
             <div className="ml-auto flex items-center gap-2">
-              <button onClick={handleCreateRule} disabled={ruleSaving} className="px-2.5 py-0.5 rounded-[4px] text-xs font-medium disabled:opacity-40" style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
+              <button onClick={handleCreateRule} disabled={ruleSaving} className="btn px-2.5 py-0.5 rounded-[4px] text-xs font-medium disabled:opacity-40" style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
                 {ruleSaving ? '…' : 'Save'}
               </button>
               <button onClick={() => setRuleSuggestion(null)} className="transition-opacity hover:opacity-60" style={{ color: 'var(--tx-tertiary)' }}><X size={11} /></button>
@@ -393,35 +327,15 @@ export function LedgerRow({
               style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
               title="Display name for this vendor"
             />
-            <Select.Root value={ruleMatchType} onValueChange={setRuleMatchType}>
-              <Select.Trigger
-                className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-[4px] outline-none whitespace-nowrap"
-                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-                title="How to match the pattern"
-              >
-                <Select.Value />
-                <Select.Icon className="ml-1 shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-                  <ChevronDown size={10} />
-                </Select.Icon>
-              </Select.Trigger>
-              <Select.Portal>
-                <Select.Content position="popper" sideOffset={4} style={{ ...selectDropdownStyle, minWidth: 'var(--radix-select-trigger-width)' }}>
-                  <Select.Viewport className="p-1">
-                    {['contains', 'starts-with', 'ends-with', 'exact', 'regex'].map((mt) => (
-                      <Select.Item
-                        key={mt} value={mt}
-                        className="px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
-                        style={{ color: 'var(--tx-primary)' }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                      >
-                        <Select.ItemText>{mt}</Select.ItemText>
-                      </Select.Item>
-                    ))}
-                  </Select.Viewport>
-                </Select.Content>
-              </Select.Portal>
-            </Select.Root>
+            <Select
+              value={ruleMatchType}
+              onValueChange={setRuleMatchType}
+              options={['contains', 'starts-with', 'ends-with', 'exact', 'regex'].map((mt) => ({ value: mt, label: mt }))}
+              size="xs"
+              fullWidth={false}
+              className="whitespace-nowrap"
+              ariaLabel="How to match the pattern"
+            />
           </div>
         </div>
       </td>
@@ -584,20 +498,12 @@ export function LedgerRow({
 
               {/* Row 4: Actions */}
               <div className="flex items-center gap-3 pt-1 border-t" style={{ borderColor: 'var(--border-warm)' }}>
-                <button
-                  onClick={handleSave} disabled={saving}
-                  className="px-4 py-1.5 text-sm rounded-[6px] font-medium disabled:opacity-40"
-                  style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-                >
+                <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
                   {saving ? '…' : 'Save'}
-                </button>
-                <button
-                  onClick={handleCancel}
-                  className="px-3 py-1.5 text-sm rounded-[6px] transition-colors duration-150"
-                  style={{ color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }}
-                >
+                </Button>
+                <Button variant="ghost" size="sm" onClick={handleCancel}>
                   Cancel
-                </button>
+                </Button>
                 {error && <span className="text-xs" style={{ color: 'var(--tx-error)' }}>{error}</span>}
               </div>
 
@@ -640,10 +546,8 @@ export function LedgerRow({
   return (
     <>
       <tr
-        className="group transition-colors duration-100"
+        className="group row-hover transition-colors duration-100"
         style={{ ...rowBorder, cursor: 'default' }}
-        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-row-hover)')}
-        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
       >
         {/* 1 · Checkbox */}
         <td className="px-3 py-3 w-10">
@@ -682,15 +586,12 @@ export function LedgerRow({
               transaction.reimbursedExpense) && (
               <div className="flex items-center gap-1 mt-1.5 flex-wrap">
                 {transaction.transactionType === 'transfer' && (
-                  <span
-                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded-[4px]"
-                    style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#92400E' }}
-                  >
+                  <Badge variant="transfer" shape="tag">
                     {transaction.amount < 0 ? '↑ out' : '↓ in'}
                     {transaction.transferCounterpartAccount && (
                       <> · {transaction.transferCounterpartAccount.name}</>
                     )}
-                  </span>
+                  </Badge>
                 )}
                 {transaction.linkedTransferId && (
                   <span
@@ -703,14 +604,14 @@ export function LedgerRow({
                   </span>
                 )}
                 {transaction.reimbursableFor && !transaction.reimbursementTxId && (
-                  <span
-                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded-[4px]"
+                  <Badge
+                    variant="transfer"
+                    shape="tag"
                     title={`Pending reimbursement from ${transaction.reimbursableFor}`}
-                    style={{ backgroundColor: 'rgba(245,158,11,0.1)', color: '#92400E' }}
                   >
                     <RotateCcw size={9} />
                     reimbursement pending
-                  </span>
+                  </Badge>
                 )}
                 {transaction.reimbursementTx && (
                   <span
@@ -738,13 +639,13 @@ export function LedgerRow({
         </td>
 
         {/* 4 · Amount */}
-        <td className="px-3 py-3 font-mono whitespace-nowrap" style={{ letterSpacing: '-0.275px' }}>
+        <td className="px-3 py-3 amount whitespace-nowrap" style={{ letterSpacing: '-0.275px' }}>
           <div className="text-sm" style={{ color: amtColor(transaction.amount) }}>
-            {transaction.amount < 0 ? '−' : '+'}{currency}{fmtMoney(transaction.amount)}
+            {transaction.amount < 0 ? '−' : ''}{currency}{fmtMoney(transaction.amount)}
           </div>
           {netAmount !== null && (
             <div className="text-[10px] font-normal mt-0.5" style={{ color: 'var(--tx-secondary)', letterSpacing: 0 }}>
-              net {netAmount < 0 ? '−' : '+'}{currency}{fmtMoney(netAmount)}
+              net {netAmount < 0 ? '−' : ''}{currency}{fmtMoney(netAmount)}
             </div>
           )}
         </td>
@@ -754,7 +655,7 @@ export function LedgerRow({
           {transaction.splitLegs && transaction.splitLegs.length > 0 ? (
             <button
               onClick={() => setShowSplitLegs((v) => !v)}
-              className="flex items-center gap-1 text-sm"
+              className="btn flex items-center gap-1 text-sm"
               style={{ color: 'var(--tx-secondary)' }}
             >
               {showSplitLegs ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
@@ -780,7 +681,7 @@ export function LedgerRow({
           <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
             <button
               onClick={() => setEditing(true)}
-              className="text-xs transition-colors duration-150 hover:text-accent"
+              className="btn text-xs transition-colors duration-150 hover:text-accent"
               style={{ color: 'var(--tx-tertiary)' }}
               aria-label="Edit"
             >
@@ -872,8 +773,8 @@ export function LedgerRow({
           >
             {leg.description}
           </td>
-          <td className="px-3 py-2.5 text-sm font-mono whitespace-nowrap" style={{ color: amtColor(leg.amount), letterSpacing: '-0.275px' }}>
-            {leg.amount < 0 ? '−' : '+'}{currency}{fmtMoney(leg.amount)}
+          <td className="px-3 py-2.5 text-sm amount whitespace-nowrap" style={{ color: amtColor(leg.amount), letterSpacing: '-0.275px' }}>
+            {leg.amount < 0 ? '−' : ''}{currency}{fmtMoney(leg.amount)}
           </td>
           <td className="px-3 py-2.5 text-sm" style={{ color: 'var(--tx-faint)' }}>
             {leg.category}

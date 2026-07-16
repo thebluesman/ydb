@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, AlertTriangle } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
+import { Modal, Button } from '@/app/_components/ui'
 
 type ClearScope = {
   transactions: boolean
@@ -83,7 +84,7 @@ export function DangerZone() {
         className="p-6 rounded-[8px]"
         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
       >
-        <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
+        <h2 className="text-section mb-1">
           Danger Zone
         </h2>
         <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
@@ -91,7 +92,7 @@ export function DangerZone() {
         </p>
         <button
           onClick={() => setShowModal(true)}
-          className="px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150"
+          className="btn px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150"
           style={{
             backgroundColor: 'var(--bg-notify-error)',
             color: 'var(--tx-notify-error)',
@@ -102,31 +103,18 @@ export function DangerZone() {
         </button>
       </div>
 
-      {showModal && (
-        <div
-          className="fixed inset-0 flex items-center justify-center px-4"
-          style={{ zIndex: 10000, backgroundColor: 'rgba(0,0,0,0.5)' }}
-          onClick={(e) => { if (e.target === e.currentTarget) close() }}
-        >
-          <div
-            className="w-full max-w-md rounded-[12px] p-6 space-y-5"
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              border: '1px solid var(--border-warm)',
-              boxShadow: 'var(--shadow-card)',
-            }}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle size={15} style={{ color: 'var(--tx-error)' }} />
-                <h3 className="text-base font-semibold" style={{ color: 'var(--tx-primary)' }}>Clear Data</h3>
-              </div>
-              <button onClick={close} disabled={clearing} style={{ color: 'var(--tx-tertiary)' }}>
-                <X size={15} />
-              </button>
-            </div>
-
+      <Modal
+        open={showModal}
+        onClose={close}
+        maxWidth={448}
+        title={
+          <span className="flex items-center gap-2">
+            <AlertTriangle size={15} style={{ color: 'var(--tx-error)' }} />
+            Clear Data
+          </span>
+        }
+      >
+        <div className="space-y-5">
             {/* Checkboxes */}
             <div className="space-y-0.5">
               {ROWS.map(({ key, label, sub, danger }) => {
@@ -193,30 +181,20 @@ export function DangerZone() {
 
             {/* Actions */}
             <div className="flex items-center justify-end gap-3">
-              <button
-                onClick={close}
-                disabled={clearing}
-                className="text-sm transition-colors duration-150 disabled:opacity-40"
-                style={{ color: 'var(--tx-tertiary)' }}
-              >
+              <Button variant="ghost" size="sm" onClick={close} disabled={clearing}>
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="danger"
+                size="md"
                 onClick={handleClear}
                 disabled={!canConfirm || clearing}
-                className="px-[14px] py-[8px] text-sm font-semibold rounded-[8px] transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{
-                  backgroundColor: canConfirm ? 'var(--tx-error)' : 'var(--bg-notify-error)',
-                  color: canConfirm ? '#fff' : 'var(--tx-notify-error)',
-                  border: '1px solid transparent',
-                }}
               >
                 {clearing ? 'Clearing…' : 'Clear Selected'}
-              </button>
+              </Button>
             </div>
-          </div>
         </div>
-      )}
+      </Modal>
     </>
   )
 }

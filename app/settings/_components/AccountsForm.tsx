@@ -394,7 +394,7 @@ export function AccountsForm({
                 <button
                   onClick={() => removeAccount(i)}
                   disabled={removing === account.id}
-                  className="px-3 py-2 text-xs rounded-[8px] transition-colors duration-150 disabled:opacity-40"
+                  className="btn px-3 py-2 text-xs rounded-[8px] transition-colors duration-150 disabled:opacity-40"
                   style={{ backgroundColor: 'var(--bg-notify-error)', color: 'var(--tx-notify-error)', border: '1px solid var(--border-warm)' }}
                 >
                   {removing === account.id ? '…' : 'Remove'}
@@ -412,7 +412,7 @@ export function AccountsForm({
 
         <button
           onClick={addAccount}
-          className="w-full py-2 text-sm rounded-[8px] transition-colors duration-150"
+          className="btn w-full py-2 text-sm rounded-[8px] transition-colors duration-150"
           style={{ border: '1px dashed var(--border-warm-md)', color: 'var(--tx-secondary)', backgroundColor: 'transparent' }}
           onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-strong)')}
           onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
