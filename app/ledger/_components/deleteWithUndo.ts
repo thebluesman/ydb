@@ -35,7 +35,11 @@ export async function deleteWithUndo(
 ) {
   const res = await fetch(`/api/transactions/${transaction.id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Server returned ${res.status}`)
-  const { deletedCounterpart } = await res.json() as { deletedCounterpart?: boolean }
+  // Default to false, not just absent: the DELETE route's early-return path
+  // for an already-gone row (`{ ok: true }`) omits this field entirely, and
+  // `!undefined` would otherwise read as "counterpart survived unlinked" —
+  // showing a misleading toast when nothing was actually deleted or unlinked.
+  const { deletedCounterpart = false } = await res.json() as { deletedCounterpart?: boolean }
   onDelete(transaction.id)
 
   // A linked transfer whose counterpart was an imported row (not created

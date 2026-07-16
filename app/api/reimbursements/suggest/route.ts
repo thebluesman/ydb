@@ -118,7 +118,5 @@ export async function GET() {
     })
   }
 
-  suggestions.sort((a, b) => b.score - a.score)
-
   return NextResponse.json({ suggestions })
 }
