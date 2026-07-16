@@ -1,6 +1,7 @@
 'use client'
 
 import { Plus, X } from 'lucide-react'
+import * as Dialog from '@radix-ui/react-dialog'
 
 type ChatSession = {
   id: number
@@ -21,29 +22,17 @@ function relativeTime(dateStr: string) {
   return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-export function ChatSidebar({
-  sessions,
-  activeSessionId,
-  onSelectSession,
-  onNewSession,
-  onDeleteSession,
-}: {
+type SessionListProps = {
   sessions: ChatSession[]
   activeSessionId: number | null
   onSelectSession: (id: number) => void
   onNewSession: () => void
   onDeleteSession: (id: number) => void
-}) {
+}
+
+function SessionList({ sessions, activeSessionId, onSelectSession, onNewSession, onDeleteSession }: SessionListProps) {
   return (
-    <div
-      className="flex flex-col shrink-0"
-      style={{
-        width: '220px',
-        borderRight: '1px solid var(--border-warm)',
-        backgroundColor: 'var(--bg-nav)',
-        overflowY: 'auto',
-      }}
-    >
+    <>
       <div className="p-3">
         <button
           onClick={onNewSession}
@@ -100,6 +89,57 @@ export function ChatSidebar({
           )
         })}
       </div>
+    </>
+  )
+}
+
+/** Desktop: a fixed rail, always visible at `md+`. Below `md` it's hidden —
+ *  MobileChatDrawer covers the same content as a slide-over instead. */
+export function ChatSidebar(props: SessionListProps) {
+  return (
+    <div
+      className="hidden md:flex md:flex-col shrink-0"
+      style={{
+        width: '220px',
+        borderRight: '1px solid var(--border-warm)',
+        backgroundColor: 'var(--bg-nav)',
+        overflowY: 'auto',
+      }}
+    >
+      <SessionList {...props} />
     </div>
+  )
+}
+
+/** Mobile-only slide-over covering the same session list, opened via a
+ *  "Sessions" button in the chat page header. */
+export function MobileChatDrawer({
+  open,
+  onClose,
+  ...listProps
+}: SessionListProps & { open: boolean; onClose: () => void }) {
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="ui-drawer-overlay md:hidden" />
+        <Dialog.Content className="ui-drawer-content md:hidden" aria-describedby={undefined}>
+          <div className="flex items-center justify-between p-3" style={{ borderBottom: '1px solid var(--border-warm)' }}>
+            <Dialog.Title className="text-sm font-semibold" style={{ color: 'var(--tx-primary)' }}>
+              Chats
+            </Dialog.Title>
+            <Dialog.Close asChild>
+              <button aria-label="Close" style={{ color: 'var(--tx-tertiary)' }}>
+                <X size={16} />
+              </button>
+            </Dialog.Close>
+          </div>
+          <SessionList
+            {...listProps}
+            onSelectSession={(id) => { listProps.onSelectSession(id); onClose() }}
+            onNewSession={() => { listProps.onNewSession(); onClose() }}
+          />
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }

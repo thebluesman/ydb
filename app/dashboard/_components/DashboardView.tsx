@@ -173,8 +173,10 @@ export function DashboardView({
           </div>
         )}
 
-        {/* Date range */}
-        <div className="flex items-center gap-2 ml-auto">
+        {/* Date range — stacks full-width below the currency pills on narrow
+            screens instead of forcing itself to the right edge and wrapping
+            awkwardly; ml-auto only kicks in once there's room (sm+). */}
+        <div className="flex items-center gap-2 flex-wrap sm:ml-auto">
           <span className="text-[11px] font-medium uppercase tracking-[0.048px]" style={{ color: 'var(--tx-secondary)' }}>
             Period
           </span>
@@ -327,7 +329,7 @@ export function DashboardView({
       )}
 
       {/* ── Summary stat cards ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {([
           { label: 'Total Income',   value: `+${fmt(summaryStats.totalIncome)}`,  sub: `${summaryStats.txCount} transactions`, bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
           { label: 'Total Expenses', value: `−${fmt(summaryStats.totalExpenses)}`, sub: 'selected period',                      bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },

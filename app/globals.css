@@ -456,6 +456,35 @@ textarea:focus-visible {
   outline: none;
 }
 
+/* ── Drawer primitive (Radix Dialog, slide-over from the left) ──────────
+   Used for the mobile chat-sessions drawer below `md`. */
+.ui-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background-color: var(--bg-overlay);
+}
+.ui-drawer-overlay[data-state='open'] { animation: ydb-drawer-overlay-in 150ms ease-out; }
+.ui-drawer-content {
+  position: fixed;
+  z-index: 10001;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(84vw, 300px);
+  background-color: var(--bg-nav);
+  border-right: 1px solid var(--border-warm);
+  box-shadow: var(--shadow-card);
+  outline: none;
+  display: flex;
+  flex-direction: column;
+}
+.ui-drawer-content[data-state='open']   { animation: ydb-drawer-slide-in 180ms cubic-bezier(0.22,1,0.36,1); }
+.ui-drawer-content[data-state='closed'] { animation: ydb-drawer-slide-out 150ms ease-in; }
+@keyframes ydb-drawer-slide-in  { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+@keyframes ydb-drawer-slide-out { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@keyframes ydb-drawer-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+
 /* ── Smooth table row hover ───────────────────────────────────────────── */
 tbody tr {
   transition: background-color 0.1s ease;

@@ -19,6 +19,7 @@ export function TopTransactionsPanel({
   }
 
   return (
+    <div style={{ overflowX: 'auto' }}>
     <table className="w-full text-sm border-collapse">
       <thead>
         <tr style={{ backgroundColor: 'var(--bg-table-head)' }}>
@@ -61,5 +62,6 @@ export function TopTransactionsPanel({
         ))}
       </tbody>
     </table>
+    </div>
   )
 }

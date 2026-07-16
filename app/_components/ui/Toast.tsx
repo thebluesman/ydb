@@ -16,7 +16,7 @@ export type ToastOptions = {
 
 type Toast = ToastOptions & { id: number; variant: ToastVariant }
 
-type ToastApi = {
+export type ToastApi = {
   notify: (opts: ToastOptions) => number
   success: (message: string, opts?: Omit<ToastOptions, 'message' | 'variant'>) => number
   error: (message: string, opts?: Omit<ToastOptions, 'message' | 'variant'>) => number
