@@ -375,10 +375,46 @@ for both prompts, and cap each message's length.
 >    string form) misbehaved — it returned a single object, not an array — so only the JSON-schema
 >    form is used. The brace-walking **salvage parser in `UploadFlow` is kept as a permanent
 >    fallback** regardless. Also set `temperature: 0` on the extraction call.
-> 3. **Chunk long statements — done.** OCR now retains per-page text (`ocrPagesRef`). In
->    `UploadFlow.runParse`, statements over ~12 KB with >1 page are sent one request per page and the
->    parsed arrays concatenated; the parse log shows "Page 2/5 · N tokens …". Short/single-page
->    statements keep the single-request path.
+> 3. **Chunk long statements — done, with a documented boundary limitation (PR #7 review).** OCR
+>    retains per-page text (`ocrPagesRef`). In `UploadFlow.runParse`, statements over the
+>    `CHUNK_THRESHOLD` with >1 page are sent one request per page and the parsed arrays
+>    concatenated; the parse log shows "Page 2/5 · N tokens …". Short statements keep the
+>    single-request path.
+>
+>    **Boundary manual test (the unchecked Test Plan item — now actually run).** Built a
+>    synthetic-but-realistic 3-page credit-card statement (>12 KB total, so the >12 KB gate opened)
+>    with ONE transaction deliberately straddling the page-1/page-2 break: `28 Mar DUBAI DUTY FREE
+>    TERMINAL 3 … CONTINUED` ends page 1 (no amount yet), and `PERFUME AND ACCESSORIES DUTY FREE
+>    417.00` opens page 2. Drove the real chunked path against the configured extraction model
+>    (**qwen2.5-coder:14b** on local Ollama), replicating `/api/ollama` exactly (credit-card system
+>    prompt, JSON-schema `format`, `num_ctx: 32768`, `temperature: 0`), concatenating per-page as
+>    `runParse` does.
+>
+>    **Result: the reviewer's concern is real and reproducible.** In every chunked run the straddling
+>    transaction was corrupted, while a single-request extraction of the same text got it right:
+>    - At ~12.6 KB (chunking active): page 1 **dropped** the first half entirely (incomplete row, no
+>      amount); page 2 emitted `{date:"", description:"PERFUME AND ACCESSORIES DUTY FREE",
+>      amount:-417}` — **blank date, truncated description** (lost the "DUBAI DUTY FREE TERMINAL 3 …
+>      REF 88213" half).
+>    - At a smaller size (forced per-page): the SAME transaction became **two** corrupt rows — a
+>      phantom `amount: 0` row on page 1 and a mis-dated (`01 Jan`, bled from a neighbour) `-417` row
+>      on page 2.
+>    - **Control, single request over the whole text:** ONE correct row — full description, correct
+>      `2024-03-28` date, `-417`. So the single-request path is boundary-safe; per-page chunking is not.
+>    The zero-amount / blank-date fragments pass through the salvage parser and `normalizeTransactions`
+>    silently, exactly as predicted.
+>
+>    **Mitigation shipped (low-cost, scoped).** Raised `CHUNK_THRESHOLD` 12 KB → 24 KB. Chunking only
+>    ever existed to stay inside the context window, but `/api/ollama` runs `num_ctx: 32768` (~32 KB
+>    of text) — 12 KB was far more conservative than needed, needlessly routing ordinary multi-page
+>    statements through the boundary-unsafe path. At 24 KB, realistic statements (typically 5–20 KB)
+>    now take the single-request path that extracts boundary transactions correctly, while still
+>    chunking genuinely huge statements before they can overflow context. A **full** fix (cross-page
+>    continuation — feeding the previous page's trailing partial row as context, with dedup) is
+>    deferred as out of scope for this turnaround: for the now-rare huge statements that still chunk,
+>    the residual error is one corrupt row per physical page break, small relative to the whole. The
+>    limitation and rationale are documented in a code comment on `CHUNK_THRESHOLD` in
+>    `UploadFlow.tsx`, so it does not ship as an unstated assumption.
 > 4. **SQL retry loop — done, validated.** `app/api/chat/route.ts` now gives a failed model query
 >    exactly one repair round-trip (failed SQL + SQLite error → "Return a corrected SQLite SELECT")
 >    before surfacing the error; the corrected query is what runs and what's reported. Verified live

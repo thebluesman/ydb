@@ -1,6 +1,6 @@
 export const runtime = 'nodejs'
 
-import { prisma, executeReadonlyQuery, ReadonlyQueryError } from '@/lib/prisma'
+import { prisma, executeReadonlyQuery } from '@/lib/prisma'
 import { getLlmConfig } from '@/lib/llm-config'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
@@ -178,7 +178,7 @@ export async function POST(request: Request) {
       // Repair round-trip couldn't reach the model — surface the original error.
       return new Response(
         JSON.stringify({ type: 'error', message: `SQL error: ${firstMsg}`, sql }),
-        { status: err instanceof ReadonlyQueryError ? 422 : 422, headers: { 'Content-Type': 'application/json' } }
+        { status: 422, headers: { 'Content-Type': 'application/json' } }
       )
     }
 

@@ -275,10 +275,23 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
     return parseModelOutput(accumulated)
   }
 
-  // Long statements are sent one page at a time. A whole 20-page statement in a
-  // single request risks overflowing num_ctx (truncating the extraction); per
-  // page keeps every request well inside the window and improves accuracy.
-  const CHUNK_THRESHOLD = 12 * 1024
+  // Very long statements are sent one page at a time so a single request can't
+  // overflow the model's context window (`/api/ollama` runs num_ctx = 32768,
+  // ~32 KB of statement text). The threshold is deliberately generous because
+  // chunking is NOT free: extraction reads per PDF page, so per-page requests
+  // split the input at physical page breaks, and a transaction whose row or
+  // description straddles a page break is then seen by two independent requests
+  // with no shared context. Verified against qwen2.5-coder:14b (see
+  // IMPROVEMENT_PLAN.md Phase 5 chunking bullet): the straddling transaction is
+  // reliably corrupted — its first half dropped, its date left blank, its
+  // amount lost, or the row split in two — whereas the same statement sent as a
+  // SINGLE request extracts it correctly. Keeping the threshold well below
+  // num_ctx means realistic multi-page statements (typically 5–20 KB) take the
+  // boundary-safe single-request path; only genuinely huge statements chunk,
+  // where the one-corrupt-row-per-page-break error is small relative to the
+  // whole and unavoidable without cross-page continuation context (deferred —
+  // see the plan). If you lower this, weigh that boundary risk.
+  const CHUNK_THRESHOLD = 24 * 1024
 
   const runParse = async () => {
     const ocrText = ocrTextRef.current
