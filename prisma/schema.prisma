@@ -47,11 +47,12 @@ model Transaction {
   status              String        @default("review")  // "review" | "committed" | "reconciled"
   notes               String?
   rawSource           String?
+  createdVia          String        @default("import")  // "import" | "manual" — gates transfer-delete cascade (FOLLOWUPS §2)
   linkedTransferId    Int?
   linkedTransfer      Transaction?  @relation("TransferLink", fields: [linkedTransferId], references: [id])
   linkedFrom          Transaction[] @relation("TransferLink")
   parentTransactionId Int?
-  parentTransaction   Transaction?  @relation("SplitLeg", fields: [parentTransactionId], references: [id])
+  parentTransaction   Transaction?  @relation("SplitLeg", fields: [parentTransactionId], references: [id], onDelete: Cascade)
   splitLegs           Transaction[] @relation("SplitLeg")
   reimbursableFor     String?                           // who owes the money back (e.g. "Insurance")
   reimbursementTxId   Int?          @unique             // settlement transaction id (one-to-one)

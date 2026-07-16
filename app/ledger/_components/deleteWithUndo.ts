@@ -17,6 +17,7 @@ type DeletableTransaction = {
   reimbursementTxId: number | null
   reimbursedExpense: { id: number } | null
   splitLegs?: SplitLeg[]
+  linkedTransferId: number | null
 }
 
 /**
@@ -34,7 +35,13 @@ export async function deleteWithUndo(
 ) {
   const res = await fetch(`/api/transactions/${transaction.id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`Server returned ${res.status}`)
+  const { deletedCounterpart } = await res.json() as { deletedCounterpart?: boolean }
   onDelete(transaction.id)
+
+  // A linked transfer whose counterpart was an imported row (not created
+  // in-app) survives unlinked rather than being cascade-deleted (FOLLOWUPS
+  // §2) — say so, since the counterpart is still sitting in the ledger.
+  const hadUnlinkedCounterpart = transaction.linkedTransferId != null && !deletedCounterpart
 
   const restore = {
     date: typeof transaction.date === 'string' ? transaction.date : transaction.date.toISOString(),
@@ -60,7 +67,11 @@ export async function deleteWithUndo(
       ? { role: 'settlement' as const, counterpartId: transaction.reimbursedExpense.id }
       : null
 
-  toast.success('Transaction deleted', {
+  const toastMessage = hadUnlinkedCounterpart
+    ? 'Transaction deleted — its linked transfer was imported, so it was kept (unlinked) instead of deleted'
+    : 'Transaction deleted'
+
+  toast.success(toastMessage, {
     duration: 5000,
     action: {
       label: 'Undo',
