@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Download, DatabaseBackup, Trash2 } from 'lucide-react'
+import { Download, DatabaseBackup, Trash2, RotateCcw, AlertTriangle } from 'lucide-react'
+import { Modal, Button } from '@/app/_components/ui'
 
 type BackupEntry = {
   filename: string
@@ -27,6 +28,9 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
   const [loading, setLoading] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [restoreTarget, setRestoreTarget] = useState<string | null>(null)
+  const [restoring, setRestoring] = useState(false)
+  const [restoredMessage, setRestoredMessage] = useState<string | null>(null)
 
   const inputStyle = {
     backgroundColor: 'var(--bg-input)',
@@ -66,8 +70,36 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
     }
   }
 
+  async function handleRestoreConfirm() {
+    if (!restoreTarget) return
+    setRestoring(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/backup/${encodeURIComponent(restoreTarget)}/restore`, { method: 'POST' })
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      setRestoreTarget(null)
+      setRestoredMessage(
+        `Restored from ${restoreTarget}. A safety backup of the previous database was saved as ${data.safetyBackup?.filename ?? 'a new backup'}. Restart the app for the restored data to take effect.`,
+      )
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setRestoring(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
+      {restoredMessage && (
+        <div
+          className="flex items-start gap-2.5 px-3 py-2.5 rounded-[6px] text-xs"
+          style={{ backgroundColor: 'var(--bg-notify-error)', color: 'var(--tx-notify-error)' }}
+        >
+          <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+          <p>{restoredMessage}</p>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <p className="text-xs" style={{ color: 'var(--tx-secondary)' }}>
           {backups.length === 0
@@ -131,6 +163,18 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
                   Download
                 </a>
                 <button
+                  onClick={() => setRestoreTarget(b.filename)}
+                  className="btn flex items-center gap-1 text-xs px-2 py-1 rounded-[5px]"
+                  style={{
+                    color: 'var(--tx-secondary)',
+                    border: '1px solid var(--border-warm)',
+                    backgroundColor: 'var(--bg-input)',
+                  }}
+                >
+                  <RotateCcw size={11} />
+                  Restore
+                </button>
+                <button
                   onClick={() => handleDelete(b.filename)}
                   disabled={deleting === b.filename}
                   className="btn flex items-center gap-1 text-xs px-2 py-1 rounded-[5px] disabled:opacity-50"
@@ -149,6 +193,25 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
           ))}
         </div>
       )}
+
+      <Modal open={restoreTarget != null} onClose={() => setRestoreTarget(null)} title="Restore database?">
+        <div className="space-y-4">
+          <p className="text-sm" style={{ color: 'var(--tx-secondary)' }}>
+            This overwrites the live database with <span className="font-mono">{restoreTarget}</span>.
+            A safety backup of the current database is taken first, but the app must be restarted
+            afterward for the restored data to take effect.
+          </p>
+          {error && <p className="text-xs" style={{ color: 'var(--color-error, #e53e3e)' }}>{error}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setRestoreTarget(null)} disabled={restoring}>
+              Cancel
+            </Button>
+            <Button variant="danger" size="sm" onClick={handleRestoreConfirm} disabled={restoring}>
+              {restoring ? 'Restoring…' : 'Restore'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

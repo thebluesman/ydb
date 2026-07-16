@@ -446,6 +446,46 @@ export function categoryTrendSql(accountIds: number[], startIso: string, endIso:
   )
 }
 
+// ── Net-worth history (Phase 7 item 4) ──────────────────────────────────────
+// Computes a monthly net-worth series as: per-account opening balance +
+// cumulative signed transaction sums, grouped in ONE query per data need
+// (pre-range seed, and in-range monthly deltas), then combined in
+// app/dashboard/page.tsx via lib/accounts.ts computeBalance (which applies
+// the asset/liability sign rule) and summed across accounts per month. This
+// mirrors the *current* per-account balance computation (`sumByAccount`
+// above — a plain groupBy sum over committed+reconciled rows, no
+// split/reimbursement exclusion) rather than the income-statement
+// `inclusionSql` used for cash-flow/category aggregates, so the last point
+// of the history reconciles with the account balances shown elsewhere on
+// the same dashboard.
+
+export type AccountMonthlyRow = { accountId: number; ym: string; s: number }
+export type AccountSumRow = { accountId: number; s: number }
+
+/** Per-account, per-month signed transaction sum within [start,end]. */
+export function accountMonthlySumSql(accountIds: number[], startIso: string, endIso: string): string {
+  const scope = scopeSql('main', accountIds)
+  return (
+    `SELECT accountId, strftime('%Y-%m', date, 'localtime') AS ym, SUM(amount) AS s` +
+    ` FROM "Transaction" main` +
+    ` WHERE ${scope} AND main.date >= '${startIso}' AND main.date <= '${endIso}'` +
+    ` GROUP BY accountId, ym`
+  )
+}
+
+/** Per-account signed transaction sum strictly before `startIso` — the seed
+ *  each account's running balance starts from when walking the in-range
+ *  months. */
+export function preRangeSumByAccountSql(accountIds: number[], startIso: string): string {
+  const scope = scopeSql('main', accountIds, startIso)
+  return (
+    `SELECT accountId, COALESCE(SUM(amount), 0) AS s` +
+    ` FROM "Transaction" main` +
+    ` WHERE ${scope}` +
+    ` GROUP BY accountId`
+  )
+}
+
 /** Raw (signed) balance of asset accounts strictly before `startIso`, used to
  *  seed the cash-flow opening row. Includes all types (transfers too); only the
  *  hidden-rows exclusion applies. */

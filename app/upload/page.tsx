@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/prisma'
-import { UploadFlow } from './_components/UploadFlow'
+import { UploadTabs } from './_components/UploadTabs'
 
 export const metadata = {
   title: 'Upload — ydb',
@@ -25,7 +25,7 @@ export default async function UploadPage() {
             Drop a bank statement (PDF or image) to extract and categorise transactions.
           </p>
         </div>
-        <UploadFlow accounts={accounts} categories={categories} />
+        <UploadTabs accounts={accounts} categories={categories} />
       </div>
     </div>
   )

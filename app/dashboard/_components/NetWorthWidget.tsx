@@ -10,7 +10,7 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts'
-import type { AccountBalance, CashFlowRow } from '../page'
+import type { AccountBalance, NetWorthPoint } from '../page'
 import { isAsset, isLiability } from '@/lib/accounts'
 import { fromCents } from '@/lib/money'
 
@@ -23,11 +23,11 @@ function fmtShort(cents: number) {
 
 export function NetWorthWidget({
   accountBalances,
-  cashFlowData,
+  netWorthHistory,
   currency,
 }: {
   accountBalances: AccountBalance[]
-  cashFlowData: CashFlowRow[]
+  netWorthHistory: NetWorthPoint[]
   currency: string
 }) {
   const [isDark, setIsDark] = useState(false)
@@ -81,10 +81,12 @@ export function NetWorthWidget({
         ))}
       </div>
 
-      {/* Trend chart */}
-      {cashFlowData.length > 1 && (
+      {/* Net-worth trend — monthly series across all accounts (assets minus
+          liabilities), computed server-side in app/dashboard/page.tsx from
+          one grouped SQL query per lib/transactions-query.ts (Phase 7 item 4). */}
+      {netWorthHistory.length > 1 && (
         <ResponsiveContainer width="100%" height={160}>
-          <LineChart data={cashFlowData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+          <LineChart data={netWorthHistory} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={grid} />
             <XAxis dataKey="period" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
             <YAxis
@@ -98,7 +100,7 @@ export function NetWorthWidget({
             />
             <Line
               type="monotone"
-              dataKey="closingBalance"
+              dataKey="netWorth"
               stroke={netWorth >= 0 ? '#6ee7b7' : '#f87171'}
               strokeWidth={2}
               dot={false}

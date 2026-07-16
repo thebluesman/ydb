@@ -1,30 +1,41 @@
 'use client'
 
 import { useDropzone } from 'react-dropzone'
-import { Upload, FileText, Image } from 'lucide-react'
+import { Upload, FileText, Image, FileSpreadsheet } from 'lucide-react'
 
 export function FileDropzone({
-  onFile, disabled, file, onClear,
+  onFile, disabled, file, onClear, accept, hint,
 }: {
   onFile: (file: File) => void
   disabled: boolean
   file: File | null
   onClear: () => void
+  /** react-dropzone `accept` map. Defaults to the statement OCR path (PDF/image). */
+  accept?: Record<string, string[]>
+  /** Helper text under the drop icon. Defaults to the statement OCR hint. */
+  hint?: string
 }) {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: { 'image/*': [], 'application/pdf': ['.pdf'] },
+    accept: accept ?? { 'image/*': [], 'application/pdf': ['.pdf'] },
     maxFiles: 1,
     disabled,
     onDropAccepted: ([f]) => onFile(f),
   })
 
   if (file) {
+    const isSpreadsheet = /\.(csv|ofx|qfx)$/i.test(file.name)
     return (
       <div
         className="flex items-center gap-4 px-5 py-4 rounded-[8px]"
         style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-card)' }}
       >
-        <div>{file.type === 'application/pdf' ? <FileText size={22} style={{ color: 'var(--tx-secondary)' }} /> : <Image size={22} style={{ color: 'var(--tx-secondary)' }} />}</div>
+        <div>
+          {isSpreadsheet
+            ? <FileSpreadsheet size={22} style={{ color: 'var(--tx-secondary)' }} />
+            : file.type === 'application/pdf'
+              ? <FileText size={22} style={{ color: 'var(--tx-secondary)' }} />
+              : <Image size={22} style={{ color: 'var(--tx-secondary)' }} />}
+        </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate" style={{ color: 'var(--tx-primary)' }}>{file.name}</p>
           <p className="text-xs mt-0.5" style={{ color: 'var(--tx-secondary)' }}>
@@ -60,7 +71,7 @@ export function FileDropzone({
           {isDragActive ? 'Drop it here' : 'Drag & drop a file'}
         </p>
         <p className="text-xs mt-1" style={{ color: 'var(--tx-secondary)' }}>
-          PDF or image (JPG, PNG, WEBP)
+          {hint ?? 'PDF or image (JPG, PNG, WEBP)'}
         </p>
       </div>
       <span

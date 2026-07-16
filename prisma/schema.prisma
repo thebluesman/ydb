@@ -18,6 +18,8 @@ model Account {
   openingBalance     Int            @default(0)
   openingBalanceDate DateTime?
   creditLimit        Int?
+  lastReconciledAt      DateTime?      // date the account was last reconciled through
+  lastReconciledBalance Int?           // confirmed statement closing balance at that date, in cents
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
   transactions       Transaction[]
