@@ -83,10 +83,14 @@ export default async function DashboardPage({
   const accountIds = accountsForCurrency.map((a) => a.id)
 
   // ── Resolve date range ─────────────────────────────────────────────────────
-  const endDate = params.endDate ? new Date(params.endDate) : now
-  const startDate = params.startDate
-    ? new Date(params.startDate)
-    : new Date(now.getFullYear(), now.getMonth() - 11, 1)
+  const defaultStartDate = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+  const parsedEndDate = params.endDate ? new Date(params.endDate) : now
+  const parsedStartDate = params.startDate ? new Date(params.startDate) : defaultStartDate
+  // A malformed ?startDate=/?endDate= produces an Invalid Date; toDbDate()'s
+  // toISOString() throws RangeError on those, so fall back to the defaults
+  // instead of 500ing the page.
+  const endDate = isNaN(parsedEndDate.getTime()) ? now : parsedEndDate
+  const startDate = isNaN(parsedStartDate.getTime()) ? defaultStartDate : parsedStartDate
 
   // Always clamp endDate to end-of-day so the inclusive upper bound covers
   // every transaction on the chosen end date (picker gives start-of-day).
