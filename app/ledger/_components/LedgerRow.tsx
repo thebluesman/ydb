@@ -83,6 +83,12 @@ function formatDate(d: string | Date) {
   return new Date(d).toISOString().split('T')[0]
 }
 
+// Keeps the checkbox's accessible name terse for long descriptions rather
+// than reading out the whole thing through a screen reader.
+function truncateForLabel(s: string, max = 40) {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s
+}
+
 const STATUS_BADGE: Record<string, { variant: BadgeVariant; label: string }> = {
   committed:  { variant: 'positive', label: 'Committed' },
   reconciled: { variant: 'info',     label: 'Reconciled' },
@@ -573,7 +579,7 @@ function LedgerRowInner({
             checked={!!selected}
             onChange={() => onToggleSelect?.(transaction.id)}
             className="cursor-pointer"
-            aria-label={`Select transaction: ${transaction.description}`}
+            aria-label={`Select transaction: ${truncateForLabel(transaction.description)}`}
           />
         </td>
 
