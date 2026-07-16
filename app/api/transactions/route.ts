@@ -4,12 +4,15 @@ import { validateTransactionWrite } from '@/lib/transactionValidation'
 import { fromCents } from '@/lib/money'
 import {
   TRANSACTION_INCLUDE,
+  buildCountSql,
+  buildExportIdsSql,
+  buildPageIdsSql,
   buildPendingSql,
-  buildPrismaWhere,
   buildStatsSql,
   parseLedgerQuery,
   resolveCurrencyScope,
   toNumber,
+  type CurrencyScope,
   type LedgerQuery,
 } from '@/lib/transactions-query'
 
@@ -27,29 +30,30 @@ export async function GET(request: Request) {
   ])
   const baseCurrency = baseCurrencySetting?.value ?? accounts[0]?.currency ?? 'GBP'
   const scope = resolveCurrencyScope(accounts, q.accountId, baseCurrency)
-  const where = buildPrismaWhere(q, scope)
 
-  // CSV export: stream the full filtered set (no pagination), one lightweight
-  // include for the account name. Escapes formula-injection sigils.
+  // CSV export: stream the full filtered set (no pagination). Escapes
+  // formula-injection sigils.
   if (q.format === 'csv') {
-    return exportCsv(where, q)
+    return exportCsv(q, scope)
   }
 
+  const pageIds = buildPageIdsSql(q, scope)
+  const countSql = buildCountSql(q, scope)
   const stats = buildStatsSql(q, scope)
   const pending = buildPendingSql(scope, q.accountId)
 
-  const [rows, total, statsRows, pendingRows] = await Promise.all([
-    prisma.transaction.findMany({
-      where,
-      orderBy: { [q.sort]: q.dir },
-      skip: (q.page - 1) * q.pageSize,
-      take: q.pageSize,
-      include: TRANSACTION_INCLUDE,
-    }),
-    prisma.transaction.count({ where }),
+  // Page rows, count, stats and pending all derive from the one raw predicate
+  // (buildFilterSql) so the visible rows and the stat counts can't diverge on a
+  // `%`/`_` search term. Rows are selected by id, then hydrated with relations.
+  const [idRows, countRows, statsRows, pendingRows] = await Promise.all([
+    prisma.$queryRawUnsafe<Array<{ id: number }>>(pageIds.sql, ...pageIds.params),
+    prisma.$queryRawUnsafe<Record<string, unknown>[]>(countSql.sql, ...countSql.params),
     prisma.$queryRawUnsafe<Record<string, unknown>[]>(stats.sql, ...stats.params),
     prisma.$queryRawUnsafe<Record<string, unknown>[]>(pending.sql, ...pending.params),
   ])
+
+  const rows = await hydrateRows(idRows.map((r) => toNumber(r.id)))
+  const total = toNumber(countRows[0]?.count)
 
   const s = statsRows[0] ?? {}
   const p = pendingRows[0] ?? {}
@@ -72,6 +76,19 @@ export async function GET(request: Request) {
   })
 }
 
+// Hydrate a list of transaction ids (in order) into full rows with the ledger
+// relations. Ids come from the raw-SQL id query; a single Prisma findMany then
+// attaches the includes, re-sorted back into the id order.
+async function hydrateRows(ids: number[]) {
+  if (ids.length === 0) return []
+  const rows = await prisma.transaction.findMany({
+    where: { id: { in: ids } },
+    include: TRANSACTION_INCLUDE,
+  })
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  return ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => r != null)
+}
+
 // Excel/Sheets treat cells beginning with =, +, -, @, \t, \r as formulas.
 // Prefixing with a single quote neutralises that without breaking the value.
 function csvCell(raw: string | number | null | undefined): string {
@@ -81,22 +98,43 @@ function csvCell(raw: string | number | null | undefined): string {
   return `"${safe.replace(/"/g, '""')}"`
 }
 
-async function exportCsv(where: ReturnType<typeof buildPrismaWhere>, q: LedgerQuery) {
-  const rows = await prisma.transaction.findMany({
-    where,
-    orderBy: { [q.sort]: q.dir },
-    select: {
-      date: true,
-      description: true,
-      originalDescription: true,
-      transactionType: true,
-      amount: true,
-      category: true,
-      status: true,
-      notes: true,
-      account: { select: { name: true } },
-    },
-  })
+async function exportCsv(q: LedgerQuery, scope: CurrencyScope) {
+  const { sql, params } = buildExportIdsSql(q, scope)
+  const idRows = await prisma.$queryRawUnsafe<Array<{ id: number }>>(sql, ...params)
+  const ids = idRows.map((r) => toNumber(r.id))
+
+  type CsvRow = {
+    id: number
+    date: Date
+    description: string
+    originalDescription: string | null
+    transactionType: string
+    amount: number
+    category: string
+    status: string
+    notes: string | null
+    account: { name: string }
+  }
+  let rows: CsvRow[] = []
+  if (ids.length > 0) {
+    const fetched = await prisma.transaction.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        date: true,
+        description: true,
+        originalDescription: true,
+        transactionType: true,
+        amount: true,
+        category: true,
+        status: true,
+        notes: true,
+        account: { select: { name: true } },
+      },
+    })
+    const byId = new Map(fetched.map((r) => [r.id, r]))
+    rows = ids.map((id) => byId.get(id)).filter((r): r is CsvRow => r != null)
+  }
   const headers = ['Date', 'Description', 'Original Description', 'Type', 'Amount', 'Category', 'Account', 'Status', 'Notes']
   const body = rows.map((t) =>
     [

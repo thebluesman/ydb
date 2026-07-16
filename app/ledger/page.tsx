@@ -2,8 +2,9 @@ import { prisma } from '@/lib/prisma'
 import { LedgerView } from './_components/LedgerView'
 import {
   TRANSACTION_INCLUDE,
+  buildCountSql,
+  buildPageIdsSql,
   buildPendingSql,
-  buildPrismaWhere,
   buildStatsSql,
   parseLedgerQuery,
   resolveCurrencyScope,
@@ -27,30 +28,47 @@ export default async function LedgerPage({
   }
   const q = parseLedgerQuery(usp)
 
-  const [accounts, categories, baseCurrencySetting] = await Promise.all([
+  // Distinct categories across the WHOLE table (not just the current page), so
+  // the ledger's category filter lists ad-hoc categories that live on other
+  // pages too. Defined categories are unioned in on the client.
+  const [accounts, categories, distinctCategoryRows, baseCurrencySetting] = await Promise.all([
     prisma.account.findMany({ where: { isActive: true }, orderBy: { id: 'asc' } }),
     prisma.category.findMany({ orderBy: { name: 'asc' } }),
+    prisma.transaction.findMany({
+      where: { category: { not: '' } },
+      select: { category: true },
+      distinct: ['category'],
+      orderBy: { category: 'asc' },
+    }),
     prisma.setting.findFirst({ where: { key: 'baseCurrency' } }),
   ])
+  const categoryOptions = distinctCategoryRows.map((r) => r.category)
 
   const baseCurrency = baseCurrencySetting?.value ?? accounts[0]?.currency ?? 'GBP'
   const scope = resolveCurrencyScope(accounts, q.accountId, baseCurrency)
-  const where = buildPrismaWhere(q, scope)
+  const pageIds = buildPageIdsSql(q, scope)
+  const countSql = buildCountSql(q, scope)
   const stats = buildStatsSql(q, scope)
   const pending = buildPendingSql(scope, q.accountId)
 
-  const [rows, total, statsRows, pendingRows] = await Promise.all([
-    prisma.transaction.findMany({
-      where,
-      orderBy: { [q.sort]: q.dir },
-      skip: (q.page - 1) * q.pageSize,
-      take: q.pageSize,
-      include: TRANSACTION_INCLUDE,
-    }),
-    prisma.transaction.count({ where }),
+  // Page rows, count, stats and pending all derive from the one raw predicate
+  // (buildFilterSql) so the visible rows and the stat counts can't diverge on a
+  // `%`/`_` search term. Rows are selected by id, then hydrated with relations.
+  const [idRows, countRows, statsRows, pendingRows] = await Promise.all([
+    prisma.$queryRawUnsafe<Array<{ id: number }>>(pageIds.sql, ...pageIds.params),
+    prisma.$queryRawUnsafe<Record<string, unknown>[]>(countSql.sql, ...countSql.params),
     prisma.$queryRawUnsafe<Record<string, unknown>[]>(stats.sql, ...stats.params),
     prisma.$queryRawUnsafe<Record<string, unknown>[]>(pending.sql, ...pending.params),
   ])
+
+  const ids = idRows.map((r) => toNumber(r.id))
+  const unordered =
+    ids.length > 0
+      ? await prisma.transaction.findMany({ where: { id: { in: ids } }, include: TRANSACTION_INCLUDE })
+      : []
+  const byId = new Map(unordered.map((r) => [r.id, r]))
+  const rows = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => r != null)
+  const total = toNumber(countRows[0]?.count)
 
   const s = statsRows[0] ?? {}
   const p = pendingRows[0] ?? {}
@@ -77,6 +95,7 @@ export default async function LedgerPage({
           initialStats={initialStats}
           accounts={accounts}
           categories={categories}
+          categoryOptions={categoryOptions}
         />
       </div>
     </div>

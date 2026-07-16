@@ -122,42 +122,23 @@ function normalizeEnum(value: string | null, allowed: string[]): string | null {
   return allowed.includes(value) ? value : null
 }
 
-// ── Prisma where object for the page query ───────────────────────────────────
-// Standard filters, expressed as a typed Prisma where. Kept adjacent to the raw
-// SQL predicate below (buildFilterSql) — the two describe the SAME filtered set
-// and must change together.
-export function buildPrismaWhere(q: LedgerQuery, scope: CurrencyScope) {
-  const where: Record<string, unknown> = {
-    parentTransactionId: null,
-  }
-  if (q.accountId != null) {
-    where.accountId = q.accountId
-  } else if (scope.accountIds != null) {
-    where.accountId = { in: scope.accountIds }
-  }
-  if (q.type) where.transactionType = q.type
-  if (q.category) where.category = q.category
-  if (q.status) where.status = q.status
-  if (q.pendingReimbursements) {
-    where.reimbursableFor = { not: null }
-    where.reimbursementTxId = null
-  }
-  if (q.search) {
-    // SQLite `contains` is case-insensitive for ASCII (matches the old
-    // `.toLowerCase().includes()` behaviour for the descriptions in play).
-    where.OR = [
-      { description: { contains: q.search } },
-      { originalDescription: { contains: q.search } },
-    ]
-  }
-  return where
-}
-
 // ── Raw SQL predicate ────────────────────────────────────────────────────────
-// Produces a boolean SQL expression (and its positional `?` params) describing
-// the same filtered set as buildPrismaWhere. Used for the DB-computed stats and
-// re-used inside the reimbursement NOT EXISTS subquery so the "settlement side"
-// exclusion is scoped to the same filtered set the old JS `settled` memo was.
+// The single filter predicate for the whole ledger. It produces a boolean SQL
+// expression (and its positional `?` params) that is the ONE source of truth for
+// which transactions the ledger operates over — the page rows, the total count,
+// the CSV export, AND the DB-computed stats all build on it, so the row list and
+// the stat counts can't drift (they previously did: a Prisma `contains` row
+// query treated `%`/`_` in the search term as wildcards while the stats SQL
+// escaped them). It is also re-used inside the reimbursement NOT EXISTS subquery
+// so the "settlement side" exclusion is scoped to the same filtered set the old
+// JS `settled` memo was.
+//
+// `applyCurrencyScope` gates ONLY the multi-currency "all accounts" narrowing:
+// the stats/pending aggregates pass `true` (money math needs a single currency,
+// so cross-currency accounts are excluded and the cards labelled with the base
+// currency), while the row list / count / CSV pass `false` so "All accounts"
+// shows every account's transactions regardless of currency — an explicit
+// `accountId` filter still applies in both cases.
 //
 // `?` placeholders work identically for Prisma `$queryRawUnsafe` and a bare
 // better-sqlite3 statement (the oracle test uses the latter).
@@ -169,6 +150,7 @@ export function buildFilterSql(
   q: LedgerQuery,
   scope: CurrencyScope,
   alias = 't',
+  { applyCurrencyScope = true }: { applyCurrencyScope?: boolean } = {},
 ): { clause: string; params: unknown[] } {
   const a = `"${alias}"`
   const clauses: string[] = [`${a}."parentTransactionId" IS NULL`]
@@ -177,7 +159,7 @@ export function buildFilterSql(
   if (q.accountId != null) {
     clauses.push(`${a}."accountId" = ?`)
     params.push(q.accountId)
-  } else if (scope.accountIds != null) {
+  } else if (applyCurrencyScope && scope.accountIds != null) {
     if (scope.accountIds.length === 0) {
       clauses.push('1 = 0')
     } else {
@@ -209,6 +191,47 @@ export function buildFilterSql(
   }
 
   return { clause: clauses.join(' AND '), params }
+}
+
+// Shared ORDER BY. `sort` is whitelisted to SORT_KEYS (all real columns) and
+// `dir` normalised to asc/desc in parseLedgerQuery, so this interpolation is
+// not injectable. The `id` tiebreaker keeps pagination deterministic when the
+// sort column has ties (same-day dates, equal amounts, …).
+function orderBySql(q: LedgerQuery, alias = 't'): string {
+  const dir = q.dir === 'asc' ? 'ASC' : 'DESC'
+  return `ORDER BY "${alias}"."${q.sort}" ${dir}, "${alias}"."id" ASC`
+}
+
+// Page of row ids for the current filter/sort, honouring pagination. Rows are
+// selected by id here (via the shared predicate, so the LIKE/ESCAPE semantics
+// match the stats) and hydrated with their relations by a follow-up Prisma
+// findMany keyed on these ids. Not currency-scoped — see buildFilterSql.
+export function buildPageIdsSql(q: LedgerQuery, scope: CurrencyScope): { sql: string; params: unknown[] } {
+  const { clause, params } = buildFilterSql(q, scope, 't', { applyCurrencyScope: false })
+  const sql = `
+    SELECT "t"."id" AS id
+    FROM "Transaction" "t"
+    WHERE ${clause}
+    ${orderBySql(q)}
+    LIMIT ? OFFSET ?
+  `
+  return { sql, params: [...params, q.pageSize, (q.page - 1) * q.pageSize] }
+}
+
+// Total rows matching the filter (drives pagination). Same predicate as the
+// page, so the count and the visible rows agree.
+export function buildCountSql(q: LedgerQuery, scope: CurrencyScope): { sql: string; params: unknown[] } {
+  const { clause, params } = buildFilterSql(q, scope, 't', { applyCurrencyScope: false })
+  return { sql: `SELECT COUNT(*) AS count FROM "Transaction" "t" WHERE ${clause}`, params }
+}
+
+// Full filtered set of ids in sort order (no pagination) — for CSV export.
+export function buildExportIdsSql(q: LedgerQuery, scope: CurrencyScope): { sql: string; params: unknown[] } {
+  const { clause, params } = buildFilterSql(q, scope, 't', { applyCurrencyScope: false })
+  return {
+    sql: `SELECT "t"."id" AS id FROM "Transaction" "t" WHERE ${clause} ${orderBySql(q)}`,
+    params,
+  }
 }
 
 export type LedgerStats = {

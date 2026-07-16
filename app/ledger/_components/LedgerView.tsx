@@ -46,12 +46,15 @@ function SortIcon({ col, sortKey, sortDir }: { col: string; sortKey: string; sor
     : <ArrowDown size={12} className="ml-1 inline-block" style={{ color: 'var(--tx-secondary)' }} />
 }
 
-export function LedgerView({ initialRows, initialTotal, initialStats, accounts, categories }: {
+export function LedgerView({ initialRows, initialTotal, initialStats, accounts, categories, categoryOptions }: {
   initialRows: Transaction[]
   initialTotal: number
   initialStats: LedgerStats
   accounts: Account[]
   categories: Category[]
+  // Distinct categories across the whole table (all pages), from the server —
+  // so the filter dropdown isn't limited to the current page's rows.
+  categoryOptions: string[]
 }) {
   const router = useRouter()
   const pathname = usePathname() ?? '/ledger'
@@ -107,6 +110,14 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
 
   const currency = stats.currency
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // On "All accounts" with more than one currency, the row list spans every
+  // account (all currencies), but the stat cards can only sum a single currency
+  // — so they're scoped to the base currency and labelled as such. Surface that
+  // difference instead of silently hiding it (and instead of the old behaviour,
+  // which narrowed the rows to base-currency accounts and could render empty).
+  const isMultiCurrency = useMemo(() => new Set(accounts.map((a) => a.currency)).size > 1, [accounts])
+  const showCurrencyNote = accountFilter === 'all' && isMultiCurrency
 
   // ── URL helpers ────────────────────────────────────────────────────────────
   const updateParams = useCallback(
@@ -164,10 +175,17 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
     else updateParams({ sort: key, dir: 'asc' })
   }
 
+  // Filter/select options: defined categories ∪ every category persisted across
+  // the whole table (categoryOptions, from the server) ∪ the current page's rows
+  // (so a category just typed into the Add form shows up immediately).
   const allCategories = useMemo(() => {
-    const all = [...new Set([...categories.map((c) => c.name), ...rows.map((t) => t.category).filter(Boolean)])]
-    return all.sort()
-  }, [rows, categories])
+    const all = new Set<string>([
+      ...categories.map((c) => c.name),
+      ...categoryOptions,
+      ...rows.map((t) => t.category).filter(Boolean),
+    ])
+    return [...all].sort()
+  }, [rows, categories, categoryOptions])
 
   // ── Optimistic row patches + reconcile ───────────────────────────────────────
   const handleUpdate = useCallback((updated: Transaction) => {
@@ -341,6 +359,14 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
           </div>
         ))}
       </div>
+
+      {/* Multi-currency note — totals are base-currency; the list spans all. */}
+      {showCurrencyNote && (
+        <p className="text-xs -mt-2" style={{ color: 'var(--tx-tertiary)' }}>
+          Totals are shown in {currency}. The list below includes accounts in other currencies —
+          filter by account to see a single account&apos;s totals.
+        </p>
+      )}
 
       {/* Pending reimbursements banner */}
       {stats.pendingReimbursementCount > 0 && (
