@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { validateTransactionWrite } from '@/lib/transactionValidation'
+import { colorForCategory } from '@/lib/category-colors'
 import { NextResponse } from 'next/server'
 
 // Fields this endpoint may change. Everything else should go through the
@@ -24,6 +25,16 @@ export async function PATCH(request: Request) {
   if (update.transactionType !== undefined) data.transactionType = update.transactionType
   if (update.category !== undefined) data.category = update.category
   if (update.status !== undefined) data.status = update.status
+
+  // Ledger lets arbitrary category strings in; auto-create rather than reject
+  // so it shows up in Settings too (Phase 6.4).
+  if (update.category) {
+    await prisma.category.upsert({
+      where: { name: update.category },
+      update: {},
+      create: { name: update.category, color: colorForCategory(update.category) },
+    })
+  }
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: 'no valid fields in update' }, { status: 400 })

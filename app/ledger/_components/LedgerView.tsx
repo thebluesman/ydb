@@ -6,6 +6,7 @@ import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, Ro
 import * as RSelect from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
 import { LedgerRowCard } from './LedgerRowCard'
+import { ReimbursementSuggestModal } from './ReimbursementSuggestModal'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { Select, Card, Button, useToast } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
@@ -89,6 +90,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
 
   const [searchInput, setSearchInput] = useState(urlSearch)
   const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [showSuggestModal, setShowSuggestModal] = useState(false)
 
   // Add transaction form
   const [showAddForm, setShowAddForm]       = useState(false)
@@ -391,26 +393,47 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
 
       {/* Pending reimbursements banner */}
       {stats.pendingReimbursementCount > 0 && (
-        <button
-          onClick={() => updateParams({ pendingReimbursements: showPendingOnly ? null : '1' })}
-          className="btn w-full flex items-center gap-2.5 px-4 py-3 rounded-[8px] text-sm text-left transition-colors duration-150"
+        <div
+          className="w-full flex items-center gap-2.5 px-4 py-3 rounded-[8px] text-sm"
           style={{
             backgroundColor: showPendingOnly ? 'var(--bg-badge-review)' : 'var(--bg-card)',
             border: '1px solid var(--border-warm)',
             color: 'var(--tx-badge-review)',
           }}
         >
-          <RotateCcw size={14} style={{ flexShrink: 0 }} />
-          <span>
-            {stats.pendingReimbursementCount} pending reimbursement{stats.pendingReimbursementCount !== 1 ? 's' : ''} awaiting settlement
-            {' — '}
-            {currency}{fromCents(stats.pendingReimbursementOutstanding).toFixed(2)} outstanding
-          </span>
-          <span className="ml-auto text-xs" style={{ color: 'var(--tx-secondary)' }}>
+          <button
+            onClick={() => updateParams({ pendingReimbursements: showPendingOnly ? null : '1' })}
+            className="btn flex items-center gap-2.5 text-left flex-1"
+          >
+            <RotateCcw size={14} style={{ flexShrink: 0 }} />
+            <span>
+              {stats.pendingReimbursementCount} pending reimbursement{stats.pendingReimbursementCount !== 1 ? 's' : ''} awaiting settlement
+              {' — '}
+              {currency}{fromCents(stats.pendingReimbursementOutstanding).toFixed(2)} outstanding
+            </span>
+          </button>
+          <button
+            onClick={() => setShowSuggestModal(true)}
+            className="btn text-xs whitespace-nowrap"
+            style={{ color: 'var(--tx-secondary)', textDecoration: 'underline' }}
+          >
+            Suggest matches
+          </button>
+          <button
+            onClick={() => updateParams({ pendingReimbursements: showPendingOnly ? null : '1' })}
+            className="btn text-xs"
+            style={{ color: 'var(--tx-secondary)' }}
+          >
             {showPendingOnly ? 'Show all' : 'Filter'}
-          </span>
-        </button>
+          </button>
+        </div>
       )}
+
+      <ReimbursementSuggestModal
+        open={showSuggestModal}
+        onClose={() => setShowSuggestModal(false)}
+        onLinked={refetch}
+      />
 
       {/* Filters */}
       <Card className="p-4">
