@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { X, Link2, Unlink, Scissors, ChevronDown, ChevronRight, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { TransferLinkModal } from './TransferLinkModal'
@@ -93,7 +93,7 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant={cfg.variant} pop>{cfg.label}</Badge>
 }
 
-export function LedgerRow({
+function LedgerRowInner({
   transaction,
   accounts,
   categories,
@@ -110,7 +110,7 @@ export function LedgerRow({
   onUpdateById?: (id: number, patch: Partial<Transaction>) => void
   onDelete: (id: number) => void
   selected?: boolean
-  onToggleSelect?: () => void
+  onToggleSelect?: (id: number) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -550,7 +550,7 @@ export function LedgerRow({
       >
         {/* 1 · Checkbox */}
         <td className="px-3 py-3 w-10">
-          <input type="checkbox" checked={!!selected} onChange={onToggleSelect} className="cursor-pointer" />
+          <input type="checkbox" checked={!!selected} onChange={() => onToggleSelect?.(transaction.id)} className="cursor-pointer" />
         </td>
 
         {/* 2 · Date */}
@@ -815,3 +815,9 @@ export function LedgerRow({
     </>
   )
 }
+
+// Rows re-render often as the ledger refetches, but an unchanged row (same
+// transaction reference, same `selected` flag) need not. All handlers passed
+// in are stable (`useCallback` in LedgerView), and select/update/delete are
+// id-based, so React.memo's shallow prop comparison is safe here.
+export const LedgerRow = memo(LedgerRowInner)

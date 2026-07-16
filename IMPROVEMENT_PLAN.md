@@ -165,6 +165,29 @@ Three data points, measured in sequence against the same code:
 
 ### Phase 1 — Ledger: move filtering/pagination to the server (biggest win)
 
+> **Status (M2b): DONE** — server-driven ledger implemented on branch
+> `claude/m2b-ledger-server-rewrite`. Query params, DB-computed stats, currency-scope fix,
+> CSV export, URL-driven filters, 250ms debounced search, `React.memo` rows, and the
+> `pendingReimbursementCount`/outstanding banner are all in place. The shared predicate lives
+> in `lib/transactions-query.ts` and is validated against a JS oracle in
+> `tests/ledgerStats.oracle.test.ts` (splits, transfers, matched/pending reimbursements,
+> multi-currency). **Deferred:** the 50k-row `scripts/seed.ts` + perf-number verification
+> (no seed data available this session) — the change is structurally sound (page-only
+> serialisation, all filtering/aggregation in SQL), but the <200ms/<100KB guardrails were not
+> benchmarked. Track under Phase 8's seed script.
+>
+> **Review pass (post-approval, PR #4):** rebased onto `main` after M2a merged (the
+> ledger components now use the M2a design-system primitives). Three review notes addressed:
+> (1) **Multi-currency "All accounts"** — the row list and CSV are no longer narrowed to
+> base-currency accounts; they span every account, while the stat cards stay scoped to the base
+> currency (money math needs a single currency) and a caption says so. This removes the old
+> silent-hiding and the empty-ledger edge case (≥2 currencies, none matching base).
+> (2) **Search escaping** — the row/count/CSV queries now build on the same raw-SQL
+> `buildFilterSql` predicate (literal `LIKE … ESCAPE`) as the stats, so `%`/`_` in a search term
+> can't make the rows and the stat counts disagree; `buildPrismaWhere` was removed (one predicate).
+> (3) **Category filter options** derive from a full-table `SELECT DISTINCT category`, not just the
+> current page. Row selection is now covered by `tests/ledgerRows.oracle.test.ts`.
+
 The ledger currently ships the whole table to the client and keeps a mutable copy in React state.
 Replace with a server-driven table. Working target: `/ledger` responds in <200 ms and transfers
 <100 KB with 50k rows in the DB — these are order-of-magnitude guardrails, **not** benchmarked
