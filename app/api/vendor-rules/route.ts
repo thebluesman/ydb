@@ -1,25 +1,45 @@
 import { prisma } from '@/lib/prisma'
-import { countMatchingTransactions } from '@/lib/vendor-rule-match'
+import { countMatchingTransactions, ruleCountQuery } from '@/lib/vendor-rule-match'
 import { NextResponse } from 'next/server'
 
 const VALID_MATCH_TYPES = ['contains', 'starts-with', 'ends-with', 'exact', 'regex']
 const VALID_DIRECTIONS = ['either', 'debit', 'credit']
 
-export async function GET() {
-  const [rules, txns] = await Promise.all([
-    prisma.vendorRule.findMany({ orderBy: [{ priority: 'asc' }, { vendor: 'asc' }] }),
-    prisma.transaction.findMany({
-      where: { status: { in: ['committed', 'reconciled'] } },
-      select: { description: true, originalDescription: true, amount: true },
-      orderBy: { updatedAt: 'desc' },
-      take: 5000,
+// Plain GET returns rules only (what the upload/review flow needs). Add
+// `?withCounts=1` to also compute how many transactions each rule matches —
+// counts run in SQL for the non-regex match types, and fall back to JS only
+// for the (rare) regex rules. The previous behaviour fetched 5,000 rows and
+// ran every rule against all of them in JS on every settings render.
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const withCounts = searchParams.get('withCounts') === '1'
+
+  const rules = await prisma.vendorRule.findMany({ orderBy: [{ priority: 'asc' }, { vendor: 'asc' }] })
+  if (!withCounts) return NextResponse.json(rules)
+
+  // Only touch the transactions table in JS if a regex rule actually needs it.
+  const hasRegex = rules.some((r) => r.matchType === 'regex')
+  const regexTxns = hasRegex
+    ? await prisma.transaction.findMany({
+        where: { status: { in: ['committed', 'reconciled'] } },
+        select: { description: true, originalDescription: true, amount: true },
+      })
+    : []
+
+  const withCountsArr = await Promise.all(
+    rules.map(async (r) => {
+      const q = ruleCountQuery(r)
+      let matchCount: number
+      if (q) {
+        const [row] = await prisma.$queryRawUnsafe<{ n: number | bigint }[]>(q.sql, ...q.params)
+        matchCount = Number(row?.n ?? 0)
+      } else {
+        matchCount = countMatchingTransactions(r, regexTxns)
+      }
+      return { ...r, matchCount }
     }),
-  ])
-  const withCounts = rules.map((r) => ({
-    ...r,
-    matchCount: countMatchingTransactions(r, txns),
-  }))
-  return NextResponse.json(withCounts)
+  )
+  return NextResponse.json(withCountsArr)
 }
 
 const VALID_TRANSACTION_TYPES = ['credit', 'debit', 'transfer']

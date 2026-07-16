@@ -58,6 +58,49 @@ export function findMatchingRule<T extends RuleInput & { id: number }>(
   return null
 }
 
+/** Escape LIKE wildcards so a literal `%`/`_` in a user pattern is matched
+ *  literally (used with `ESCAPE '\'`). */
+export function escapeLike(pattern: string): string {
+  return pattern.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
+
+/**
+ * Build a parameterized COUNT(*) query that reproduces matchesRule() in SQL for
+ * the non-regex match types. Returns null for `regex` rules (the caller must
+ * fall back to countMatchingTransactions in JS). Counts committed/reconciled
+ * rows, applying the direction + amount gates and matching the pattern against
+ * COALESCE(originalDescription, description) — the same target field as the JS
+ * matcher. Placeholders are `?` so the result runs under both Prisma
+ * $queryRawUnsafe and better-sqlite3.
+ */
+export function ruleCountQuery(rule: RuleInput): { sql: string; params: unknown[] } | null {
+  if (rule.matchType === 'regex') return null
+
+  const params: unknown[] = []
+  const where: string[] = [`status IN ('committed','reconciled')`]
+
+  // Gate 1 — direction (debit ⇒ amount < 0, credit ⇒ amount > 0)
+  if (rule.direction === 'debit') where.push('amount < 0')
+  else if (rule.direction === 'credit') where.push('amount > 0')
+
+  // Gate 2 — amount range on ABS(amount)
+  if (rule.minAmount !== null) { where.push('ABS(amount) >= ?'); params.push(rule.minAmount) }
+  if (rule.maxAmount !== null) { where.push('ABS(amount) <= ?'); params.push(rule.maxAmount) }
+
+  // Gate 3 — pattern (case-insensitive via LOWER on both sides)
+  const target = `LOWER(COALESCE(originalDescription, description))`
+  const pat = rule.pattern.toLowerCase()
+  switch (rule.matchType) {
+    case 'contains':    where.push(`${target} LIKE ? ESCAPE '\\'`); params.push(`%${escapeLike(pat)}%`); break
+    case 'starts-with': where.push(`${target} LIKE ? ESCAPE '\\'`); params.push(`${escapeLike(pat)}%`); break
+    case 'ends-with':   where.push(`${target} LIKE ? ESCAPE '\\'`); params.push(`%${escapeLike(pat)}`); break
+    case 'exact':       where.push(`${target} = ?`); params.push(pat); break
+    default: return null
+  }
+
+  return { sql: `SELECT COUNT(*) AS n FROM "Transaction" WHERE ${where.join(' AND ')}`, params }
+}
+
 /**
  * Counts how many transactions satisfy matchesRule for the given rule.
  * Matches against originalDescription when available, falling back to description.

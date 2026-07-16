@@ -1,6 +1,4 @@
 import { prisma } from '@/lib/prisma'
-import { colorForCategory, PALETTE } from '@/lib/category-colors'
-import { countMatchingTransactions } from '@/lib/vendor-rule-match'
 import { PreferencesForm } from './_components/PreferencesForm'
 import { SettingsCategoryBridge } from './_components/SettingsCategoryBridge'
 import { BudgetManager } from './_components/BudgetManager'
@@ -17,7 +15,7 @@ export const metadata = {
 export default async function SettingsPage() {
   const backups = listBackups()
 
-  const [rawAccounts, categories, settings, rawVendorRules, budgets, rawImportRecords, committedTxns] = await Promise.all([
+  const [rawAccounts, categories, settings, rawVendorRules, budgets, rawImportRecords] = await Promise.all([
     prisma.account.findMany({ orderBy: { id: 'asc' } }),
     prisma.category.findMany({ orderBy: { name: 'asc' } }),
     prisma.setting.findMany(),
@@ -28,30 +26,17 @@ export default async function SettingsPage() {
       take: 50,
       include: { account: { select: { name: true } } },
     }),
-    prisma.transaction.findMany({
-      where: { status: { in: ['committed', 'reconciled'] } },
-      select: { description: true, originalDescription: true, amount: true },
-      orderBy: { updatedAt: 'desc' },
-      take: 5000,
-    }),
   ])
-  const vendorRules = rawVendorRules.map((r) => ({
-    ...r,
-    matchCount: countMatchingTransactions(r, committedTxns),
-  }))
+  // Match counts are no longer computed here (that pulled 5,000 rows and ran
+  // every rule against them on each render, blocking the page). They are
+  // fetched lazily client-side via GET /api/vendor-rules?withCounts=1.
+  // The category-colour migration likewise moved to the instrumentation.ts
+  // startup hook so this page never performs DB writes during render.
+  const vendorRules = rawVendorRules.map((r) => ({ ...r, matchCount: 0 }))
   const importRecords = rawImportRecords.map((r) => ({
     ...r,
     importedAt: r.importedAt.toISOString(),
   }))
-
-  // Migrate any categories that aren't using a palette colour
-  const stale = categories.filter((c) => !PALETTE.includes(c.color))
-  if (stale.length > 0) {
-    await Promise.all(
-      stale.map((c) => prisma.category.update({ where: { id: c.id }, data: { color: colorForCategory(c.name) } }))
-    )
-    stale.forEach((c) => { c.color = colorForCategory(c.name) })
-  }
 
   return (
     <div className="flex-1 px-6 py-10 md:px-10 bg-surface-200">

@@ -16,6 +16,22 @@ export default function ChatPage() {
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
   const [activeMessages, setActiveMessages] = useState<Message[]>([])
 
+  const loadSession = (id: number) => {
+    fetch(`/api/chat-sessions/${id}`)
+      .then((r) => r.json())
+      .then((session: { id: number; title: string; updatedAt: string; messages: Array<{ role: string; text: string; sql?: string }> }) => {
+        setActiveSessionId(session.id)
+        setActiveMessages(
+          session.messages.map((m) => ({
+            role: m.role as 'user' | 'assistant',
+            text: m.text,
+            sql: m.sql,
+          }))
+        )
+      })
+      .catch(() => {})
+  }
+
   // Load sessions on mount; auto-create one if none exist
   useEffect(() => {
     fetch('/api/chat-sessions')
@@ -34,22 +50,6 @@ export default function ChatPage() {
       })
       .catch(() => {})
   }, [])
-
-  const loadSession = (id: number) => {
-    fetch(`/api/chat-sessions/${id}`)
-      .then((r) => r.json())
-      .then((session: { id: number; title: string; updatedAt: string; messages: Array<{ role: string; text: string; sql?: string }> }) => {
-        setActiveSessionId(session.id)
-        setActiveMessages(
-          session.messages.map((m) => ({
-            role: m.role as 'user' | 'assistant',
-            text: m.text,
-            sql: m.sql,
-          }))
-        )
-      })
-      .catch(() => {})
-  }
 
   const handleSelectSession = (id: number) => {
     if (id === activeSessionId) return
@@ -82,13 +82,13 @@ export default function ChatPage() {
     } catch {}
   }
 
-  const handleMessagesChange = (messages: Message[]) => {
-    // Refresh session list to get updated titles/timestamps
+  const handleResponseComplete = () => {
+    // Refresh session list to get updated titles/timestamps — called once per
+    // completed response, not per streamed token.
     fetch('/api/chat-sessions')
       .then((r) => r.json())
       .then((data: ChatSession[]) => setSessions(data))
       .catch(() => {})
-    setActiveMessages(messages)
   }
 
   return (
@@ -104,7 +104,7 @@ export default function ChatPage() {
         <ChatPane
           sessionId={activeSessionId}
           initialMessages={activeMessages}
-          onMessagesChange={handleMessagesChange}
+          onResponseComplete={handleResponseComplete}
         />
       </div>
     </div>

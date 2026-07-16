@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Check, X, Pencil } from 'lucide-react'
 import { pillTextColor } from '@/lib/category-colors'
+import { useToast } from '@/app/_components/ui'
 
 type Category = { id: number; name: string; color: string }
 
@@ -13,6 +14,7 @@ export function CategoryManager({
   categories: Category[]
   onChange: (cats: Category[]) => void
 }) {
+  const toast = useToast()
   const [newName, setNewName] = useState('')
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
@@ -87,7 +89,9 @@ export function CategoryManager({
       if (!res.ok) throw new Error(await res.text())
       onChange(categories.filter((c) => c.id !== id))
       setConfirmDelete(null)
-    } catch { /* silent */ }
+    } catch (e) {
+      toast.error(`Could not delete category: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   const inputStyle = {

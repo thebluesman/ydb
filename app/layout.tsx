@@ -4,6 +4,7 @@ import Link from "next/link";
 import Script from "next/script";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { NavLinks, ConfigLink } from "./components/NavLinks";
+import { ToastProvider } from "./_components/ui";
 import "./globals.css";
 
 const clashDisplay = localFont({
@@ -41,6 +42,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${clashDisplay.variable} ${clashGrotesk.variable} ${ibmPlexMono.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col">
+        <ToastProvider>
         {/* Prevent flash of wrong theme */}
         <Script
           id="theme-init"
@@ -71,6 +73,7 @@ export default function RootLayout({
           </div>
         </header>
         <main className="flex-1 flex flex-col">{children}</main>
+        </ToastProvider>
       </body>
     </html>
   );

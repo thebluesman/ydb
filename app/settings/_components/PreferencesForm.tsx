@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import * as Select from '@radix-ui/react-select'
 import { ChevronDown } from 'lucide-react'
+import { useToast } from '@/app/_components/ui'
 
 const CURRENCIES = ['GBP', 'USD', 'EUR', 'AED', 'JPY', 'CAD', 'AUD', 'SGD', 'CHF']
 
@@ -10,6 +11,7 @@ type Setting = { key: string; value: string }
 
 export function PreferencesForm({ initialSettings }: { initialSettings: Setting[] }) {
   const initial = initialSettings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'
+  const toast = useToast()
   const [baseCurrency, setBaseCurrency] = useState(initial)
   const [saved, setSaved] = useState(false)
 
@@ -17,14 +19,17 @@ export function PreferencesForm({ initialSettings }: { initialSettings: Setting[
     setBaseCurrency(value)
     setSaved(false)
     try {
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'baseCurrency', value }),
       })
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
-    } catch { /* silent */ }
+    } catch (e) {
+      toast.error(`Could not save currency: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   return (

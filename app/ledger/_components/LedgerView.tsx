@@ -6,7 +6,7 @@ import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, Ro
 import * as RSelect from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
 import { DatePicker } from '@/app/_components/DatePicker'
-import { Select, Card, Button } from '@/app/_components/ui'
+import { Select, Card, Button, useToast } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
 import { DEFAULT_PAGE_SIZE, SORT_KEYS, type SortKey } from '@/lib/transactions-query'
 
@@ -56,6 +56,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
   // so the filter dropdown isn't limited to the current page's rows.
   categoryOptions: string[]
 }) {
+  const toast = useToast()
   const router = useRouter()
   const pathname = usePathname() ?? '/ledger'
   // useSearchParams() is typed nullable (null during certain prerender paths);
@@ -245,9 +246,10 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
       setSelectedIds(new Set())
       setBulkCategory('')
       setBulkStatus('')
+      toast.success(`Updated ${selectedIds.size} transaction${selectedIds.size !== 1 ? 's' : ''}`)
       refetch()
     } catch (e) {
-      alert(String(e))
+      toast.error(`Bulk update failed: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setBulkApplying(false)
     }

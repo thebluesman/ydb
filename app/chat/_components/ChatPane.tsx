@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { MessageCircle, SendHorizonal, AlertCircle } from 'lucide-react'
+import { MessageCircle, SendHorizonal, AlertCircle, Square, Copy, Check } from 'lucide-react'
 import { ThinkingLoader } from '@/app/_components/ThinkingLoader'
 
 export type Message = {
@@ -9,24 +9,31 @@ export type Message = {
   text: string
   sql?: string
   error?: boolean
+  /** Raw technical detail (SQLite error etc.) shown in a collapsible section
+   *  under a friendly error headline. */
+  errorDetail?: string
 }
 
 export function ChatPane({
   sessionId,
   initialMessages,
-  onMessagesChange,
+  onResponseComplete,
 }: {
   sessionId: number | null
   initialMessages: Message[]
-  onMessagesChange?: (messages: Message[]) => void
+  /** Called once after a response finishes streaming and is persisted, so the
+   *  sidebar can refresh titles/timestamps — NOT per streamed chunk. */
+  onResponseComplete?: () => void
 }) {
   const [messages, setMessages] = useState<Message[]>(initialMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [focused, setFocused] = useState(false)
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sessionIdRef = useRef<number | null>(sessionId)
+  const abortRef = useRef<AbortController | null>(null)
 
   // Sync when session changes
   useEffect(() => {
@@ -42,11 +49,6 @@ export function ChatPane({
   const updateMessages = (updater: (prev: Message[]) => Message[]) => {
     setMessages((prev) => updater(prev))
   }
-
-  useEffect(() => {
-    onMessagesChange?.(messages)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages])
 
   async function send() {
     const question = input.trim()
@@ -68,18 +70,28 @@ export function ChatPane({
     let accumulatedText = ''
     let accumulatedSql: string | undefined
 
+    const controller = new AbortController()
+    abortRef.current = controller
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, history }),
+        signal: controller.signal,
       })
 
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({ message: 'Unknown error' }))
         updateMessages((prev) => {
           const next = [...prev]
-          next[next.length - 1] = { role: 'assistant', text: err.message ?? res.statusText, error: true }
+          next[next.length - 1] = {
+            role: 'assistant',
+            text: 'The generated query failed.',
+            errorDetail: err.message ?? res.statusText,
+            sql: err.sql,
+            error: true,
+          }
           return next
         })
         return
@@ -120,7 +132,8 @@ export function ChatPane({
                 const last = next[next.length - 1]
                 next[next.length - 1] = {
                   ...last,
-                  text: event.message,
+                  text: 'The generated query failed.',
+                  errorDetail: event.message,
                   sql: event.sql ?? last.sql,
                   error: true,
                 }
@@ -154,23 +167,54 @@ export function ChatPane({
             })
           }
         }
-        saveMessages().catch(() => { /* non-critical */ })
+        // Refresh the sidebar exactly once, after persistence completes — not
+        // on every streamed token (the previous onMessagesChange-per-render
+        // pattern refetched /api/chat-sessions for each chunk).
+        saveMessages()
+          .catch(() => { /* non-critical */ })
+          .finally(() => onResponseComplete?.())
       }
 
     } catch (err) {
-      updateMessages((prev) => {
-        const next = [...prev]
-        next[next.length - 1] = {
-          role: 'assistant',
-          text: err instanceof Error ? err.message : 'Failed to reach server',
-          error: true,
-        }
-        return next
-      })
+      // User pressed Stop — keep whatever streamed so far, no error banner.
+      if (err instanceof Error && err.name === 'AbortError') {
+        updateMessages((prev) => {
+          const next = [...prev]
+          const last = next[next.length - 1]
+          if (last && last.role === 'assistant' && !last.text) {
+            next[next.length - 1] = { ...last, text: '_(stopped)_' }
+          }
+          return next
+        })
+      } else {
+        updateMessages((prev) => {
+          const next = [...prev]
+          next[next.length - 1] = {
+            role: 'assistant',
+            text: 'Could not reach the server.',
+            errorDetail: err instanceof Error ? err.message : String(err),
+            error: true,
+          }
+          return next
+        })
+      }
     } finally {
+      abortRef.current = null
       setLoading(false)
       textareaRef.current?.focus()
     }
+  }
+
+  function stop() {
+    abortRef.current?.abort()
+  }
+
+  async function copyMessage(text: string, index: number) {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedIndex(index)
+      setTimeout(() => setCopiedIndex((c) => (c === index ? null : c)), 1500)
+    } catch { /* clipboard unavailable */ }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -230,9 +274,6 @@ export function ChatPane({
             <div style={{ maxWidth: '85%' }}>
               {msg.error ? (
                 <div style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '8px',
                   padding: '10px 14px',
                   borderRadius: '12px',
                   backgroundColor: 'var(--bg-notify-error)',
@@ -241,8 +282,25 @@ export function ChatPane({
                   lineHeight: 1.5,
                   color: 'var(--tx-error)',
                 }}>
-                  <AlertCircle size={15} strokeWidth={2} style={{ flexShrink: 0, marginTop: '1px' }} />
-                  <span>{msg.text}</span>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <AlertCircle size={15} strokeWidth={2} style={{ flexShrink: 0, marginTop: '1px' }} />
+                    <span>{msg.text}</span>
+                  </div>
+                  {msg.errorDetail && (
+                    <details style={{ marginTop: '8px' }}>
+                      <summary style={{ cursor: 'pointer', fontSize: '12px', opacity: 0.85, userSelect: 'none' }}>
+                        Technical detail
+                      </summary>
+                      <pre style={{
+                        marginTop: '6px', padding: '8px 10px', borderRadius: '6px',
+                        backgroundColor: 'var(--bg-card-alt)', border: '1px solid var(--border-warm)',
+                        fontSize: '12px', color: 'var(--tx-secondary)', overflowX: 'auto',
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, monospace',
+                      }}>
+                        {msg.errorDetail}
+                      </pre>
+                    </details>
+                  )}
                 </div>
               ) : (
                 <div style={{
@@ -262,6 +320,21 @@ export function ChatPane({
                     msg.text || '\u200b'
                   )}
                 </div>
+              )}
+
+              {msg.role === 'assistant' && !msg.error && msg.text && !(loading && i === messages.length - 1) && (
+                <button
+                  onClick={() => copyMessage(msg.text, i)}
+                  aria-label="Copy answer"
+                  style={{
+                    marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px',
+                    fontSize: '12px', color: 'var(--tx-secondary)', background: 'none',
+                    border: 'none', cursor: 'pointer', padding: 0,
+                  }}
+                >
+                  {copiedIndex === i ? <Check size={12} /> : <Copy size={12} />}
+                  {copiedIndex === i ? 'Copied' : 'Copy'}
+                </button>
               )}
 
               {msg.role === 'assistant' && msg.sql && (
@@ -349,27 +422,38 @@ export function ChatPane({
             justifyContent: 'flex-end',
             padding: '8px 10px',
           }}>
-            <button
-              onClick={send}
-              disabled={loading || !input.trim()}
-              className="btn"
-              style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '10px',
-                border: 'none',
-                backgroundColor: loading || !input.trim() ? 'var(--border)' : 'var(--bg-nav-active)',
-                color: loading || !input.trim() ? 'var(--tx-secondary)' : 'var(--tx-nav-active)',
-                cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
-                transition: 'background-color 0.15s, color 0.15s',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <SendHorizonal size={16} strokeWidth={2} />
-            </button>
+            {loading ? (
+              <button
+                onClick={stop}
+                aria-label="Stop generating"
+                className="btn"
+                style={{
+                  width: '34px', height: '34px', borderRadius: '10px', border: 'none',
+                  backgroundColor: 'var(--bg-nav-active)', color: 'var(--tx-nav-active)',
+                  cursor: 'pointer', transition: 'background-color 0.15s, color 0.15s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                }}
+              >
+                <Square size={14} strokeWidth={2} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                onClick={send}
+                disabled={!input.trim()}
+                aria-label="Send message"
+                className="btn"
+                style={{
+                  width: '34px', height: '34px', borderRadius: '10px', border: 'none',
+                  backgroundColor: !input.trim() ? 'var(--border)' : 'var(--bg-nav-active)',
+                  color: !input.trim() ? 'var(--tx-secondary)' : 'var(--tx-nav-active)',
+                  cursor: !input.trim() ? 'not-allowed' : 'pointer',
+                  transition: 'background-color 0.15s, color 0.15s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                }}
+              >
+                <SendHorizonal size={16} strokeWidth={2} />
+              </button>
+            )}
           </div>
         </div>
         <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '11px', color: 'var(--tx-secondary)', opacity: 0.6 }}>

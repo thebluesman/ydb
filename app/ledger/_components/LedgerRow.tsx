@@ -6,7 +6,7 @@ import { DatePicker } from '@/app/_components/DatePicker'
 import { TransferLinkModal } from './TransferLinkModal'
 import { ReimburseLinkModal } from './ReimburseLinkModal'
 import { SplitForm } from './SplitForm'
-import { Select, Badge, Button } from '@/app/_components/ui'
+import { Select, Badge, Button, Modal, useToast } from '@/app/_components/ui'
 import type { BadgeVariant } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
 
@@ -112,8 +112,11 @@ function LedgerRowInner({
   selected?: boolean
   onToggleSelect?: (id: number) => void
 }) {
+  const toast = useToast()
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
   const [ruleSuggestion, setRuleSuggestion] = useState<{ description: string; category: string } | null>(null)
   const [rulePattern, setRulePattern] = useState('')
@@ -196,12 +199,17 @@ function LedgerRowInner({
   }
 
   const handleDelete = async () => {
-    if (!confirm('Delete this transaction?')) return
+    setDeleting(true)
     try {
-      await fetch(`/api/transactions/${transaction.id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/transactions/${transaction.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      setConfirmingDelete(false)
       onDelete(transaction.id)
+      toast.success('Transaction deleted')
     } catch (e) {
-      alert(String(e))
+      toast.error(`Could not delete transaction: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -241,7 +249,10 @@ function LedgerRowInner({
       })
       if (!res.ok) throw new Error(await res.text())
       setRuleSuggestion(null)
-    } catch { /* silent */ } finally {
+      toast.success(`Rule created for “${ruleVendor}”`)
+    } catch (e) {
+      toast.error(`Could not create rule: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
       setRuleSaving(false)
     }
   }
@@ -256,7 +267,10 @@ function LedgerRowInner({
         onUpdateById?.(transaction.linkedTransferId, { linkedTransferId: null })
       }
       onUpdate(updated)
-    } catch { /* silent */ } finally {
+      toast.success('Transfer unlinked')
+    } catch (e) {
+      toast.error(`Could not unlink transfer: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
       setUnlinking(false)
     }
   }
@@ -272,7 +286,10 @@ function LedgerRowInner({
       if (prevSettlementId) {
         onUpdateById?.(prevSettlementId, { reimbursedExpense: null })
       }
-    } catch { /* silent */ } finally {
+      toast.success('Reimbursement unlinked')
+    } catch (e) {
+      toast.error(`Could not unlink reimbursement: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
       setUnlinkingReimburse(false)
     }
   }
@@ -737,7 +754,7 @@ function LedgerRowInner({
               </button>
             )}
             <button
-              onClick={handleDelete}
+              onClick={() => setConfirmingDelete(true)}
               className="text-xs transition-colors duration-150 hover:text-error ml-1 pl-1"
               style={{ color: 'var(--tx-tertiary)', borderLeft: '1px solid var(--border-warm)' }}
               aria-label="Delete"
@@ -747,6 +764,26 @@ function LedgerRowInner({
           </div>
         </td>
       </tr>
+
+      {/* Delete confirmation — replaces the old native browser dialog */}
+      <Modal
+        open={confirmingDelete}
+        onClose={() => { if (!deleting) setConfirmingDelete(false) }}
+        maxWidth={400}
+        title="Delete transaction"
+      >
+        <p className="text-sm mb-5" style={{ color: 'var(--tx-secondary)' }}>
+          Delete “{transaction.description}”? This cannot be undone.
+        </p>
+        <div className="flex items-center justify-end gap-3">
+          <Button variant="ghost" size="sm" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button variant="danger" size="md" onClick={handleDelete} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete'}
+          </Button>
+        </div>
+      </Modal>
 
       {/* Split form */}
       {showSplitForm && (
