@@ -1,10 +1,10 @@
 'use client'
 
 import { memo, useCallback, useState, useEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
 import { X, ChevronDown, Plus, Check } from 'lucide-react'
-import * as Select from '@radix-ui/react-select'
+import * as RSelect from '@radix-ui/react-select'
 import { DatePicker } from '@/app/_components/DatePicker'
+import { Select, Button, Modal, Field, Input } from '@/app/_components/ui'
 import { toCents } from '@/lib/money'
 
 export type DraftTransaction = {
@@ -20,13 +20,14 @@ type RuleSuggestion = { pattern: string; vendor: string; category: string; match
 const inputCls = 'w-full px-2 py-1.5 text-sm rounded-[6px] outline-none transition-colors duration-150'
 
 const amountColor = (amt: number, transactionType?: string) =>
-  transactionType === 'transfer' ? '#F59E0B' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-tertiary)'
+  transactionType === 'transfer' ? 'var(--tx-transfer)' : amt < 0 ? 'var(--tx-error)' : amt > 0 ? 'var(--tx-success)' : 'var(--tx-tertiary)'
 
 const inputStyle = { border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }
+// Dropdowns use the ambient (raised) shadow so modals still read as "above".
 const selectContent: React.CSSProperties = {
   backgroundColor: 'var(--bg-card)',
   border: '1px solid var(--border-warm)',
-  boxShadow: 'var(--shadow-card)',
+  boxShadow: 'var(--shadow-ambient)',
   borderRadius: '8px',
   zIndex: 9999,
 }
@@ -89,14 +90,6 @@ function AddCategoryModal({
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    inputRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   const handleSubmit = async () => {
     const trimmed = name.trim()
@@ -120,56 +113,27 @@ function AddCategoryModal({
     }
   }
 
-  const modal = (
-    <div
-      className="fixed inset-0 flex items-center justify-center"
-      style={{ zIndex: 10000, backgroundColor: 'rgba(0,0,0,0.5)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div
-        className="w-full max-w-sm rounded-[12px] p-6 space-y-4"
-        style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', boxShadow: 'var(--shadow-card)' }}
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold" style={{ color: 'var(--tx-primary)' }}>New category</h3>
-          <button onClick={onClose} style={{ color: 'var(--tx-tertiary)' }}><X size={15} /></button>
-        </div>
-        <div>
-          <label className="block text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--tx-tertiary)' }}>Name</label>
-          <input
-            ref={inputRef}
-            type="text"
-            value={name}
-            onChange={(e) => { setName(e.target.value); setError('') }}
-            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-            placeholder="e.g. Groceries"
-            className="w-full px-3 py-2 text-sm rounded-[8px] outline-none"
-            style={inputStyle}
-          />
-          {error && <p className="mt-1 text-xs" style={{ color: 'var(--tx-error)' }}>{error}</p>}
-        </div>
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded-[6px]"
-            style={{ color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="px-4 py-1.5 text-sm rounded-[6px] font-medium disabled:opacity-40"
-            style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-          >
-            {saving ? '…' : 'Add'}
-          </button>
-        </div>
+  return (
+    <Modal open onClose={onClose} title="New category" maxWidth={384} className="space-y-4">
+      <Field label="Name">
+        <Input
+          autoFocus
+          type="text"
+          value={name}
+          onChange={(e) => { setName(e.target.value); setError('') }}
+          onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+          placeholder="e.g. Groceries"
+        />
+        {error && <p className="mt-1 text-xs" style={{ color: 'var(--tx-error)' }}>{error}</p>}
+      </Field>
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" size="sm" onClick={handleSubmit} disabled={saving}>
+          {saving ? '…' : 'Add'}
+        </Button>
       </div>
-    </div>
+    </Modal>
   )
-
-  return createPortal(modal, document.body)
 }
 
 // ── Category Select ───────────────────────────────────────────────────────────
@@ -200,22 +164,22 @@ function CategorySelect({
   const filtered = q ? categories.filter((c) => c.name.toLowerCase().includes(q)) : categories
 
   return (
-    <Select.Root
+    <RSelect.Root
       value={value}
       onValueChange={handleChange}
       onOpenChange={(open) => { if (!open) setSearch('') }}
     >
-      <Select.Trigger
+      <RSelect.Trigger
         className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
         style={inputStyle}
       >
         <span className="flex-1 truncate text-left">{value}</span>
-        <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+        <RSelect.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
           <ChevronDown size={12} />
-        </Select.Icon>
-      </Select.Trigger>
-      <Select.Portal>
-        <Select.Content
+        </RSelect.Icon>
+      </RSelect.Trigger>
+      <RSelect.Portal>
+        <RSelect.Content
           position="popper" sideOffset={4}
           style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}
           onAnimationStart={() => searchRef.current?.focus()}
@@ -233,45 +197,45 @@ function CategorySelect({
               style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
             />
           </div>
-          <Select.Viewport className="p-1" style={{ maxHeight: 220, overflowY: 'auto' }}>
+          <RSelect.Viewport className="p-1" style={{ maxHeight: 220, overflowY: 'auto' }}>
             {!hasValue && !q && !!value && (
-              <Select.Item
+              <RSelect.Item
                 value={value}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none hover:bg-[var(--bg-card-alt)]"
+                className="ui-select-item flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
                 style={{ color: 'var(--tx-primary)' }}
               >
                 <Check size={12} style={{ flexShrink: 0, color: 'var(--tx-secondary)' }} />
-                <Select.ItemText>{value}</Select.ItemText>
-              </Select.Item>
+                <RSelect.ItemText>{value}</RSelect.ItemText>
+              </RSelect.Item>
             )}
             {filtered.map((c) => (
-              <Select.Item
+              <RSelect.Item
                 key={c.id} value={c.name}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none hover:bg-[var(--bg-card-alt)]"
+                className="ui-select-item flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
                 style={{ color: 'var(--tx-primary)' }}
               >
                 <span style={{ width: 12, flexShrink: 0 }}>
                   {c.name === value && <Check size={12} style={{ color: 'var(--tx-secondary)' }} />}
                 </span>
-                <Select.ItemText>{c.name}</Select.ItemText>
-              </Select.Item>
+                <RSelect.ItemText>{c.name}</RSelect.ItemText>
+              </RSelect.Item>
             ))}
             {filtered.length === 0 && (
               <div className="px-3 py-2 text-sm" style={{ color: 'var(--tx-tertiary)' }}>No matches</div>
             )}
-            <Select.Separator style={{ height: '1px', backgroundColor: 'var(--border-warm)', margin: '4px 0' }} />
-            <Select.Item
+            <RSelect.Separator style={{ height: '1px', backgroundColor: 'var(--border-warm)', margin: '4px 0' }} />
+            <RSelect.Item
               value={ADD_NEW_SENTINEL}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none hover:bg-[var(--bg-card-alt)]"
+              className="ui-select-item flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
               style={{ color: 'var(--tx-secondary)' }}
             >
               <Plus size={12} />
-              <Select.ItemText>Add new category</Select.ItemText>
-            </Select.Item>
-          </Select.Viewport>
-        </Select.Content>
-      </Select.Portal>
-    </Select.Root>
+              <RSelect.ItemText>Add new category</RSelect.ItemText>
+            </RSelect.Item>
+          </RSelect.Viewport>
+        </RSelect.Content>
+      </RSelect.Portal>
+    </RSelect.Root>
   )
 }
 
@@ -303,14 +267,6 @@ function AddAccountModal({
   const [currency, setCurrency]     = useState('GBP')
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    inputRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   const handleSubmit = async () => {
     const trimmed = name.trim()
@@ -334,85 +290,53 @@ function AddAccountModal({
     }
   }
 
-  const fieldLabel = 'block text-[10px] uppercase tracking-wide mb-1'
   const nativeSelect = 'w-full px-3 py-2 text-sm rounded-[8px] outline-none'
 
-  const modal = (
-    <div
-      className="fixed inset-0 flex items-center justify-center"
-      style={{ zIndex: 10000, backgroundColor: 'rgba(0,0,0,0.5)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div
-        className="w-full max-w-sm rounded-[12px] p-6 space-y-4"
-        style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', boxShadow: 'var(--shadow-card)' }}
-      >
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold" style={{ color: 'var(--tx-primary)' }}>New account</h3>
-          <button onClick={onClose} style={{ color: 'var(--tx-tertiary)' }}><X size={15} /></button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className={fieldLabel} style={{ color: 'var(--tx-tertiary)' }}>Name</label>
-            <input
-              ref={inputRef}
-              type="text"
-              value={name}
-              onChange={(e) => { setName(e.target.value); setError('') }}
-              onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-              placeholder="e.g. Cash Wallet"
-              className="w-full px-3 py-2 text-sm rounded-[8px] outline-none"
+  return (
+    <Modal open onClose={onClose} title="New account" maxWidth={384} className="space-y-4">
+      <div className="space-y-3">
+        <Field label="Name">
+          <Input
+            autoFocus
+            type="text"
+            value={name}
+            onChange={(e) => { setName(e.target.value); setError('') }}
+            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+            placeholder="e.g. Cash Wallet"
+          />
+        </Field>
+        <div className="flex gap-3">
+          <Field label="Type" className="flex-1">
+            <select
+              value={accountType}
+              onChange={(e) => setType(e.target.value)}
+              className={nativeSelect}
               style={inputStyle}
-            />
-          </div>
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className={fieldLabel} style={{ color: 'var(--tx-tertiary)' }}>Type</label>
-              <select
-                value={accountType}
-                onChange={(e) => setType(e.target.value)}
-                className={nativeSelect}
-                style={inputStyle}
-              >
-                {ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={fieldLabel} style={{ color: 'var(--tx-tertiary)' }}>Currency</label>
-              <select
-                value={currency}
-                onChange={(e) => setCurrency(e.target.value)}
-                className={nativeSelect}
-                style={inputStyle}
-              >
-                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
-          {error && <p className="text-xs" style={{ color: 'var(--tx-error)' }}>{error}</p>}
+            >
+              {ACCOUNT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Currency">
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className={nativeSelect}
+              style={inputStyle}
+            >
+              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
         </div>
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm rounded-[6px]"
-            style={{ color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="px-4 py-1.5 text-sm rounded-[6px] font-medium disabled:opacity-40"
-            style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-          >
-            {saving ? '…' : 'Add'}
-          </button>
-        </div>
+        {error && <p className="text-xs" style={{ color: 'var(--tx-error)' }}>{error}</p>}
       </div>
-    </div>
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+        <Button variant="primary" size="sm" onClick={handleSubmit} disabled={saving}>
+          {saving ? '…' : 'Add'}
+        </Button>
+      </div>
+    </Modal>
   )
-
-  return createPortal(modal, document.body)
 }
 
 // ── Account Select ────────────────────────────────────────────────────────────
@@ -436,45 +360,41 @@ function AccountSelect({
   }
 
   return (
-    <Select.Root value={String(value)} onValueChange={handleChange}>
-      <Select.Trigger
+    <RSelect.Root value={String(value)} onValueChange={handleChange}>
+      <RSelect.Trigger
         className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
         style={inputStyle}
       >
-        <Select.Value />
-        <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
+        <RSelect.Value />
+        <RSelect.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
           <ChevronDown size={12} />
-        </Select.Icon>
-      </Select.Trigger>
-      <Select.Portal>
-        <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
-          <Select.Viewport className="p-1">
+        </RSelect.Icon>
+      </RSelect.Trigger>
+      <RSelect.Portal>
+        <RSelect.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
+          <RSelect.Viewport className="p-1">
             {accounts.map((a) => (
-              <Select.Item
+              <RSelect.Item
                 key={a.id} value={String(a.id)}
-                className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+                className="ui-select-item px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
                 style={{ color: 'var(--tx-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
               >
-                <Select.ItemText>{a.name}</Select.ItemText>
-              </Select.Item>
+                <RSelect.ItemText>{a.name}</RSelect.ItemText>
+              </RSelect.Item>
             ))}
-            <Select.Separator style={{ height: '1px', backgroundColor: 'var(--border-warm)', margin: '4px 0' }} />
-            <Select.Item
+            <RSelect.Separator style={{ height: '1px', backgroundColor: 'var(--border-warm)', margin: '4px 0' }} />
+            <RSelect.Item
               value={ADD_NEW_ACCOUNT_SENTINEL}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
+              className="ui-select-item flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
               style={{ color: 'var(--tx-secondary)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
             >
               <Plus size={12} />
-              <Select.ItemText>Add new account</Select.ItemText>
-            </Select.Item>
-          </Select.Viewport>
-        </Select.Content>
-      </Select.Portal>
-    </Select.Root>
+              <RSelect.ItemText>Add new account</RSelect.ItemText>
+            </RSelect.Item>
+          </RSelect.Viewport>
+        </RSelect.Content>
+      </RSelect.Portal>
+    </RSelect.Root>
   )
 }
 
@@ -483,45 +403,19 @@ function AccountSelect({
 const TYPE_OPTIONS = [
   { value: 'debit',    label: 'Debit',    dot: 'var(--tx-stat-expense)', color: 'var(--tx-stat-expense)' },
   { value: 'credit',   label: 'Credit',   dot: 'var(--tx-stat-income)',  color: 'var(--tx-stat-income)' },
-  { value: 'transfer', label: 'Transfer', dot: '#F59E0B',                color: '#F59E0B' },
+  { value: 'transfer', label: 'Transfer', dot: 'var(--tx-transfer)',     color: 'var(--tx-transfer)' },
 ]
 
 function TypeSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const current = TYPE_OPTIONS.find((o) => o.value === value) ?? TYPE_OPTIONS[0]
   return (
-    <Select.Root value={value} onValueChange={onChange}>
-      <Select.Trigger
-        className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
-        style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: current.color }}
-      >
-        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: current.dot }} />
-        <Select.Value />
-        <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-          <ChevronDown size={12} />
-        </Select.Icon>
-      </Select.Trigger>
-      <Select.Portal>
-        <Select.Content
-          position="popper" sideOffset={4}
-          style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}
-        >
-          <Select.Viewport className="p-1">
-            {TYPE_OPTIONS.map((opt) => (
-              <Select.Item
-                key={opt.value} value={opt.value}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                style={{ color: 'var(--tx-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-              >
-                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: opt.dot }} />
-                <Select.ItemText>{opt.label}</Select.ItemText>
-              </Select.Item>
-            ))}
-          </Select.Viewport>
-        </Select.Content>
-      </Select.Portal>
-    </Select.Root>
+    <Select
+      value={value}
+      onValueChange={onChange}
+      options={TYPE_OPTIONS}
+      ariaLabel="Transaction type"
+      showDot
+      colorFromOption
+    />
   )
 }
 
@@ -582,7 +476,7 @@ const Row = memo(function Row({
           </span>
           <button
             onClick={() => onDismissDuplicate(d._id)}
-            className="text-xs underline transition-opacity hover:opacity-70"
+            className="btn text-xs underline transition-opacity hover:opacity-70"
             style={{ color: 'var(--tx-badge-review)' }}
           >
             Dismiss
@@ -635,7 +529,7 @@ const Row = memo(function Row({
             <button
               type="button"
               onClick={() => onExpandNotes(d._id)}
-              className="text-xs py-0.5 text-left transition-opacity duration-100 hover:opacity-80"
+              className="btn text-xs py-0.5 text-left transition-opacity duration-100 hover:opacity-80"
               style={{ color: 'var(--tx-faint)' }}
             >
               + Add note
@@ -657,37 +551,12 @@ const Row = memo(function Row({
             style={{ ...inputStyle, color: amountColor(d.amount, d.transactionType) }}
           />
           {d.transactionType === 'transfer' && (
-            <Select.Root
+            <Select
               value={transferDirection}
               onValueChange={(dir) => onTransferDirChange(d._id, dir as 'in' | 'out')}
-            >
-              <Select.Trigger
-                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
-                style={inputStyle}
-              >
-                <Select.Value />
-                <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-                  <ChevronDown size={12} />
-                </Select.Icon>
-              </Select.Trigger>
-              <Select.Portal>
-                <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
-                  <Select.Viewport className="p-1">
-                    {[{ value: 'out', label: '↑ Out' }, { value: 'in', label: '↓ In' }].map((opt) => (
-                      <Select.Item
-                        key={opt.value} value={opt.value}
-                        className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                        style={{ color: 'var(--tx-primary)' }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                      >
-                        <Select.ItemText>{opt.label}</Select.ItemText>
-                      </Select.Item>
-                    ))}
-                  </Select.Viewport>
-                </Select.Content>
-              </Select.Portal>
-            </Select.Root>
+              options={[{ value: 'out', label: '↑ Out' }, { value: 'in', label: '↓ In' }]}
+              ariaLabel="Transfer direction"
+            />
           )}
           <CategorySelect
             value={d.category}
@@ -702,48 +571,18 @@ const Row = memo(function Row({
             onAddNew={() => onAddAccountForRow(d._id)}
           />
           {d.transactionType === 'transfer' && (
-            <Select.Root
+            <Select
               value={String(d.transferCounterpartAccountId ?? '__none__')}
               onValueChange={(v) => onUpdate(d._id, 'transferCounterpartAccountId', v === '__none__' ? null : parseInt(v))}
-            >
-              <Select.Trigger
-                className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
-                style={inputStyle}
-              >
-                <Select.Value placeholder={transferDirection === 'out' ? 'To account…' : 'From account…'} />
-                <Select.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-                  <ChevronDown size={12} />
-                </Select.Icon>
-              </Select.Trigger>
-              <Select.Portal>
-                <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
-                  <Select.Viewport className="p-1">
-                    <Select.Item
-                      value="__none__"
-                      className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                      style={{ color: 'var(--tx-faint)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                    >
-                      <Select.ItemText>— none —</Select.ItemText>
-                    </Select.Item>
-                    {accounts
-                      .filter((a) => a.id !== d.accountId)
-                      .map((a) => (
-                        <Select.Item
-                          key={a.id} value={String(a.id)}
-                          className="px-3 py-1.5 text-sm rounded-[6px] cursor-pointer outline-none select-none"
-                          style={{ color: 'var(--tx-primary)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                        >
-                          <Select.ItemText>{a.name}</Select.ItemText>
-                        </Select.Item>
-                      ))}
-                  </Select.Viewport>
-                </Select.Content>
-              </Select.Portal>
-            </Select.Root>
+              ariaLabel={transferDirection === 'out' ? 'To account' : 'From account'}
+              options={[
+                { value: '__none__', label: '— none —', itemColor: 'var(--tx-faint)' },
+                ...accounts
+                  .filter((a) => a.id !== d.accountId)
+                  .map((a) => ({ value: String(a.id), label: a.name })),
+              ]}
+              placeholder={transferDirection === 'out' ? 'To account…' : 'From account…'}
+            />
           )}
         </div>
 
@@ -773,7 +612,7 @@ const Row = memo(function Row({
               <button
                 onClick={() => onSaveRule(d._id)}
                 disabled={savingRule}
-                className="px-2.5 py-0.5 text-xs rounded-[4px] font-medium disabled:opacity-40"
+                className="btn px-2.5 py-0.5 text-xs rounded-[4px] font-medium disabled:opacity-40"
                 style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
               >
                 {savingRule ? '…' : 'Save'}
@@ -806,35 +645,15 @@ const Row = memo(function Row({
               style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
               title="Display name for this vendor"
             />
-            <Select.Root value={ruleSuggestion.matchType} onValueChange={(v) => onUpdateRuleField(d._id, 'matchType', v)}>
-              <Select.Trigger
-                className="flex items-center gap-1.5 px-2 py-1 text-xs rounded-[4px] outline-none whitespace-nowrap"
-                style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
-                title="How to match the pattern"
-              >
-                <Select.Value />
-                <Select.Icon className="ml-1 shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
-                  <ChevronDown size={10} />
-                </Select.Icon>
-              </Select.Trigger>
-              <Select.Portal>
-                <Select.Content position="popper" sideOffset={4} style={{ ...selectContent, minWidth: 'var(--radix-select-trigger-width)' }}>
-                  <Select.Viewport className="p-1">
-                    {['contains', 'starts-with', 'ends-with', 'exact', 'regex'].map((mt) => (
-                      <Select.Item
-                        key={mt} value={mt}
-                        className="px-3 py-1.5 text-xs rounded-[6px] cursor-pointer outline-none select-none"
-                        style={{ color: 'var(--tx-primary)' }}
-                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-                      >
-                        <Select.ItemText>{mt}</Select.ItemText>
-                      </Select.Item>
-                    ))}
-                  </Select.Viewport>
-                </Select.Content>
-              </Select.Portal>
-            </Select.Root>
+            <Select
+              value={ruleSuggestion.matchType}
+              onValueChange={(v) => onUpdateRuleField(d._id, 'matchType', v)}
+              options={['contains', 'starts-with', 'ends-with', 'exact', 'regex'].map((mt) => ({ value: mt, label: mt }))}
+              size="xs"
+              fullWidth={false}
+              className="whitespace-nowrap"
+              ariaLabel="How to match the pattern"
+            />
           </div>
         </div>
       )}
@@ -1036,7 +855,7 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-[22px] font-semibold" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
+        <h2 className="text-section">
           Review {drafts.length} transaction{drafts.length !== 1 ? 's' : ''}
         </h2>
         <p className="text-xs" style={{ color: 'var(--tx-secondary)' }}>Edit any field before committing.</p>
@@ -1095,28 +914,21 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
       )}
 
       <div className="flex items-center gap-3 pt-2">
-        <button
-          onClick={addRow}
-          className="px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150"
-          style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-card)', color: 'var(--tx-primary)' }}
-        >
+        <Button variant="default" size="sm" onClick={addRow}>
           + Add row
-        </button>
-        <button
-          onClick={onDiscard}
-          className="px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150"
-          style={{ color: 'var(--tx-secondary)' }}
-        >
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDiscard}>
           Discard
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="primary"
+          size="md"
           onClick={handleCommit}
           disabled={committing || drafts.length === 0}
-          className="ml-auto px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
-          style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+          className="ml-auto"
         >
           {committing ? 'Saving…' : `Commit ${drafts.length} transaction${drafts.length !== 1 ? 's' : ''}`}
-        </button>
+        </Button>
       </div>
 
       {addCategoryForRow !== null && (

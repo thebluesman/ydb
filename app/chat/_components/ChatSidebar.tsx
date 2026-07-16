@@ -47,7 +47,7 @@ export function ChatSidebar({
       <div className="p-3">
         <button
           onClick={onNewSession}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-[8px] text-sm font-medium transition-colors duration-150"
+          className="btn w-full flex items-center gap-2 px-3 py-2 rounded-[8px] text-sm font-medium transition-colors duration-150"
           style={{
             backgroundColor: 'var(--bg-btn)',
             border: '1px solid var(--border-warm)',

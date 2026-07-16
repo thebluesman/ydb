@@ -335,7 +335,7 @@ export function VendorRuleManager({
                       n.has(vendorName) ? n.delete(vendorName) : n.add(vendorName)
                       return n
                     })}
-                    className="flex items-center gap-1.5 flex-1 min-w-0 text-left"
+                    className="btn flex items-center gap-1.5 flex-1 min-w-0 text-left"
                   >
                     {isCollapsed
                       ? <ChevronRight size={13} style={{ color: 'var(--tx-tertiary)', flexShrink: 0 }} />
@@ -353,7 +353,7 @@ export function VendorRuleManager({
                         vendorRules.forEach((r) => saveCategory(r, newCat))
                       }
                     }}
-                    className="text-xs px-2 py-0.5 rounded-full font-medium transition-opacity hover:opacity-80 shrink-0"
+                    className="btn text-xs px-2 py-0.5 rounded-full font-medium transition-opacity hover:opacity-80 shrink-0"
                     style={{ backgroundColor: catColor(repRule.category), color: pillTextColor(catColor(repRule.category)) }}
                     title="Click to change category for all patterns"
                   >
@@ -366,7 +366,7 @@ export function VendorRuleManager({
 
                   <button
                     onClick={() => prefillVendor(vendorName)}
-                    className="text-[11px] shrink-0 transition-colors hover:opacity-80"
+                    className="btn text-[11px] shrink-0 transition-colors hover:opacity-80"
                     style={{ color: 'var(--tx-tertiary)' }}
                     title="Add another pattern for this vendor"
                   >
@@ -420,8 +420,8 @@ export function VendorRuleManager({
                           <span
                             className="text-[10px] px-1.5 py-0.5 rounded-[4px] shrink-0 font-medium"
                             style={{
-                              backgroundColor: rule.transactionType === 'transfer' ? 'rgba(245,158,11,0.15)' : rule.transactionType === 'credit' ? 'var(--bg-stat-income)' : 'var(--bg-stat-expense)',
-                              color: rule.transactionType === 'transfer' ? '#F59E0B' : rule.transactionType === 'credit' ? 'var(--tx-stat-income)' : 'var(--tx-stat-expense)',
+                              backgroundColor: rule.transactionType === 'transfer' ? 'var(--bg-transfer-strong)' : rule.transactionType === 'credit' ? 'var(--bg-stat-income)' : 'var(--bg-stat-expense)',
+                              color: rule.transactionType === 'transfer' ? 'var(--tx-transfer)' : rule.transactionType === 'credit' ? 'var(--tx-stat-income)' : 'var(--tx-stat-expense)',
                             }}
                           >
                             → {rule.transactionType}
@@ -443,7 +443,7 @@ export function VendorRuleManager({
                       <div className="flex items-center gap-2.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0">
                         <button
                           onClick={() => editingRuleId === rule.id ? setEditingRuleId(null) : startEdit(rule)}
-                          className="text-xs transition-colors hover:opacity-80"
+                          className="btn text-xs transition-colors hover:opacity-80"
                           style={{ color: 'var(--tx-tertiary)' }}
                         >
                           {editingRuleId === rule.id ? 'Close' : 'Edit'}
@@ -558,14 +558,14 @@ export function VendorRuleManager({
                           <button
                             onClick={() => saveEdit(rule)}
                             disabled={editSaving}
-                            className="px-3 py-1 text-xs rounded-[6px] disabled:opacity-40"
+                            className="btn px-3 py-1 text-xs rounded-[6px] disabled:opacity-40"
                             style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
                           >
                             {editSaving ? '…' : 'Save'}
                           </button>
                           <button
                             onClick={() => setEditingRuleId(null)}
-                            className="px-3 py-1 text-xs rounded-[6px]"
+                            className="btn px-3 py-1 text-xs rounded-[6px]"
                             style={{ color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }}
                           >
                             Cancel
@@ -715,7 +715,7 @@ export function VendorRuleManager({
           <button
             onClick={handleAdd}
             disabled={adding}
-            className="px-3 py-[7px] text-sm rounded-[8px] transition-colors disabled:opacity-40 whitespace-nowrap"
+            className="btn px-3 py-[7px] text-sm rounded-[8px] transition-colors disabled:opacity-40 whitespace-nowrap"
             style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
           >
             {adding ? '…' : 'Add'}
@@ -725,7 +725,7 @@ export function VendorRuleManager({
         {/* Advanced options toggle */}
         <button
           onClick={() => setShowAdvanced((v) => !v)}
-          className="flex items-center gap-1 text-xs transition-opacity hover:opacity-100"
+          className="btn flex items-center gap-1 text-xs transition-opacity hover:opacity-100"
           style={{ color: 'var(--tx-tertiary)', opacity: 0.75 }}
         >
           {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}

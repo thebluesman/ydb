@@ -171,7 +171,7 @@ export function BudgetManager({
         <button
           onClick={handleAdd}
           disabled={adding}
-          className="px-3 py-2 text-sm rounded-[8px] transition-colors duration-150 disabled:opacity-40 whitespace-nowrap"
+          className="btn px-3 py-2 text-sm rounded-[8px] transition-colors duration-150 disabled:opacity-40 whitespace-nowrap"
           style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
         >
           {adding ? '…' : 'Add'}

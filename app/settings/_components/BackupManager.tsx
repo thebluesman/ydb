@@ -77,7 +77,7 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
         <button
           onClick={handleBackupNow}
           disabled={loading}
-          className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[6px] transition-opacity disabled:opacity-50"
+          className="btn flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[6px] transition-opacity disabled:opacity-50"
           style={{ ...inputStyle, padding: '6px 12px', cursor: loading ? 'default' : 'pointer' }}
         >
           <DatabaseBackup size={13} />
@@ -133,7 +133,7 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
                 <button
                   onClick={() => handleDelete(b.filename)}
                   disabled={deleting === b.filename}
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-[5px] disabled:opacity-50"
+                  className="btn flex items-center gap-1 text-xs px-2 py-1 rounded-[5px] disabled:opacity-50"
                   style={{
                     color: 'var(--color-error, #e53e3e)',
                     border: '1px solid var(--border-warm)',

@@ -322,7 +322,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
         </h2>
         <p className="text-sm" style={{ color: 'var(--tx-secondary)' }}>They are now in your ledger.</p>
         <button onClick={reset}
-          className="px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 hover:text-error"
+          className="btn px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 hover:text-error"
           style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
           Upload another
         </button>
@@ -352,7 +352,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
           <div className="flex flex-wrap gap-2">
             {accounts.map((a) => (
               <button key={a.id} onClick={() => setSelectedAccountId(a.id)} disabled={phase !== 'idle'}
-                className="px-3 py-1.5 rounded-full text-sm transition-colors duration-150"
+                className="btn px-3 py-1.5 rounded-full text-sm transition-colors duration-150"
                 style={selectedAccountId === a.id
                   ? { backgroundColor: 'var(--bg-selected)', color: 'var(--tx-selected)', border: '1px solid var(--bg-selected)' }
                   : { backgroundColor: 'var(--bg-btn)', color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }
@@ -397,7 +397,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
               </div>
               <button
                 onClick={() => { abortRef.current?.abort(); setPhase('idle') }}
-                className="text-sm px-3 py-1 rounded-[6px] transition-colors"
+                className="btn text-sm px-3 py-1 rounded-[6px] transition-colors"
                 style={{ color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }}
               >
                 Cancel
@@ -418,7 +418,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
 
         {phase === 'idle' && passwordPhase === 'none' && (
           <button onClick={handleProcess} disabled={!file || !selectedAccountId}
-            className="w-full py-[10px] px-[14px] rounded-[8px] text-sm font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn w-full py-[10px] px-[14px] rounded-[8px] text-sm font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}>
             Extract Transactions
           </button>
@@ -443,7 +443,7 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
                 style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
               />
               <button onClick={handleProcess} disabled={!pdfPassword}
-                className="px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
                 Unlock
               </button>

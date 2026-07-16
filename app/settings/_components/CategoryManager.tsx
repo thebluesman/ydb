@@ -110,14 +110,14 @@ export function CategoryManager({
           <div className="flex gap-2">
             <button
               onClick={() => handleDelete(confirmDelete.id, true)}
-              className="px-3 py-1 text-xs rounded-[6px]"
+              className="btn px-3 py-1 text-xs rounded-[6px]"
               style={{ backgroundColor: 'var(--tx-error)', color: '#fff' }}
             >
               Delete anyway
             </button>
             <button
               onClick={() => setConfirmDelete(null)}
-              className="px-3 py-1 text-xs rounded-[6px]"
+              className="btn px-3 py-1 text-xs rounded-[6px]"
               style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
             >
               Cancel
@@ -210,7 +210,7 @@ export function CategoryManager({
         <button
           onClick={handleAdd}
           disabled={adding}
-          className="px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150 hover:text-error disabled:opacity-40 whitespace-nowrap"
+          className="btn px-[12px] py-[7px] text-sm rounded-[8px] transition-colors duration-150 hover:text-error disabled:opacity-40 whitespace-nowrap"
           style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
         >
           {adding ? '…' : 'Add'}

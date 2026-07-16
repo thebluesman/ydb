@@ -14,13 +14,30 @@
   --bg-row-hover:    rgba(235, 234, 229, 0.5);
   --bg-edit-row:     rgba(242, 241, 237, 0.9);
 
-  --bg-badge-committed:   #d0f0e4;
-  --bg-badge-review:      #fef3c7;
-  --bg-badge-reconciled:  #e0f2fe;
-  --bg-notify-success:  #d0f0e4;
-  --bg-notify-error:    #fae0e5;
-  --bg-stat-income:     #d0f0e4;
-  --bg-stat-expense:    #fae0e5;
+  /* Semantic status pairs — one per hue (dark values defined once in .dark) */
+  --bg-positive:  #d0f0e4;
+  --tx-positive:  #1f8a65;
+  --bg-negative:  #fae0e5;
+  --tx-negative:  #cf2d56;
+  --bg-caution:   #fef3c7;
+  --tx-caution:   #92400e;
+  --bg-info:      #e0f2fe;
+  --tx-info:      #0369a1;
+
+  /* Transfer amber (light + dark, see .dark) */
+  --tx-transfer:        #f59e0b;
+  --tx-transfer-deep:   #92400e;
+  --bg-transfer:        rgba(245, 158, 11, 0.10);
+  --bg-transfer-strong: rgba(245, 158, 11, 0.15);
+
+  /* Legacy status names → semantic pairs (kept so unmigrated call sites work) */
+  --bg-badge-committed:   var(--bg-positive);
+  --bg-badge-review:      var(--bg-caution);
+  --bg-badge-reconciled:  var(--bg-info);
+  --bg-notify-success:  var(--bg-positive);
+  --bg-notify-error:    var(--bg-negative);
+  --bg-stat-income:     var(--bg-positive);
+  --bg-stat-expense:    var(--bg-negative);
   --bg-stat-net:        #f7f7f4;
 
   /* Text */
@@ -29,17 +46,17 @@
   --tx-tertiary:        rgba(38, 37, 30, 0.40);
   --tx-faint:           rgba(38, 37, 30, 0.35);
   --tx-selected:        #f2f1ed;
-  --tx-error:           #cf2d56;
-  --tx-success:         #1f8a65;
-  --tx-badge-committed:   #1f8a65;
-  --tx-badge-review:      #92400e;
-  --tx-badge-reconciled:  #0369a1;
-  --tx-notify-success:  #1f8a65;
-  --tx-notify-error:    #cf2d56;
-  --tx-stat-income:     #1f8a65;
-  --tx-stat-expense:    #cf2d56;
-  --tx-stat-net-pos:    #1f8a65;
-  --tx-stat-net-neg:    #cf2d56;
+  --tx-error:           var(--tx-negative);
+  --tx-success:         var(--tx-positive);
+  --tx-badge-committed:   var(--tx-positive);
+  --tx-badge-review:      var(--tx-caution);
+  --tx-badge-reconciled:  var(--tx-info);
+  --tx-notify-success:  var(--tx-positive);
+  --tx-notify-error:    var(--tx-negative);
+  --tx-stat-income:     var(--tx-positive);
+  --tx-stat-expense:    var(--tx-negative);
+  --tx-stat-net-pos:    var(--tx-positive);
+  --tx-stat-net-neg:    var(--tx-negative);
 
   /* Misc */
   --progress-fg:  #26251e;
@@ -56,6 +73,19 @@
   --shadow-ambient: rgba(0,0,0,0.02) 0px 0px 16px,
                     rgba(0,0,0,0.008) 0px 0px 8px;
   --shadow-focus:  rgba(0,0,0,0.10) 0px 4px 12px;
+
+  /* Overlay scrim / focus ring / border alias / motion */
+  --bg-overlay:  rgba(0, 0, 0, 0.5);
+  --focus-ring:  0 0 0 3px rgba(245, 78, 0, 0.15);
+  --border:      var(--border-warm);
+  --dur-fast: 100ms;
+  --dur-base: 150ms;
+  --dur-slow: 200ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Accent (orange) subtle states — dropzone drag, etc. */
+  --border-accent-active: rgba(245, 78, 0, 0.5);
+  --bg-accent-subtle:     rgba(245, 78, 0, 0.04);
 }
 
 /* ── Dark mode overrides ─────────────────────────────────────────── */
@@ -74,14 +104,22 @@
   --bg-row-hover:    rgba(42, 41, 38, 0.6);
   --bg-edit-row:     rgba(34, 33, 32, 0.98);
 
-  --bg-badge-committed:   rgba(34, 163, 117, 0.15);
-  --bg-badge-review:      rgba(245, 158, 11, 0.15);
-  --bg-badge-reconciled:  rgba(3, 105, 161, 0.18);
-  --bg-notify-success:  rgba(34, 163, 117, 0.15);
-  --bg-notify-error:    rgba(224, 90, 122, 0.15);
-  --bg-stat-income:     rgba(34, 163, 117, 0.12);
-  --bg-stat-expense:    rgba(224, 90, 122, 0.12);
-  --bg-stat-net:        #222120;
+  /* Semantic status pairs — dark (legacy aliases forward automatically) */
+  --bg-positive:  rgba(34, 163, 117, 0.15);
+  --tx-positive:  #22a375;
+  --bg-negative:  rgba(224, 90, 122, 0.15);
+  --tx-negative:  #e05a7a;
+  --bg-caution:   rgba(245, 158, 11, 0.15);
+  --tx-caution:   #d97706;
+  --bg-info:      rgba(3, 105, 161, 0.18);
+  --tx-info:      #38bdf8;
+  --bg-stat-net:  #222120;
+
+  /* Transfer amber — dark (was #92400e brown text, near-invisible) */
+  --tx-transfer:        #fbbf24;
+  --tx-transfer-deep:   #fbbf24;
+  --bg-transfer:        rgba(245, 158, 11, 0.15);
+  --bg-transfer-strong: rgba(245, 158, 11, 0.22);
 
   /* Text */
   --tx-primary:         #f2f1ed;
@@ -89,17 +127,6 @@
   --tx-tertiary:        rgba(242, 241, 237, 0.40);
   --tx-faint:           rgba(242, 241, 237, 0.35);
   --tx-selected:        #26251e;
-  --tx-error:           #e05a7a;
-  --tx-success:         #22a375;
-  --tx-badge-committed:   #22a375;
-  --tx-badge-review:      #d97706;
-  --tx-badge-reconciled:  #38bdf8;
-  --tx-notify-success:  #22a375;
-  --tx-notify-error:    #e05a7a;
-  --tx-stat-income:     #22a375;
-  --tx-stat-expense:    #e05a7a;
-  --tx-stat-net-pos:    #22a375;
-  --tx-stat-net-neg:    #e05a7a;
 
   /* Misc */
   --progress-fg:  rgba(242, 241, 237, 0.8);
@@ -114,6 +141,10 @@
                    rgba(0,0,0,0.40) 0px 14px 32px,
                    rgba(242,241,237,0.07) 0px 0px 0px 1px;
   --shadow-focus:  rgba(0,0,0,0.30) 0px 4px 12px;
+
+  /* Heavier scrim + stronger focus glow in dark */
+  --bg-overlay:  rgba(0, 0, 0, 0.65);
+  --focus-ring:  0 0 0 3px rgba(245, 78, 0, 0.22);
 
   /* Tailwind token overrides (since @theme uses var(), .dark overrides cascade) */
   --color-cursor-dark:              #f2f1ed;
@@ -239,14 +270,18 @@ main > * {
   box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.25), 0 0 0 1px var(--border-warm-md);
 }
 
-/* ── Button press ─────────────────────────────────────────────────────── */
-button:not(:disabled),
-a[role="button"] {
-  transition: transform 0.1s ease, opacity 0.15s ease;
+/* ── Button press (scoped to .btn so checkboxes/icon buttons don't inherit) ── */
+.btn:not(:disabled),
+a.btn[role="button"] {
+  transition: transform var(--dur-fast) ease, opacity var(--dur-base) ease;
   font-weight: 600;
 }
-button:not(:disabled):active {
+.btn:not(:disabled):active {
   transform: scale(0.96);
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* ── Input / select focus glow ────────────────────────────────────────── */
@@ -254,21 +289,156 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(245, 78, 0, 0.15);
-}
-.dark input:focus-visible,
-.dark select:focus-visible,
-.dark textarea:focus-visible {
-  box-shadow: 0 0 0 3px rgba(245, 78, 0, 0.22);
+  box-shadow: var(--focus-ring);
 }
 .composer-textarea:focus-visible,
 .dark .composer-textarea:focus-visible {
   box-shadow: none;
 }
 
+/* ── Design-system utility classes ────────────────────────────────────── */
+.card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-warm);
+  border-radius: 8px;
+}
+.text-page-title,
+.h-page {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.325px;
+  color: var(--tx-primary);
+}
+.text-section,
+.h-section {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.11px;
+  color: var(--tx-primary);
+}
+.text-card-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.048px;
+  color: var(--tx-secondary);
+}
+.text-meta {
+  font-size: 12px;
+  color: var(--tx-secondary);
+}
+/* Tabular mono numerals for money — apply wherever amounts render */
+.amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Radix Select item highlight — replaces JS onMouseEnter/onMouseLeave handlers */
+.ui-select-item[data-highlighted] {
+  background-color: var(--bg-card-alt);
+}
+
+/* ── Button primitive ─────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: background-color var(--dur-base) ease, color var(--dur-base) ease,
+              opacity var(--dur-base) ease, transform var(--dur-fast) ease,
+              filter var(--dur-base) ease;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-sm { padding: 6px 12px; font-size: 13px; }
+.btn-md { padding: 8px 14px; font-size: 14px; }
+
+.btn-primary {
+  background-color: var(--color-accent);
+  color: #fff;
+}
+.btn-primary:not(:disabled):hover { background-color: #d94500; }
+
+.btn-default {
+  background-color: var(--bg-btn);
+  color: var(--tx-primary);
+  border-color: var(--border-warm);
+}
+.btn-default:not(:disabled):hover { background-color: var(--bg-card-alt); }
+
+.btn-ghost {
+  background-color: transparent;
+  color: var(--tx-secondary);
+}
+.btn-ghost:not(:disabled):hover { color: var(--tx-primary); background-color: var(--bg-row-hover); }
+
+.btn-danger {
+  background-color: var(--tx-negative);
+  color: #fff;
+}
+.btn-danger:not(:disabled):hover { filter: brightness(0.94); }
+
+/* ── Input primitive ──────────────────────────────────────────────────── */
+.ui-input {
+  width: 100%;
+  border: 1px solid var(--border-warm);
+  background-color: var(--bg-input);
+  color: var(--tx-primary);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--dur-base) ease;
+}
+
+.ui-field-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+  color: var(--tx-tertiary);
+}
+
+/* ── Modal primitive (Radix Dialog) ───────────────────────────────────── */
+.ui-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background-color: var(--bg-overlay);
+}
+.ui-modal-content {
+  position: fixed;
+  z-index: 10001;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(100% - 32px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-warm);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  outline: none;
+}
+
 /* ── Smooth table row hover ───────────────────────────────────────────── */
 tbody tr {
   transition: background-color 0.1s ease;
+}
+/* Read-mode ledger row hover (replaces JS onMouseEnter/onMouseLeave) */
+tr.row-hover:hover {
+  background-color: var(--bg-row-hover);
 }
 
 /* ── Calendar popover entry ───────────────────────────────────────────── */
