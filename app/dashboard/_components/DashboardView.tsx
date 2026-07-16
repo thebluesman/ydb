@@ -202,7 +202,7 @@ export function DashboardView({
             screens instead of forcing itself to the right edge and wrapping
             awkwardly; ml-auto only kicks in once there's room (sm+). */}
         <div className="flex items-center gap-2 flex-wrap sm:ml-auto">
-          <DateRangePresets onSelect={handlePreset} />
+          <DateRangePresets onSelect={handlePreset} currentRange={{ startDate: currentStartDate, endDate: currentEndDate }} />
           <span className="text-[11px] font-medium uppercase tracking-[0.048px]" style={{ color: 'var(--tx-secondary)' }}>
             Period
           </span>

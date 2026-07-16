@@ -67,6 +67,7 @@ export default async function SettingsPage() {
 
         {/* Budgets card */}
         <div
+          id="budgets"
           className="p-6 rounded-[8px]"
           style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
         >

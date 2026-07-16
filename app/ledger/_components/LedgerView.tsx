@@ -573,7 +573,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
             space; reuses the DatePicker pair + shared preset pills from the
             dashboard so "3M"/"YTD"/etc. mean the same thing on both screens. */}
         <div className="flex flex-wrap items-center gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--border-warm)' }}>
-          <DateRangePresets onSelect={handleDatePreset} />
+          <DateRangePresets onSelect={handleDatePreset} currentRange={{ startDate: urlStartDate, endDate: urlEndDate }} />
           <DatePicker value={dateStart} onChange={setDateStart} size="sm" />
           <span className="text-xs" style={{ color: 'var(--tx-faint)' }}>to</span>
           <DatePicker value={dateEnd} onChange={setDateEnd} size="sm" />
