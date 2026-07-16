@@ -85,7 +85,7 @@ export function CsvImportFlow({ accounts, categories }: { accounts: Account[]; c
     return () => { cancelled = true }
   }, [selectedAccountId])
 
-  async function loadSavedMapping(applyTo: string[][] | null) {
+  async function loadSavedMapping() {
     try {
       const res = await fetch('/api/settings')
       if (!res.ok) return
@@ -98,7 +98,6 @@ export function CsvImportFlow({ accounts, categories }: { accounts: Account[]; c
       setDateFormat(m.dateFormat)
       if (m.amountCol != null) { setAmountMode('single'); setAmountCol(m.amountCol) }
       else { setAmountMode('split'); setDebitCol(m.debitCol); setCreditCol(m.creditCol) }
-      if (applyTo) void applyTo // mapping applies on next render via state
     } catch { /* ignore malformed saved mapping */ }
   }
 
@@ -121,7 +120,7 @@ export function CsvImportFlow({ accounts, categories }: { accounts: Account[]; c
     }
     setRows(parsedRows)
     setPhase('mapping')
-    await loadSavedMapping(parsedRows)
+    await loadSavedMapping()
   }
 
   const headerRow = hasHeaderRow ? rows[0] ?? null : null

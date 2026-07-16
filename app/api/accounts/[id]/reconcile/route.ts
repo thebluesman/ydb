@@ -28,7 +28,7 @@ export async function POST(
   if (typeof statementBalanceRaw !== 'number' || !Number.isFinite(statementBalanceRaw)) {
     return NextResponse.json({ error: 'statementBalance (number) is required' }, { status: 400 })
   }
-  if (typeof dateRaw !== 'string' || isNaN(new Date(dateRaw).getTime())) {
+  if (typeof dateRaw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateRaw) || isNaN(new Date(dateRaw).getTime())) {
     return NextResponse.json({ error: 'date (yyyy-mm-dd) is required' }, { status: 400 })
   }
 
@@ -37,8 +37,11 @@ export async function POST(
     return NextResponse.json({ error: 'Account not found' }, { status: 404 })
   }
 
-  const asOf = new Date(dateRaw)
-  asOf.setHours(23, 59, 59, 999)
+  // End-of-day in UTC, not the server's local timezone — matches the
+  // convention lib/transactions-query.ts's ledger date-range filter uses
+  // (new Date(`${date}T23:59:59.999Z`)), so "through 2026-07-16" means the
+  // same UTC calendar day everywhere regardless of server locale.
+  const asOf = new Date(`${dateRaw}T23:59:59.999Z`)
   const throughIso = toDbDate(asOf)
 
   const [sumRow] = await prisma.$queryRawUnsafe<{ s: number | bigint }[]>(

@@ -129,8 +129,8 @@ export function applyCsvMapping(
     } else if (mapping.debitCol != null && mapping.creditCol != null) {
       const debit = parseSignedNumber(row[mapping.debitCol] ?? '')
       const credit = parseSignedNumber(row[mapping.creditCol] ?? '')
-      if (debit && debit !== 0) { amount = -Math.abs(debit); transactionType = 'debit' }
-      else if (credit && credit !== 0) { amount = Math.abs(credit); transactionType = 'credit' }
+      if (debit) { amount = -Math.abs(debit); transactionType = 'debit' }
+      else if (credit) { amount = Math.abs(credit); transactionType = 'credit' }
       else { skipped++; continue }
     } else {
       skipped++; continue
