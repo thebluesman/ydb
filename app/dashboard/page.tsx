@@ -7,9 +7,13 @@ import {
   categorySql,
   categoryTrendSql,
   preRangeAssetSumSql,
+  accountMonthlySumSql,
+  preRangeSumByAccountSql,
   type MonthlyRow,
   type CategoryRow,
   type TrendRow,
+  type AccountMonthlyRow,
+  type AccountSumRow,
 } from '@/lib/transactions-query'
 
 // Raw SQLite integer aggregates can come back as bigint via the driver; coerce
@@ -37,7 +41,10 @@ export type AccountBalance = {
   openingBalanceDate: string | null
   currentBalance: number
   creditLimit: number | null
+  lastReconciledAt: string | null
 }
+
+export type NetWorthPoint = { period: string; netWorth: number }
 
 export type CashFlowRow = {
   period: string
@@ -177,6 +184,7 @@ export default async function DashboardPage({
         : null,
       currentBalance,
       creditLimit: acc.creditLimit,
+      lastReconciledAt: acc.lastReconciledAt ? acc.lastReconciledAt.toISOString().split('T')[0] : null,
     }
   })
 
@@ -213,6 +221,40 @@ export default async function DashboardPage({
         closingBalance: runningBalance + income - expenses,
       })
       runningBalance = runningBalance + income - expenses
+    }
+  }
+
+  // ── Net-worth history (Phase 7 item 4) ──────────────────────────────────────
+  // One monthly series covering ALL accounts (assets AND liabilities), unlike
+  // cashFlowData above which is asset-only cash flow. Each account's running
+  // balance is seeded from its pre-range signed sum, then walked month by
+  // month using the two grouped queries below and lib/accounts.computeBalance
+  // (same asset/liability sign rule as accountBalances) — see
+  // lib/transactions-query.ts for why this mirrors the *current*-balance
+  // computation rather than the income-statement inclusion rules.
+  const netWorthHistory: NetWorthPoint[] = []
+  if (accountIds.length > 0) {
+    const [preRangeRows, accountMonthlyRows] = await Promise.all([
+      prisma.$queryRawUnsafe<AccountSumRow[]>(preRangeSumByAccountSql(accountIds, startIso)),
+      prisma.$queryRawUnsafe<AccountMonthlyRow[]>(accountMonthlySumSql(accountIds, startIso, endIso)),
+    ])
+    const preRangeByAccount = new Map(preRangeRows.map((r) => [num(r.accountId), num(r.s)]))
+    const monthlyByAccountYm = new Map(
+      accountMonthlyRows.map((r) => [`${num(r.accountId)}:${r.ym}`, num(r.s)]),
+    )
+    const running = new Map(accountsForCurrency.map((a) => [a.id, preRangeByAccount.get(a.id) ?? 0]))
+    for (const key of monthMap.keys()) {
+      let assets = 0
+      let liabilities = 0
+      for (const acc of accountsForCurrency) {
+        const delta = monthlyByAccountYm.get(`${acc.id}:${key}`) ?? 0
+        const total = (running.get(acc.id) ?? 0) + delta
+        running.set(acc.id, total)
+        const balance = computeBalance(acc, total)
+        if (isAsset(acc.accountType)) assets += Math.max(balance, 0)
+        else liabilities += Math.max(balance, 0)
+      }
+      netWorthHistory.push({ period: monthLabel(key), netWorth: assets - liabilities })
     }
   }
 
@@ -325,6 +367,7 @@ export default async function DashboardPage({
           selectedCurrency={selectedCurrency}
           accountBalances={accountBalances}
           cashFlowData={cashFlowData}
+          netWorthHistory={netWorthHistory}
           categoryTrendData={categoryTrendData}
           trendCategories={trendCategories}
           topTransactions={topTransactions}

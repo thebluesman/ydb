@@ -19,7 +19,7 @@ import { CategoryTrendChart } from './CategoryTrendChart'
 import { TopTransactionsPanel } from './TopTransactionsPanel'
 import { BudgetWidget } from './BudgetWidget'
 import { NetWorthWidget } from './NetWorthWidget'
-import type { AccountBalance, CashFlowRow, TopTransaction, TrendCategory, BudgetData } from '../page'
+import type { AccountBalance, CashFlowRow, NetWorthPoint, TopTransaction, TrendCategory, BudgetData } from '../page'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { isLiability } from '@/lib/accounts'
 import { fromCents } from '@/lib/money'
@@ -58,6 +58,7 @@ export function DashboardView({
   selectedCurrency,
   accountBalances,
   cashFlowData,
+  netWorthHistory,
   categoryTrendData,
   trendCategories,
   topTransactions,
@@ -73,6 +74,7 @@ export function DashboardView({
   selectedCurrency: string
   accountBalances: AccountBalance[]
   cashFlowData: CashFlowRow[]
+  netWorthHistory: NetWorthPoint[]
   categoryTrendData: Record<string, number | string>[]
   trendCategories: TrendCategory[]
   topTransactions: TopTransaction[]
@@ -280,6 +282,9 @@ export function DashboardView({
                   since {acc.openingBalanceDate}
                 </p>
               )}
+              <p className="text-[10px] mt-0.5" style={{ color: 'var(--tx-faint)' }}>
+                {acc.lastReconciledAt ? `reconciled through ${acc.lastReconciledAt}` : 'never reconciled'}
+              </p>
             </div>
           )})}
           </div>
@@ -313,7 +318,7 @@ export function DashboardView({
             Net Worth
           </p>
           <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>Assets minus liabilities · {selectedCurrency}</p>
-          <NetWorthWidget accountBalances={accountBalances} cashFlowData={cashFlowData} currency={selectedCurrency} />
+          <NetWorthWidget accountBalances={accountBalances} netWorthHistory={netWorthHistory} currency={selectedCurrency} />
         </div>
       )}
 

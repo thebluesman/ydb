@@ -6,6 +6,7 @@ import { RecurringTransactions } from './_components/RecurringTransactions'
 import { ImportHistory } from './_components/ImportHistory'
 import { DangerZone } from './_components/DangerZone'
 import { BackupManager } from './_components/BackupManager'
+import { ReconciliationManager } from './_components/ReconciliationManager'
 import { listBackups } from '@/lib/backup'
 
 export const metadata = {
@@ -91,6 +92,29 @@ export default async function SettingsPage() {
             Detected from monthly patterns in your committed transactions.
           </p>
           <RecurringTransactions />
+        </div>
+
+        {/* Reconciliation card */}
+        <div
+          className="p-6 rounded-[8px]"
+          style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
+        >
+          <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
+            Reconcile an Account
+          </h2>
+          <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
+            Enter a statement&apos;s closing balance and date to check it against committed transactions,
+            then mark that period reconciled once they match.
+          </p>
+          <ReconciliationManager
+            accounts={rawAccounts.map((a) => ({
+              id: a.id,
+              name: a.name,
+              currency: a.currency,
+              lastReconciledAt: a.lastReconciledAt ? a.lastReconciledAt.toISOString() : null,
+              lastReconciledBalance: a.lastReconciledBalance,
+            }))}
+          />
         </div>
 
         {/* Import history card */}
