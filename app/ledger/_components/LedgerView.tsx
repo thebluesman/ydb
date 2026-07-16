@@ -2,9 +2,10 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X } from 'lucide-react'
-import * as Select from '@radix-ui/react-select'
+import * as RSelect from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
 import { DatePicker } from '@/app/_components/DatePicker'
+import { Select, Card, Button } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
 
 // Excel/Sheets treat cells beginning with =, +, -, @, \t, \r as formulas.
@@ -315,7 +316,6 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     }
   }
 
-  const cardStyle: React.CSSProperties = { backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', borderRadius: '8px' }
   const selectStyle: React.CSSProperties = { border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }
 
   return (
@@ -323,21 +323,22 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       {/* Page header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-[26px] font-semibold text-cursor-dark leading-[1.25]" style={{ letterSpacing: '-0.325px' }}>
+          <h1 className="text-page-title">
             Ledger
           </h1>
           <p className="mt-1 text-sm leading-[1.5]" style={{ color: 'var(--tx-secondary)' }}>
             All transactions — filter, edit, and manage.
           </p>
         </div>
-        <button
+        <Button
+          variant="default"
+          size="sm"
           onClick={() => { setShowAddForm((v) => !v); setAddError('') }}
-          className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-[8px] transition-colors duration-150"
-          style={{ backgroundColor: showAddForm ? 'var(--bg-card-alt)' : 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+          style={showAddForm ? { backgroundColor: 'var(--bg-card-alt)' } : undefined}
         >
           <Plus size={14} />
           Add
-        </button>
+        </Button>
       </div>
 
       {/* Stats */}
@@ -348,8 +349,8 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
           { label: 'Net',      value: `${stats.net >= 0 ? '+' : '−'}${currency} ${fromCents(Math.abs(stats.net)).toFixed(2)}`, sub: `${filtered.length} shown`, bg: 'var(--bg-stat-net)', tx: stats.net >= 0 ? 'var(--tx-stat-net-pos)' : 'var(--tx-stat-net-neg)' },
         ].map(({ label, value, sub, bg, tx }) => (
           <div key={label} className="card-hover p-5 rounded-[8px]" style={{ backgroundColor: bg, border: '1px solid var(--border-warm)' }}>
-            <p className="text-[11px] font-medium uppercase tracking-[0.048px] mb-2" style={{ color: 'var(--tx-secondary)' }}>{label}</p>
-            <p className="text-xl font-semibold font-mono" style={{ color: tx, letterSpacing: '-0.5px' }}>{value}</p>
+            <p className="text-card-label mb-2">{label}</p>
+            <p className="amount text-xl font-semibold" style={{ color: tx, letterSpacing: '-0.5px' }}>{value}</p>
             <p className="text-xs mt-1" style={{ color: 'var(--tx-faint)' }}>{sub}</p>
           </div>
         ))}
@@ -359,7 +360,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       {pendingReimbursements.length > 0 && (
         <button
           onClick={() => setShowPendingOnly((v) => !v)}
-          className="w-full flex items-center gap-2.5 px-4 py-3 rounded-[8px] text-sm text-left transition-colors duration-150"
+          className="btn w-full flex items-center gap-2.5 px-4 py-3 rounded-[8px] text-sm text-left transition-colors duration-150"
           style={{
             backgroundColor: showPendingOnly ? 'var(--bg-badge-review)' : 'var(--bg-card)',
             border: '1px solid var(--border-warm)',
@@ -379,7 +380,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       )}
 
       {/* Filters */}
-      <div className="p-4" style={cardStyle}>
+      <Card className="p-4">
         <div className="flex flex-wrap gap-3 items-center">
           <input type="search" placeholder="Search descriptions…" value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -393,36 +394,37 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
             { value: typeFilter,    onChange: setTypeFilter,    options: [{ value: 'all', label: 'All types' }, { value: 'debit', label: 'Debit' }, { value: 'credit', label: 'Credit' }, { value: 'transfer', label: 'Transfer' }] },
             { value: statusFilter,  onChange: setStatusFilter,  options: [{ value: 'all', label: 'All statuses' }, { value: 'committed', label: 'Committed' }, { value: 'reconciled', label: 'Reconciled' }, { value: 'review', label: 'Review' }] },
           ].map(({ value, onChange, options }, i) => (
-            <FilterSelect key={i} value={value} onChange={onChange} options={options} />
+            <Select key={i} value={value} onValueChange={onChange} options={options} size="md" fullWidth={false} />
           ))}
-          {/* Category filter — with empty state when no user categories exist */}
-          <Select.Root value={categoryFilter} onValueChange={setCategoryFilter}>
-            <Select.Trigger
+          {/* Category filter — inline Radix (kept for its empty-state hint, which
+              the shared Select primitive doesn't model). JS hover replaced by
+              the .ui-select-item[data-highlighted] CSS rule; elevation → ambient. */}
+          <RSelect.Root value={categoryFilter} onValueChange={setCategoryFilter}>
+            <RSelect.Trigger
               className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none"
               style={selectStyle}
+              aria-label="Filter by category"
             >
-              <Select.Value />
-              <Select.Icon style={{ color: 'var(--tx-tertiary)' }}>
+              <RSelect.Value />
+              <RSelect.Icon style={{ color: 'var(--tx-tertiary)' }}>
                 <ChevronDown size={14} />
-              </Select.Icon>
-            </Select.Trigger>
-            <Select.Portal>
-              <Select.Content
+              </RSelect.Icon>
+            </RSelect.Trigger>
+            <RSelect.Portal>
+              <RSelect.Content
                 position="popper"
                 sideOffset={4}
                 className="z-50 overflow-hidden rounded-[8px]"
-                style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', boxShadow: 'var(--shadow-card)', minWidth: 'var(--radix-select-trigger-width)' }}
+                style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', boxShadow: 'var(--shadow-ambient)', minWidth: 'var(--radix-select-trigger-width)' }}
               >
-                <Select.Viewport className="p-1">
-                  <Select.Item
+                <RSelect.Viewport className="p-1">
+                  <RSelect.Item
                     value="all"
-                    className="px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
+                    className="ui-select-item px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
                     style={{ color: 'var(--tx-primary)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                   >
-                    <Select.ItemText>All categories</Select.ItemText>
-                  </Select.Item>
+                    <RSelect.ItemText>All categories</RSelect.ItemText>
+                  </RSelect.Item>
                   {categories.length === 0 && (
                     <div className="flex items-center gap-1.5 px-3 py-1.5">
                       <AlertCircle size={11} strokeWidth={1.5} style={{ color: 'var(--tx-tertiary)' }} />
@@ -430,31 +432,29 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
                     </div>
                   )}
                   {allCategories.map((c) => (
-                    <Select.Item
+                    <RSelect.Item
                       key={c}
                       value={c}
-                      className="px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
+                      className="ui-select-item px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
                       style={{ color: 'var(--tx-primary)' }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                     >
-                      <Select.ItemText>{c}</Select.ItemText>
-                    </Select.Item>
+                      <RSelect.ItemText>{c}</RSelect.ItemText>
+                    </RSelect.Item>
                   ))}
-                </Select.Viewport>
-              </Select.Content>
-            </Select.Portal>
-          </Select.Root>
+                </RSelect.Viewport>
+              </RSelect.Content>
+            </RSelect.Portal>
+          </RSelect.Root>
           {hasFilters && (
             <button onClick={() => { setAccountFilter('all'); setTypeFilter('all'); setCategoryFilter('all'); setStatusFilter('all'); setSearch(''); setShowPendingOnly(false) }}
-              className="text-sm transition-colors duration-150 hover:text-error" style={{ color: 'var(--tx-secondary)' }}>
+              className="btn text-sm transition-colors duration-150 hover:text-error" style={{ color: 'var(--tx-secondary)' }}>
               Clear
             </button>
           )}
           <button
             onClick={handleExport}
             disabled={sorted.length === 0}
-            className="flex items-center gap-1.5 text-sm transition-colors duration-150 disabled:opacity-30 ml-auto"
+            className="btn flex items-center gap-1.5 text-sm transition-colors duration-150 disabled:opacity-30 ml-auto"
             style={{ color: 'var(--tx-secondary)' }}
             title="Export filtered view as CSV"
           >
@@ -462,7 +462,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
             Export
           </button>
         </div>
-      </div>
+      </Card>
 
       {/* Add transaction form */}
       {showAddForm && (
@@ -495,13 +495,13 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
                   <button
                     key={t}
                     onClick={() => setAddType(t)}
-                    className="px-2.5 py-1.5 text-xs capitalize"
+                    className="btn px-2.5 py-1.5 text-xs capitalize"
                     style={{
                       backgroundColor: addType === t
-                        ? t === 'debit' ? 'var(--bg-stat-expense)' : t === 'credit' ? 'var(--bg-stat-income)' : 'rgba(245,158,11,0.15)'
+                        ? t === 'debit' ? 'var(--bg-stat-expense)' : t === 'credit' ? 'var(--bg-stat-income)' : 'var(--bg-transfer-strong)'
                         : 'var(--bg-input)',
                       color: addType === t
-                        ? t === 'debit' ? 'var(--tx-stat-expense)' : t === 'credit' ? 'var(--tx-stat-income)' : '#F59E0B'
+                        ? t === 'debit' ? 'var(--tx-stat-expense)' : t === 'credit' ? 'var(--tx-stat-income)' : 'var(--tx-transfer)'
                         : 'var(--tx-secondary)',
                       borderRight: t !== 'transfer' ? '1px solid var(--border-warm)' : undefined,
                     }}
@@ -599,13 +599,9 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={handleAddTransaction} disabled={addSaving}
-              className="px-4 py-1.5 text-sm rounded-[6px] font-medium disabled:opacity-40"
-              style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
-            >
+            <Button variant="primary" size="sm" onClick={handleAddTransaction} disabled={addSaving}>
               {addSaving ? '…' : 'Save'}
-            </button>
+            </Button>
             {addError && <span className="text-xs" style={{ color: 'var(--tx-error)' }}>{addError}</span>}
           </div>
         </div>
@@ -692,14 +688,14 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
             <button
               disabled={page === 1}
               onClick={() => setPage((p) => p - 1)}
-              className="px-3 py-1 rounded-[6px] transition-colors duration-150 disabled:opacity-30"
+              className="btn px-3 py-1 rounded-[6px] transition-colors duration-150 disabled:opacity-30"
               style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-btn)', color: 'var(--tx-primary)' }}>
               Prev
             </button>
             <button
               disabled={page * PAGE_SIZE >= sorted.length}
               onClick={() => setPage((p) => p + 1)}
-              className="px-3 py-1 rounded-[6px] transition-colors duration-150 disabled:opacity-30"
+              className="btn px-3 py-1 rounded-[6px] transition-colors duration-150 disabled:opacity-30"
               style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-btn)', color: 'var(--tx-primary)' }}>
               Next
             </button>
@@ -750,71 +746,25 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
             <option value="committed">Committed</option>
             <option value="reconciled">Reconciled</option>
           </select>
-          <button
+          <Button
+            variant="primary"
+            size="sm"
             onClick={handleBulkApply}
             disabled={bulkApplying || (!bulkCategory && !bulkStatus)}
-            className="px-3 py-1 text-xs rounded-[6px] font-medium transition-colors duration-150 disabled:opacity-40"
-            style={{ backgroundColor: 'var(--bg-selected)', color: 'var(--tx-selected)', border: '1px solid var(--border-warm)' }}
+            className="px-3 py-1 text-xs"
           >
             {bulkApplying ? '…' : 'Apply'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => { setSelectedIds(new Set()); setBulkCategory(''); setBulkStatus('') }}
-            className="text-xs transition-colors duration-150"
-            style={{ color: 'var(--tx-secondary)' }}
+            className="text-xs"
           >
             Clear
-          </button>
+          </Button>
         </div>
       )}
     </div>
-  )
-}
-
-function FilterSelect({
-  value,
-  onChange,
-  options,
-}: {
-  value: string
-  onChange: (v: string) => void
-  options: { value: string; label: string }[]
-}) {
-  const selectStyle: React.CSSProperties = { border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }
-  return (
-    <Select.Root value={value} onValueChange={onChange}>
-      <Select.Trigger
-        className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none"
-        style={selectStyle}
-      >
-        <Select.Value />
-        <Select.Icon style={{ color: 'var(--tx-tertiary)' }}>
-          <ChevronDown size={14} />
-        </Select.Icon>
-      </Select.Trigger>
-      <Select.Portal>
-        <Select.Content
-          position="popper"
-          sideOffset={4}
-          className="z-50 overflow-hidden rounded-[8px]"
-          style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', boxShadow: 'var(--shadow-card)', minWidth: 'var(--radix-select-trigger-width)' }}
-        >
-          <Select.Viewport className="p-1">
-            {options.map((o) => (
-              <Select.Item
-                key={o.value}
-                value={o.value}
-                className="px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
-                style={{ color: 'var(--tx-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-card-alt)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
-              >
-                <Select.ItemText>{o.label}</Select.ItemText>
-              </Select.Item>
-            ))}
-          </Select.Viewport>
-        </Select.Content>
-      </Select.Portal>
-    </Select.Root>
   )
 }

@@ -160,6 +160,7 @@ export function DashboardView({
               <button
                 key={c}
                 onClick={() => handleCurrencyClick(c)}
+                className="btn"
                 style={{
                   ...pillBase,
                   backgroundColor: c === selectedCurrency ? 'var(--bg-selected)' : 'var(--bg-btn)',
@@ -182,7 +183,7 @@ export function DashboardView({
           <DatePicker value={endDate} onChange={setEndDate} size="sm" />
           <button
             onClick={handleApplyDates}
-            className="px-3 py-1 text-xs rounded-[6px] transition-colors duration-150"
+            className="btn px-3 py-1 text-xs rounded-[6px] transition-colors duration-150"
             style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
           >
             Apply

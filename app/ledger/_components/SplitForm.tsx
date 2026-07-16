@@ -143,7 +143,7 @@ export function SplitForm({
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={addLeg}
-                className="flex items-center gap-1 text-xs"
+                className="btn flex items-center gap-1 text-xs"
                 style={{ color: 'var(--tx-secondary)' }}
               >
                 <Plus size={12} /> Add leg
@@ -153,14 +153,14 @@ export function SplitForm({
                 <button
                   onClick={handleSave}
                   disabled={saving || !isValid}
-                  className="px-3 py-1 text-xs rounded-[6px] font-medium disabled:opacity-40"
+                  className="btn px-3 py-1 text-xs rounded-[6px] font-medium disabled:opacity-40"
                   style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
                 >
                   {saving ? '…' : 'Save Split'}
                 </button>
                 <button
                   onClick={onCancel}
-                  className="text-xs"
+                  className="btn text-xs"
                   style={{ color: 'var(--tx-secondary)' }}
                 >
                   Cancel
