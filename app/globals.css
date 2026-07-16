@@ -43,8 +43,8 @@
   /* Text */
   --tx-primary:         #26251e;
   --tx-secondary:       rgba(38, 37, 30, 0.55);
-  --tx-tertiary:        rgba(38, 37, 30, 0.40);
-  --tx-faint:           rgba(38, 37, 30, 0.35);
+  --tx-tertiary:        rgba(38, 37, 30, 0.66); /* raised for WCAG AA (4.5:1) on informative text — was 0.40 */
+  --tx-faint:           rgba(38, 37, 30, 0.64); /* raised for WCAG AA (4.5:1) — was 0.35 */
   --tx-selected:        #f2f1ed;
   --tx-error:           var(--tx-negative);
   --tx-success:         var(--tx-positive);
@@ -124,8 +124,8 @@
   /* Text */
   --tx-primary:         #f2f1ed;
   --tx-secondary:       rgba(242, 241, 237, 0.55);
-  --tx-tertiary:        rgba(242, 241, 237, 0.40);
-  --tx-faint:           rgba(242, 241, 237, 0.35);
+  --tx-tertiary:        rgba(242, 241, 237, 0.53); /* raised for WCAG AA (4.5:1) — was 0.40 */
+  --tx-faint:           rgba(242, 241, 237, 0.50); /* raised for WCAG AA (4.5:1) — was 0.35 */
   --tx-selected:        #26251e;
 
   /* Misc */
@@ -314,6 +314,20 @@ select:focus-visible,
 textarea:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
+}
+
+/* ── Catch-all focus-visible ring for interactive elements that don't go
+   through .btn (nav links, DatePicker/calendar buttons, select triggers,
+   sortable-header buttons, etc.) — replaces the bare `outline: none` that
+   used to leave these with no visible focus state at all. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible,
+summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: 4px;
 }
 .composer-textarea:focus-visible,
 .dark .composer-textarea:focus-visible {
@@ -507,4 +521,20 @@ tr.row-hover:hover {
 }
 .badge-pop {
   animation: ydb-pop 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────
+   All the decorative entrance animations above (page fade-in, toast/
+   calendar/drawer slide-ins, badge pop) are inline `animation:` values on
+   individual elements as well as CSS classes, so a single `animation-*`
+   override here (rather than re-wrapping each keyframe rule) is what
+   actually reaches the inline cases too. Transitions used for essential
+   state feedback — the focus ring appearing, hover/press states — are left
+   alone; they're near-instant already and aren't the kind of motion this
+   guards against. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

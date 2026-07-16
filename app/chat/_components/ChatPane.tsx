@@ -243,8 +243,9 @@ export function ChatPane({
       margin: '0 auto',
       padding: '0 16px',
     }}>
-      {/* Message thread */}
-      <div ref={threadRef} style={{
+      {/* Message thread — aria-live="polite" so screen readers announce new/streaming
+          messages without interrupting (assertive would be too aggressive mid-stream) */}
+      <div ref={threadRef} role="log" aria-live="polite" aria-relevant="additions text" style={{
         flex: 1,
         overflowY: 'auto',
         paddingTop: '24px',

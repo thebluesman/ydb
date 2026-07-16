@@ -51,6 +51,7 @@ export function PreferencesForm({ initialSettings }: { initialSettings: Setting[
         </label>
         <Select.Root value={baseCurrency} onValueChange={handleChange}>
           <Select.Trigger
+            aria-label="Base Currency"
             className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none font-mono min-w-[90px]"
             style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }}
           >

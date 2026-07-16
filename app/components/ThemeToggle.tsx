@@ -1,33 +1,54 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Sun, Moon } from 'lucide-react'
+import { Sun, Moon, Monitor } from 'lucide-react'
+
+type Theme = 'light' | 'dark' | 'system'
+
+function resolveDark(theme: Theme): boolean {
+  if (theme === 'dark') return true
+  if (theme === 'light') return false
+  return window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
+const NEXT: Record<Theme, Theme> = { light: 'dark', dark: 'system', system: 'light' }
+const ICON = { light: Sun, dark: Moon, system: Monitor }
+const LABEL: Record<Theme, string> = { light: 'Light', dark: 'Dark', system: 'System' }
 
 export function ThemeToggle() {
-  const [dark, setDark] = useState(false)
+  const [theme, setTheme] = useState<Theme>('system')
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    const stored = localStorage.getItem('theme')
+    setTheme(stored === 'light' || stored === 'dark' ? stored : 'system')
     setMounted(true)
-    setDark(document.documentElement.classList.contains('dark'))
   }, [])
 
-  const toggle = () => {
-    const next = !dark
-    setDark(next)
-    document.documentElement.classList.toggle('dark', next)
-    localStorage.setItem('theme', next ? 'dark' : 'light')
-  }
+  useEffect(() => {
+    if (!mounted) return
+    document.documentElement.classList.toggle('dark', resolveDark(theme))
+    if (theme !== 'system') return
+    // Live-follow the OS preference while `system` is active, rather than
+    // snapshotting matchMedia() once — matches the theme-init script's logic.
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => document.documentElement.classList.toggle('dark', mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [theme, mounted])
 
   // Render a placeholder with the same dimensions to avoid layout shift
   if (!mounted) {
     return <div className="w-16 h-7" />
   }
 
+  const next = NEXT[theme]
+  const Icon = ICON[theme]
+
   return (
     <button
-      onClick={toggle}
-      aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+      onClick={() => { setTheme(next); localStorage.setItem('theme', next) }}
+      aria-label={`Theme: ${LABEL[theme]}. Switch to ${LABEL[next]} mode`}
       className="btn flex items-center gap-1.5 px-3 py-1 rounded-full text-xs transition-colors duration-150 hover:text-accent"
       style={{
         backgroundColor: 'var(--bg-btn)',
@@ -35,8 +56,8 @@ export function ThemeToggle() {
         color: 'var(--tx-secondary)',
       }}
     >
-      {dark ? <Sun size={13} /> : <Moon size={13} />}
-      <span>{dark ? 'Light' : 'Dark'}</span>
+      <Icon size={13} />
+      <span>{LABEL[theme]}</span>
     </button>
   )
 }

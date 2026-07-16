@@ -53,7 +53,7 @@ export function FileDropzone({
         backgroundColor: isDragActive ? 'var(--bg-accent-subtle)' : 'var(--bg-card)',
       }}
     >
-      <input {...getInputProps()} />
+      <input {...getInputProps()} aria-label="Upload statement file (PDF or image)" />
       <Upload size={28} style={{ color: 'var(--tx-tertiary)' }} />
       <div className="text-center">
         <p className="text-sm font-medium" style={{ color: 'var(--tx-primary)' }}>

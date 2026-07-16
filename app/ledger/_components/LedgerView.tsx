@@ -468,11 +468,11 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
 
           <div className={`${showMobileFilters ? 'flex flex-wrap gap-3 items-center w-full' : 'hidden'} md:contents`}>
             {[
-              { value: accountFilter, onChange: (v: string) => updateParams({ accountId: v }), options: [{ value: 'all', label: 'All accounts' }, ...accounts.map((a) => ({ value: String(a.id), label: a.name }))] },
-              { value: typeFilter,    onChange: (v: string) => updateParams({ type: v }),      options: [{ value: 'all', label: 'All types' }, { value: 'debit', label: 'Debit' }, { value: 'credit', label: 'Credit' }, { value: 'transfer', label: 'Transfer' }] },
-              { value: statusFilter,  onChange: (v: string) => updateParams({ status: v }),    options: [{ value: 'all', label: 'All statuses' }, { value: 'committed', label: 'Committed' }, { value: 'reconciled', label: 'Reconciled' }, { value: 'review', label: 'Review' }] },
-            ].map(({ value, onChange, options }, i) => (
-              <Select key={i} value={value} onValueChange={onChange} options={options} size="md" fullWidth={false} />
+              { value: accountFilter, onChange: (v: string) => updateParams({ accountId: v }), options: [{ value: 'all', label: 'All accounts' }, ...accounts.map((a) => ({ value: String(a.id), label: a.name }))], ariaLabel: 'Filter by account' },
+              { value: typeFilter,    onChange: (v: string) => updateParams({ type: v }),      options: [{ value: 'all', label: 'All types' }, { value: 'debit', label: 'Debit' }, { value: 'credit', label: 'Credit' }, { value: 'transfer', label: 'Transfer' }], ariaLabel: 'Filter by type' },
+              { value: statusFilter,  onChange: (v: string) => updateParams({ status: v }),    options: [{ value: 'all', label: 'All statuses' }, { value: 'committed', label: 'Committed' }, { value: 'reconciled', label: 'Reconciled' }, { value: 'review', label: 'Review' }], ariaLabel: 'Filter by status' },
+            ].map(({ value, onChange, options, ariaLabel }, i) => (
+              <Select key={i} value={value} onValueChange={onChange} options={options} ariaLabel={ariaLabel} size="md" fullWidth={false} />
             ))}
             {/* Category filter — inline Radix (kept for its empty-state hint, which
                 the shared Select primitive doesn't model). JS hover replaced by
@@ -552,6 +552,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                 onClick={chip.onClear}
                 className="btn flex items-center gap-1 px-2 py-1 text-xs rounded-full transition-colors duration-150"
                 style={{ backgroundColor: 'var(--bg-card-alt)', border: '1px solid var(--border-warm)', color: 'var(--tx-secondary)' }}
+                aria-label={`Remove filter: ${chip.label}`}
               >
                 {chip.label}
                 <X size={11} />
@@ -726,6 +727,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                         onChange={toggleSelectAll}
                         className="cursor-pointer"
                         title="Select all on this page"
+                        aria-label="Select all on this page"
                       />
                     </th>
                     {([
@@ -739,17 +741,23 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                     ] as const).map(({ key, label, sortable }) =>
                       sortable ? (
                         <th key={key}
-                          className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap cursor-pointer select-none"
+                          className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap"
                           style={{ color: 'var(--tx-secondary)' }}
-                          onClick={() => toggleSort(key as SortKey)}>
-                          {label}
-                          <SortIcon col={key} sortKey={sortKey} sortDir={sortDir} />
+                          aria-sort={key !== sortKey ? 'none' : sortDir === 'asc' ? 'ascending' : 'descending'}>
+                          <button
+                            onClick={() => toggleSort(key as SortKey)}
+                            className="btn flex items-center select-none"
+                            aria-label={`Sort by ${label}`}
+                          >
+                            {label}
+                            <SortIcon col={key} sortKey={sortKey} sortDir={sortDir} />
+                          </button>
                         </th>
                       ) : (
                         <th key={key}
                           className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap"
                           style={{ color: 'var(--tx-secondary)' }}>
-                          {label}
+                          {label || <span className="sr-only">{key === 'actions' ? 'Actions' : key}</span>}
                         </th>
                       )
                     )}
