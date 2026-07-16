@@ -1,20 +1,13 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X } from 'lucide-react'
 import * as Select from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { fromCents, toCents } from '@/lib/money'
-
-// Excel/Sheets treat cells beginning with =, +, -, @, \t, \r as formulas.
-// Prefixing with a single quote neutralises that without breaking the value.
-function csvCell(raw: string | number | null | undefined): string {
-  const s = raw == null ? '' : String(raw)
-  const needsEscape = /^[=+\-@\t\r]/.test(s)
-  const safe = needsEscape ? `'${s}` : s
-  return `"${safe.replace(/"/g, '""')}"`
-}
+import { DEFAULT_PAGE_SIZE, SORT_KEYS, type SortKey } from '@/lib/transactions-query'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
 
@@ -35,9 +28,15 @@ type Transaction = {
 type Account = { id: number; name: string; currency: string }
 type Category = { id: number; name: string; color: string }
 
-type SortKey = 'date' | 'amount' | 'description' | 'category' | 'transactionType'
+type LedgerStats = {
+  income: number; expenses: number; net: number
+  incomeCount: number; expenseCount: number
+  currency: string
+  pendingReimbursementCount: number
+  pendingReimbursementOutstanding: number
+}
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = DEFAULT_PAGE_SIZE
 
 function SortIcon({ col, sortKey, sortDir }: { col: string; sortKey: string; sortDir: string }) {
   if (col !== sortKey) return <ArrowUpDown size={12} className="ml-1 inline-block" style={{ color: 'var(--tx-faint)', opacity: 0.35 }} />
@@ -46,18 +45,43 @@ function SortIcon({ col, sortKey, sortDir }: { col: string; sortKey: string; sor
     : <ArrowDown size={12} className="ml-1 inline-block" style={{ color: 'var(--tx-secondary)' }} />
 }
 
-export function LedgerView({ initialTransactions, accounts, categories, baseCurrency }: {
-  initialTransactions: Transaction[]; accounts: Account[]; categories: Category[]; baseCurrency: string
+export function LedgerView({ initialRows, initialTotal, initialStats, accounts, categories }: {
+  initialRows: Transaction[]
+  initialTotal: number
+  initialStats: LedgerStats
+  accounts: Account[]
+  categories: Category[]
 }) {
-  const [transactions, setTransactions] = useState<Transaction[]>(initialTransactions)
-  const [accountFilter, setAccountFilter] = useState('all')
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [categoryFilter, setCategoryFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [search, setSearch] = useState('')
-  const [sortKey, setSortKey] = useState<SortKey>('date')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [page, setPage] = useState(1)
+  const router = useRouter()
+  const pathname = usePathname() ?? '/ledger'
+  // useSearchParams() is typed nullable (null during certain prerender paths);
+  // coerce once so the reads below stay clean. All uses here are read-only.
+  // useMemo keeps the reference stable for the callbacks that depend on it.
+  const rawSearchParams = useSearchParams()
+  const searchParams = useMemo(() => rawSearchParams ?? new URLSearchParams(), [rawSearchParams])
+  const paramsKey = searchParams.toString()
+
+  // Server-driven data. Seeded from the SSR render; refetched on any URL change.
+  const [rows, setRows] = useState<Transaction[]>(initialRows)
+  const [total, setTotal] = useState(initialTotal)
+  const [stats, setStats] = useState<LedgerStats>(initialStats)
+  const [loading, setLoading] = useState(false)
+
+  // Filters are read from the URL (the single source of truth); the search box
+  // keeps a local value so typing feels instant and debounces into the URL.
+  const accountFilter = searchParams.get('accountId') ?? 'all'
+  const typeFilter = searchParams.get('type') ?? 'all'
+  const categoryFilter = searchParams.get('category') ?? 'all'
+  const statusFilter = searchParams.get('status') ?? 'all'
+  const urlSearch = searchParams.get('search') ?? ''
+  const sortKey = (SORT_KEYS as readonly string[]).includes(searchParams.get('sort') ?? '')
+    ? (searchParams.get('sort') as SortKey)
+    : 'date'
+  const sortDir = searchParams.get('dir') === 'asc' ? 'asc' : 'desc'
+  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1)
+  const showPendingOnly = searchParams.get('pendingReimbursements') === '1'
+
+  const [searchInput, setSearchInput] = useState(urlSearch)
 
   // Add transaction form
   const [showAddForm, setShowAddForm]       = useState(false)
@@ -79,105 +103,94 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
   const [bulkCategory, setBulkCategory] = useState('')
   const [bulkStatus, setBulkStatus] = useState('')
   const [bulkApplying, setBulkApplying] = useState(false)
-  const [showPendingOnly, setShowPendingOnly] = useState(false)
+
+  const currency = stats.currency
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  // ── URL helpers ────────────────────────────────────────────────────────────
+  const updateParams = useCallback(
+    (patch: Record<string, string | null>, opts: { resetPage?: boolean } = {}) => {
+      const next = new URLSearchParams(searchParams.toString())
+      for (const [k, v] of Object.entries(patch)) {
+        if (v == null || v === '' || v === 'all') next.delete(k)
+        else next.set(k, v)
+      }
+      if (opts.resetPage !== false && !('page' in patch)) next.delete('page')
+      const qs = next.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [router, pathname, searchParams],
+  )
+
+  // ── Fetch on URL change (skip the first render — SSR already matched it) ─────
+  const firstRender = useRef(true)
+  const refetch = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/transactions?${searchParams.toString()}`)
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      setRows(data.rows)
+      setTotal(data.total)
+      setStats(data.stats)
+    } catch {
+      /* leave the last good page on screen */
+    } finally {
+      setLoading(false)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false
+      return
+    }
+    refetch()
+  }, [paramsKey, refetch])
+
+  // Keep the search box in sync if the URL search changes elsewhere (e.g. Clear).
+  useEffect(() => { setSearchInput(urlSearch) }, [urlSearch])
+
+  // Debounce the search input → URL (250ms).
+  useEffect(() => {
+    if (searchInput === urlSearch) return
+    const t = setTimeout(() => updateParams({ search: searchInput || null }), 250)
+    return () => clearTimeout(t)
+  }, [searchInput, urlSearch, updateParams])
 
   const toggleSort = (key: SortKey) => {
-    if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortKey(key); setSortDir('asc') }
-    setPage(1)
+    if (key === sortKey) updateParams({ sort: key, dir: sortDir === 'asc' ? 'desc' : 'asc' })
+    else updateParams({ sort: key, dir: 'asc' })
   }
-
-  useEffect(() => { setPage(1) }, [accountFilter, typeFilter, categoryFilter, statusFilter, search, sortKey, sortDir, showPendingOnly])
-
-  const pendingReimbursements = useMemo(
-    () => transactions.filter((t) => t.reimbursableFor && !t.reimbursementTxId && !t.parentTransactionId),
-    [transactions]
-  )
-
-  const filtered = useMemo(() => transactions.filter((t) => {
-    if (t.parentTransactionId !== null) return false // hide split legs from main list
-    if (showPendingOnly && !(t.reimbursableFor && !t.reimbursementTxId)) return false
-    if (accountFilter !== 'all' && t.accountId !== parseInt(accountFilter)) return false
-    if (typeFilter !== 'all' && t.transactionType !== typeFilter) return false
-    if (categoryFilter !== 'all' && t.category !== categoryFilter) return false
-    if (statusFilter !== 'all' && t.status !== statusFilter) return false
-    if (search) {
-      const q = search.toLowerCase()
-      if (!t.description.toLowerCase().includes(q) && !(t.originalDescription ?? '').toLowerCase().includes(q)) return false
-    }
-    return true
-  }), [transactions, accountFilter, typeFilter, categoryFilter, statusFilter, search, showPendingOnly])
 
   const allCategories = useMemo(() => {
-    const all = [...new Set([...categories.map((c) => c.name), ...transactions.map((t) => t.category).filter(Boolean)])]
+    const all = [...new Set([...categories.map((c) => c.name), ...rows.map((t) => t.category).filter(Boolean)])]
     return all.sort()
-  }, [transactions, categories])
+  }, [rows, categories])
 
-  const stats = useMemo(() => {
-    // Exclude both sides of a matched reimbursement pair — they net to zero
-    // and otherwise inflate income and expenses equally. Mirrors the rule on
-    // the dashboard (see app/dashboard/page.tsx `hiddenTxIds`).
-    const settled = new Set<number>()
-    for (const t of filtered) {
-      if (t.reimbursementTxId != null) {
-        settled.add(t.id)
-        settled.add(t.reimbursementTxId)
-      }
-    }
-    const nonTransfer = filtered.filter(
-      (t) => t.transactionType !== 'transfer' && !settled.has(t.id),
-    )
-    const income = nonTransfer
-      .filter((t) => t.transactionType === 'credit')
-      .reduce((s, t) => s + Math.abs(t.amount), 0)
-    const expenses = nonTransfer
-      .filter((t) => t.transactionType === 'debit')
-      .reduce((s, t) => s + Math.abs(t.amount), 0)
-    return {
-      income, expenses, net: income - expenses,
-      incomeCount: nonTransfer.filter((t) => t.transactionType === 'credit').length,
-      expenseCount: nonTransfer.filter((t) => t.transactionType === 'debit').length,
-    }
-  }, [filtered])
-
-  const currency = useMemo(() => {
-    if (accountFilter !== 'all') {
-      return accounts.find((a) => String(a.id) === accountFilter)?.currency ?? baseCurrency
-    }
-    return baseCurrency
-  }, [accounts, accountFilter, baseCurrency])
-
-  const sorted = useMemo(() => {
-    const dir = sortDir === 'asc' ? 1 : -1
-    return [...filtered].sort((a, b) => {
-      switch (sortKey) {
-        case 'date':        return dir * (new Date(a.date).getTime() - new Date(b.date).getTime())
-        case 'amount':      return dir * (a.amount - b.amount)
-        case 'description': return dir * a.description.localeCompare(b.description)
-        case 'category':         return dir * a.category.localeCompare(b.category)
-        case 'transactionType':  return dir * a.transactionType.localeCompare(b.transactionType)
-      }
-    })
-  }, [filtered, sortKey, sortDir])
-
-  const paginated = useMemo(
-    () => sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [sorted, page]
-  )
-
-  const hasFilters = accountFilter !== 'all' || typeFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || search || showPendingOnly
-
-  const handleUpdate = (updated: Transaction) =>
-    setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-  const handleUpdateById = (id: number, patch: Partial<Transaction>) =>
-    setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
-  const handleDelete = (id: number) => {
-    setTransactions((prev) => prev.filter((t) => t.id !== id))
+  // ── Optimistic row patches + reconcile ───────────────────────────────────────
+  const handleUpdate = useCallback((updated: Transaction) => {
+    setRows((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+    refetch()
+  }, [refetch])
+  const handleUpdateById = useCallback((id: number, patch: Partial<Transaction>) => {
+    setRows((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  }, [])
+  const handleDelete = useCallback((id: number) => {
+    setRows((prev) => prev.filter((t) => t.id !== id))
     setSelectedIds((prev) => { const n = new Set(prev); n.delete(id); return n })
-  }
+    refetch()
+  }, [refetch])
+  const toggleSelectRow = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }, [])
 
   // Bulk select helpers
-  const pageIds = paginated.map((t) => t.id)
+  const pageIds = rows.map((t) => t.id)
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id))
 
   const toggleSelectAll = () => {
@@ -188,37 +201,12 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     }
   }
 
-  const toggleSelectRow = (id: number) => {
-    setSelectedIds((prev) => {
-      const n = new Set(prev)
-      n.has(id) ? n.delete(id) : n.add(id)
-      return n
-    })
-  }
-
   const handleExport = () => {
-    const headers = ['Date', 'Description', 'Original Description', 'Type', 'Amount', 'Category', 'Account', 'Status', 'Notes']
-    // Every cell gets quote-wrapped + formula-sigil escaping. Amount shifts
-    // from cents back to major units for the CSV view.
-    const rows = sorted.map((t) => [
-      new Date(t.date).toISOString().split('T')[0],
-      t.description ?? '',
-      t.originalDescription ?? '',
-      t.transactionType,
-      fromCents(t.amount).toFixed(2),
-      t.category,
-      t.account.name,
-      t.status,
-      t.notes ?? '',
-    ].map(csvCell))
-    const csv = [headers.map(csvCell).join(','), ...rows.map((r) => r.join(','))].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `transactions-${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    // Server streams the full filtered set (ignores pagination) as CSV; the
+    // Content-Disposition header triggers the download without navigating.
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('format', 'csv')
+    window.location.href = `/api/transactions?${params.toString()}`
   }
 
   const handleBulkApply = async () => {
@@ -235,13 +223,10 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
         body: JSON.stringify({ ids: [...selectedIds], update }),
       })
       if (!res.ok) throw new Error(await res.text())
-      // Update local state
-      setTransactions((prev) =>
-        prev.map((t) => selectedIds.has(t.id) ? { ...t, ...update } : t)
-      )
       setSelectedIds(new Set())
       setBulkCategory('')
       setBulkStatus('')
+      refetch()
     } catch (e) {
       alert(String(e))
     } finally {
@@ -293,14 +278,9 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
         const err = await res.json()
         throw new Error(err.error ?? 'Failed to add')
       }
-      const created = await res.json()
-      // Transfer creates two rows — reload to pick up the counterpart side.
-      if (addType === 'transfer') {
-        const fresh = await fetch('/api/transactions').then((r) => r.json())
-        setTransactions(fresh)
-      } else {
-        setTransactions((prev) => [created, ...prev])
-      }
+      // Refetch the current page so the new row (and its transfer counterpart,
+      // if any) appears in the correct sorted position with fresh stats.
+      await refetch()
       // Reset form
       setAddDescription(''); setAddAmount(''); setAddNotes('')
       setAddDate(new Date().toISOString().split('T')[0])
@@ -313,6 +293,12 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
     } finally {
       setAddSaving(false)
     }
+  }
+
+  const hasFilters = accountFilter !== 'all' || typeFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || urlSearch || showPendingOnly
+  const clearFilters = () => {
+    setSearchInput('')
+    updateParams({ accountId: null, type: null, category: null, status: null, search: null, pendingReimbursements: null })
   }
 
   const cardStyle: React.CSSProperties = { backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', borderRadius: '8px' }
@@ -345,7 +331,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
         {[
           { label: 'Income',   value: `+${currency} ${fromCents(stats.income).toFixed(2)}`,   sub: `${stats.incomeCount} transaction${stats.incomeCount !== 1 ? 's' : ''}`,   bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
           { label: 'Expenses', value: `−${currency} ${fromCents(stats.expenses).toFixed(2)}`, sub: `${stats.expenseCount} transaction${stats.expenseCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
-          { label: 'Net',      value: `${stats.net >= 0 ? '+' : '−'}${currency} ${fromCents(Math.abs(stats.net)).toFixed(2)}`, sub: `${filtered.length} shown`, bg: 'var(--bg-stat-net)', tx: stats.net >= 0 ? 'var(--tx-stat-net-pos)' : 'var(--tx-stat-net-neg)' },
+          { label: 'Net',      value: `${stats.net >= 0 ? '+' : '−'}${currency} ${fromCents(Math.abs(stats.net)).toFixed(2)}`, sub: `${total} shown`, bg: 'var(--bg-stat-net)', tx: stats.net >= 0 ? 'var(--tx-stat-net-pos)' : 'var(--tx-stat-net-neg)' },
         ].map(({ label, value, sub, bg, tx }) => (
           <div key={label} className="card-hover p-5 rounded-[8px]" style={{ backgroundColor: bg, border: '1px solid var(--border-warm)' }}>
             <p className="text-[11px] font-medium uppercase tracking-[0.048px] mb-2" style={{ color: 'var(--tx-secondary)' }}>{label}</p>
@@ -356,9 +342,9 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       </div>
 
       {/* Pending reimbursements banner */}
-      {pendingReimbursements.length > 0 && (
+      {stats.pendingReimbursementCount > 0 && (
         <button
-          onClick={() => setShowPendingOnly((v) => !v)}
+          onClick={() => updateParams({ pendingReimbursements: showPendingOnly ? null : '1' })}
           className="w-full flex items-center gap-2.5 px-4 py-3 rounded-[8px] text-sm text-left transition-colors duration-150"
           style={{
             backgroundColor: showPendingOnly ? 'var(--bg-badge-review)' : 'var(--bg-card)',
@@ -368,9 +354,9 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
         >
           <RotateCcw size={14} style={{ flexShrink: 0 }} />
           <span>
-            {pendingReimbursements.length} pending reimbursement{pendingReimbursements.length !== 1 ? 's' : ''} awaiting settlement
+            {stats.pendingReimbursementCount} pending reimbursement{stats.pendingReimbursementCount !== 1 ? 's' : ''} awaiting settlement
             {' — '}
-            {currency}{fromCents(pendingReimbursements.reduce((s, t) => s + Math.abs(t.amount), 0)).toFixed(2)} outstanding
+            {currency}{fromCents(stats.pendingReimbursementOutstanding).toFixed(2)} outstanding
           </span>
           <span className="ml-auto text-xs" style={{ color: 'var(--tx-secondary)' }}>
             {showPendingOnly ? 'Show all' : 'Filter'}
@@ -381,22 +367,22 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       {/* Filters */}
       <div className="p-4" style={cardStyle}>
         <div className="flex flex-wrap gap-3 items-center">
-          <input type="search" placeholder="Search descriptions…" value={search}
-            onChange={(e) => setSearch(e.target.value)}
+          <input type="search" placeholder="Search descriptions…" value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="flex-1 min-w-[200px] px-3 py-2 text-sm rounded-[8px] outline-none transition-colors duration-150"
             style={selectStyle}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
             onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm)')}
           />
           {[
-            { value: accountFilter, onChange: setAccountFilter, options: [{ value: 'all', label: 'All accounts' }, ...accounts.map((a) => ({ value: String(a.id), label: a.name }))] },
-            { value: typeFilter,    onChange: setTypeFilter,    options: [{ value: 'all', label: 'All types' }, { value: 'debit', label: 'Debit' }, { value: 'credit', label: 'Credit' }, { value: 'transfer', label: 'Transfer' }] },
-            { value: statusFilter,  onChange: setStatusFilter,  options: [{ value: 'all', label: 'All statuses' }, { value: 'committed', label: 'Committed' }, { value: 'reconciled', label: 'Reconciled' }, { value: 'review', label: 'Review' }] },
+            { value: accountFilter, onChange: (v: string) => updateParams({ accountId: v }), options: [{ value: 'all', label: 'All accounts' }, ...accounts.map((a) => ({ value: String(a.id), label: a.name }))] },
+            { value: typeFilter,    onChange: (v: string) => updateParams({ type: v }),      options: [{ value: 'all', label: 'All types' }, { value: 'debit', label: 'Debit' }, { value: 'credit', label: 'Credit' }, { value: 'transfer', label: 'Transfer' }] },
+            { value: statusFilter,  onChange: (v: string) => updateParams({ status: v }),    options: [{ value: 'all', label: 'All statuses' }, { value: 'committed', label: 'Committed' }, { value: 'reconciled', label: 'Reconciled' }, { value: 'review', label: 'Review' }] },
           ].map(({ value, onChange, options }, i) => (
             <FilterSelect key={i} value={value} onChange={onChange} options={options} />
           ))}
           {/* Category filter — with empty state when no user categories exist */}
-          <Select.Root value={categoryFilter} onValueChange={setCategoryFilter}>
+          <Select.Root value={categoryFilter} onValueChange={(v) => updateParams({ category: v })}>
             <Select.Trigger
               className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none"
               style={selectStyle}
@@ -446,14 +432,14 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
             </Select.Portal>
           </Select.Root>
           {hasFilters && (
-            <button onClick={() => { setAccountFilter('all'); setTypeFilter('all'); setCategoryFilter('all'); setStatusFilter('all'); setSearch(''); setShowPendingOnly(false) }}
+            <button onClick={clearFilters}
               className="text-sm transition-colors duration-150 hover:text-error" style={{ color: 'var(--tx-secondary)' }}>
               Clear
             </button>
           )}
           <button
             onClick={handleExport}
-            disabled={sorted.length === 0}
+            disabled={total === 0}
             className="flex items-center gap-1.5 text-sm transition-colors duration-150 disabled:opacity-30 ml-auto"
             style={{ color: 'var(--tx-secondary)' }}
             title="Export filtered view as CSV"
@@ -612,12 +598,12 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       )}
 
       {/* Table */}
-      <div className="overflow-hidden rounded-[8px]" style={{ border: '1px solid var(--border-warm)' }}>
-        {filtered.length === 0 ? (
+      <div className="overflow-hidden rounded-[8px]" style={{ border: '1px solid var(--border-warm)', opacity: loading ? 0.6 : 1, transition: 'opacity 120ms' }}>
+        {rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3" style={{ color: 'var(--tx-tertiary)', backgroundColor: 'var(--bg-card)' }}>
             <span className="text-3xl opacity-30">—</span>
             <p className="text-sm">
-              {transactions.length === 0 ? 'No transactions yet. Upload a statement to get started.' : 'No transactions match the current filters.'}
+              {total === 0 && !hasFilters ? 'No transactions yet. Upload a statement to get started.' : 'No transactions match the current filters.'}
             </p>
           </div>
         ) : (
@@ -662,7 +648,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
                 </tr>
               </thead>
               <tbody style={{ backgroundColor: 'var(--bg-card)' }}>
-                {paginated.map((t) => (
+                {rows.map((t) => (
                   <LedgerRow
                     key={t.id}
                     transaction={t}
@@ -672,7 +658,7 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
                     onUpdateById={handleUpdateById}
                     onDelete={handleDelete}
                     selected={selectedIds.has(t.id)}
-                    onToggleSelect={() => toggleSelectRow(t.id)}
+                    onToggleSelect={toggleSelectRow}
                   />
                 ))}
               </tbody>
@@ -682,23 +668,23 @@ export function LedgerView({ initialTransactions, accounts, categories, baseCurr
       </div>
 
       {/* Pagination */}
-      {sorted.length > PAGE_SIZE && (
+      {total > PAGE_SIZE && (
         <div className="flex items-center justify-between px-3 py-2 rounded-[8px] text-xs"
           style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', color: 'var(--tx-secondary)' }}>
           <span>
-            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)} of {sorted.length}
+            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
           </span>
           <div className="flex gap-2">
             <button
-              disabled={page === 1}
-              onClick={() => setPage((p) => p - 1)}
+              disabled={page <= 1}
+              onClick={() => updateParams({ page: String(page - 1) }, { resetPage: false })}
               className="px-3 py-1 rounded-[6px] transition-colors duration-150 disabled:opacity-30"
               style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-btn)', color: 'var(--tx-primary)' }}>
               Prev
             </button>
             <button
-              disabled={page * PAGE_SIZE >= sorted.length}
-              onClick={() => setPage((p) => p + 1)}
+              disabled={page >= totalPages}
+              onClick={() => updateParams({ page: String(page + 1) }, { resetPage: false })}
               className="px-3 py-1 rounded-[6px] transition-colors duration-150 disabled:opacity-30"
               style={{ border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-btn)', color: 'var(--tx-primary)' }}>
               Next

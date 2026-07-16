@@ -1,19 +1,125 @@
 import { prisma } from '@/lib/prisma'
 import { NextResponse } from 'next/server'
 import { validateTransactionWrite } from '@/lib/transactionValidation'
+import { fromCents } from '@/lib/money'
+import {
+  TRANSACTION_INCLUDE,
+  buildPendingSql,
+  buildPrismaWhere,
+  buildStatsSql,
+  parseLedgerQuery,
+  resolveCurrencyScope,
+  toNumber,
+  type LedgerQuery,
+} from '@/lib/transactions-query'
 
-export async function GET() {
-  const transactions = await prisma.transaction.findMany({
-    orderBy: { date: 'desc' },
-    include: {
-      account: { select: { name: true, currency: true } },
-      splitLegs: { select: { id: true, amount: true, category: true, description: true } },
-      reimbursementTx: { select: { id: true, amount: true, description: true } },
-      reimbursedExpense: { select: { id: true, description: true } },
-      transferCounterpartAccount: { select: { id: true, name: true } },
+// Server-driven ledger query (Phase 1). Filtering, sorting, pagination, and
+// stats all run in SQLite — response time and payload are independent of the
+// total table size (only the requested page is serialised, with its 5
+// includes). The shared predicate/aggregation lives in lib/transactions-query.
+export async function GET(request: Request) {
+  const url = new URL(request.url)
+  const q = parseLedgerQuery(url.searchParams)
+
+  const [accounts, baseCurrencySetting] = await Promise.all([
+    prisma.account.findMany({ where: { isActive: true }, select: { id: true, currency: true } }),
+    prisma.setting.findFirst({ where: { key: 'baseCurrency' } }),
+  ])
+  const baseCurrency = baseCurrencySetting?.value ?? accounts[0]?.currency ?? 'GBP'
+  const scope = resolveCurrencyScope(accounts, q.accountId, baseCurrency)
+  const where = buildPrismaWhere(q, scope)
+
+  // CSV export: stream the full filtered set (no pagination), one lightweight
+  // include for the account name. Escapes formula-injection sigils.
+  if (q.format === 'csv') {
+    return exportCsv(where, q)
+  }
+
+  const stats = buildStatsSql(q, scope)
+  const pending = buildPendingSql(scope, q.accountId)
+
+  const [rows, total, statsRows, pendingRows] = await Promise.all([
+    prisma.transaction.findMany({
+      where,
+      orderBy: { [q.sort]: q.dir },
+      skip: (q.page - 1) * q.pageSize,
+      take: q.pageSize,
+      include: TRANSACTION_INCLUDE,
+    }),
+    prisma.transaction.count({ where }),
+    prisma.$queryRawUnsafe<Record<string, unknown>[]>(stats.sql, ...stats.params),
+    prisma.$queryRawUnsafe<Record<string, unknown>[]>(pending.sql, ...pending.params),
+  ])
+
+  const s = statsRows[0] ?? {}
+  const p = pendingRows[0] ?? {}
+  const income = toNumber(s.income)
+  const expenses = toNumber(s.expenses)
+
+  return NextResponse.json({
+    rows,
+    total,
+    stats: {
+      income,
+      expenses,
+      net: income - expenses,
+      incomeCount: toNumber(s.incomeCount),
+      expenseCount: toNumber(s.expenseCount),
+      currency: scope.currency,
+      pendingReimbursementCount: toNumber(p.count),
+      pendingReimbursementOutstanding: toNumber(p.outstanding),
     },
   })
-  return NextResponse.json(transactions)
+}
+
+// Excel/Sheets treat cells beginning with =, +, -, @, \t, \r as formulas.
+// Prefixing with a single quote neutralises that without breaking the value.
+function csvCell(raw: string | number | null | undefined): string {
+  const s = raw == null ? '' : String(raw)
+  const needsEscape = /^[=+\-@\t\r]/.test(s)
+  const safe = needsEscape ? `'${s}` : s
+  return `"${safe.replace(/"/g, '""')}"`
+}
+
+async function exportCsv(where: ReturnType<typeof buildPrismaWhere>, q: LedgerQuery) {
+  const rows = await prisma.transaction.findMany({
+    where,
+    orderBy: { [q.sort]: q.dir },
+    select: {
+      date: true,
+      description: true,
+      originalDescription: true,
+      transactionType: true,
+      amount: true,
+      category: true,
+      status: true,
+      notes: true,
+      account: { select: { name: true } },
+    },
+  })
+  const headers = ['Date', 'Description', 'Original Description', 'Type', 'Amount', 'Category', 'Account', 'Status', 'Notes']
+  const body = rows.map((t) =>
+    [
+      new Date(t.date).toISOString().split('T')[0],
+      t.description ?? '',
+      t.originalDescription ?? '',
+      t.transactionType,
+      fromCents(t.amount).toFixed(2),
+      t.category,
+      t.account.name,
+      t.status,
+      t.notes ?? '',
+    ]
+      .map(csvCell)
+      .join(','),
+  )
+  const csv = [headers.map(csvCell).join(','), ...body].join('\n')
+  return new NextResponse(csv, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="transactions-${new Date().toISOString().split('T')[0]}.csv"`,
+    },
+  })
 }
 
 type IncomingTx = {
