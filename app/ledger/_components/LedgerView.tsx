@@ -2,9 +2,10 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X, SlidersHorizontal } from 'lucide-react'
 import * as RSelect from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
+import { LedgerRowCard } from './LedgerRowCard'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { Select, Card, Button, useToast } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
@@ -87,6 +88,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
   const showPendingOnly = searchParams.get('pendingReimbursements') === '1'
 
   const [searchInput, setSearchInput] = useState(urlSearch)
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
 
   // Add transaction form
   const [showAddForm, setShowAddForm]       = useState(false)
@@ -322,6 +324,23 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
     updateParams({ accountId: null, type: null, category: null, status: null, search: null, pendingReimbursements: null })
   }
 
+  // Chip summary of active filters — shown below `md` when the filter
+  // disclosure is collapsed, so the user can see (and clear) what's applied
+  // without opening it.
+  const activeFilterChips = useMemo(() => {
+    const chips: { key: string; label: string; onClear: () => void }[] = []
+    if (urlSearch) chips.push({ key: 'search', label: `“${urlSearch}”`, onClear: () => setSearchInput('') })
+    if (accountFilter !== 'all') {
+      const acc = accounts.find((a) => String(a.id) === accountFilter)
+      chips.push({ key: 'account', label: acc?.name ?? 'Account', onClear: () => updateParams({ accountId: null }) })
+    }
+    if (typeFilter !== 'all') chips.push({ key: 'type', label: typeFilter, onClear: () => updateParams({ type: null }) })
+    if (statusFilter !== 'all') chips.push({ key: 'status', label: statusFilter, onClear: () => updateParams({ status: null }) })
+    if (categoryFilter !== 'all') chips.push({ key: 'category', label: categoryFilter, onClear: () => updateParams({ category: null }) })
+    if (showPendingOnly) chips.push({ key: 'pending', label: 'Pending reimbursements', onClear: () => updateParams({ pendingReimbursements: null }) })
+    return chips
+  }, [urlSearch, accountFilter, typeFilter, statusFilter, categoryFilter, showPendingOnly, accounts, updateParams])
+
   const selectStyle: React.CSSProperties = { border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }
 
   return (
@@ -348,7 +367,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
           { label: 'Income',   value: `+${currency} ${fromCents(stats.income).toFixed(2)}`,   sub: `${stats.incomeCount} transaction${stats.incomeCount !== 1 ? 's' : ''}`,   bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
           { label: 'Expenses', value: `−${currency} ${fromCents(stats.expenses).toFixed(2)}`, sub: `${stats.expenseCount} transaction${stats.expenseCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
@@ -403,68 +422,92 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
             onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm)')}
           />
-          {[
-            { value: accountFilter, onChange: (v: string) => updateParams({ accountId: v }), options: [{ value: 'all', label: 'All accounts' }, ...accounts.map((a) => ({ value: String(a.id), label: a.name }))] },
-            { value: typeFilter,    onChange: (v: string) => updateParams({ type: v }),      options: [{ value: 'all', label: 'All types' }, { value: 'debit', label: 'Debit' }, { value: 'credit', label: 'Credit' }, { value: 'transfer', label: 'Transfer' }] },
-            { value: statusFilter,  onChange: (v: string) => updateParams({ status: v }),    options: [{ value: 'all', label: 'All statuses' }, { value: 'committed', label: 'Committed' }, { value: 'reconciled', label: 'Reconciled' }, { value: 'review', label: 'Review' }] },
-          ].map(({ value, onChange, options }, i) => (
-            <Select key={i} value={value} onValueChange={onChange} options={options} size="md" fullWidth={false} />
-          ))}
-          {/* Category filter — inline Radix (kept for its empty-state hint, which
-              the shared Select primitive doesn't model). JS hover replaced by
-              the .ui-select-item[data-highlighted] CSS rule; elevation → ambient. */}
-          <RSelect.Root value={categoryFilter} onValueChange={(v) => updateParams({ category: v })}>
-            <RSelect.Trigger
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none"
-              style={selectStyle}
-              aria-label="Filter by category"
-            >
-              <RSelect.Value />
-              <RSelect.Icon style={{ color: 'var(--tx-tertiary)' }}>
-                <ChevronDown size={14} />
-              </RSelect.Icon>
-            </RSelect.Trigger>
-            <RSelect.Portal>
-              <RSelect.Content
-                position="popper"
-                sideOffset={4}
-                className="z-50 overflow-hidden rounded-[8px]"
-                style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', boxShadow: 'var(--shadow-ambient)', minWidth: 'var(--radix-select-trigger-width)' }}
+
+          {/* Below md, the account/type/status/category selects collapse behind
+              this toggle; md:contents makes them direct flex children again at
+              md+ so desktop layout is unchanged. */}
+          <button
+            onClick={() => setShowMobileFilters((v) => !v)}
+            className="btn md:hidden flex items-center gap-1.5 px-3 py-2 text-sm rounded-[8px] transition-colors duration-150"
+            style={selectStyle}
+          >
+            <SlidersHorizontal size={14} />
+            Filters
+            {hasFilters && (
+              <span
+                className="text-[10px] font-semibold rounded-full px-1.5"
+                style={{ backgroundColor: 'var(--bg-selected)', color: 'var(--tx-selected)' }}
               >
-                <RSelect.Viewport className="p-1">
-                  <RSelect.Item
-                    value="all"
-                    className="ui-select-item px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
-                    style={{ color: 'var(--tx-primary)' }}
-                  >
-                    <RSelect.ItemText>All categories</RSelect.ItemText>
-                  </RSelect.Item>
-                  {categories.length === 0 && (
-                    <div className="flex items-center gap-1.5 px-3 py-1.5">
-                      <AlertCircle size={11} strokeWidth={1.5} style={{ color: 'var(--tx-tertiary)' }} />
-                      <span className="text-[11px]" style={{ color: 'var(--tx-tertiary)' }}>No custom categories yet</span>
-                    </div>
-                  )}
-                  {allCategories.map((c) => (
+                {activeFilterChips.length}
+              </span>
+            )}
+          </button>
+
+          <div className={`${showMobileFilters ? 'flex flex-wrap gap-3 items-center w-full' : 'hidden'} md:contents`}>
+            {[
+              { value: accountFilter, onChange: (v: string) => updateParams({ accountId: v }), options: [{ value: 'all', label: 'All accounts' }, ...accounts.map((a) => ({ value: String(a.id), label: a.name }))] },
+              { value: typeFilter,    onChange: (v: string) => updateParams({ type: v }),      options: [{ value: 'all', label: 'All types' }, { value: 'debit', label: 'Debit' }, { value: 'credit', label: 'Credit' }, { value: 'transfer', label: 'Transfer' }] },
+              { value: statusFilter,  onChange: (v: string) => updateParams({ status: v }),    options: [{ value: 'all', label: 'All statuses' }, { value: 'committed', label: 'Committed' }, { value: 'reconciled', label: 'Reconciled' }, { value: 'review', label: 'Review' }] },
+            ].map(({ value, onChange, options }, i) => (
+              <Select key={i} value={value} onValueChange={onChange} options={options} size="md" fullWidth={false} />
+            ))}
+            {/* Category filter — inline Radix (kept for its empty-state hint, which
+                the shared Select primitive doesn't model). JS hover replaced by
+                the .ui-select-item[data-highlighted] CSS rule; elevation → ambient. */}
+            <RSelect.Root value={categoryFilter} onValueChange={(v) => updateParams({ category: v })}>
+              <RSelect.Trigger
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-[8px] outline-none"
+                style={selectStyle}
+                aria-label="Filter by category"
+              >
+                <RSelect.Value />
+                <RSelect.Icon style={{ color: 'var(--tx-tertiary)' }}>
+                  <ChevronDown size={14} />
+                </RSelect.Icon>
+              </RSelect.Trigger>
+              <RSelect.Portal>
+                <RSelect.Content
+                  position="popper"
+                  sideOffset={4}
+                  className="z-50 overflow-hidden rounded-[8px]"
+                  style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', boxShadow: 'var(--shadow-ambient)', minWidth: 'var(--radix-select-trigger-width)' }}
+                >
+                  <RSelect.Viewport className="p-1">
                     <RSelect.Item
-                      key={c}
-                      value={c}
+                      value="all"
                       className="ui-select-item px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
                       style={{ color: 'var(--tx-primary)' }}
                     >
-                      <RSelect.ItemText>{c}</RSelect.ItemText>
+                      <RSelect.ItemText>All categories</RSelect.ItemText>
                     </RSelect.Item>
-                  ))}
-                </RSelect.Viewport>
-              </RSelect.Content>
-            </RSelect.Portal>
-          </RSelect.Root>
-          {hasFilters && (
-            <button onClick={clearFilters}
-              className="btn text-sm transition-colors duration-150 hover:text-error" style={{ color: 'var(--tx-secondary)' }}>
-              Clear
-            </button>
-          )}
+                    {categories.length === 0 && (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5">
+                        <AlertCircle size={11} strokeWidth={1.5} style={{ color: 'var(--tx-tertiary)' }} />
+                        <span className="text-[11px]" style={{ color: 'var(--tx-tertiary)' }}>No custom categories yet</span>
+                      </div>
+                    )}
+                    {allCategories.map((c) => (
+                      <RSelect.Item
+                        key={c}
+                        value={c}
+                        className="ui-select-item px-3 py-2 text-sm rounded-[6px] cursor-pointer outline-none select-none transition-colors duration-100"
+                        style={{ color: 'var(--tx-primary)' }}
+                      >
+                        <RSelect.ItemText>{c}</RSelect.ItemText>
+                      </RSelect.Item>
+                    ))}
+                  </RSelect.Viewport>
+                </RSelect.Content>
+              </RSelect.Portal>
+            </RSelect.Root>
+            {hasFilters && (
+              <button onClick={clearFilters}
+                className="btn text-sm transition-colors duration-150 hover:text-error" style={{ color: 'var(--tx-secondary)' }}>
+                Clear
+              </button>
+            )}
+          </div>
+
           <button
             onClick={handleExport}
             disabled={total === 0}
@@ -476,6 +519,23 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
             Export
           </button>
         </div>
+
+        {/* Active-filter chips — mobile only, visible while the disclosure above is collapsed */}
+        {!showMobileFilters && activeFilterChips.length > 0 && (
+          <div className="md:hidden flex flex-wrap gap-1.5 mt-3">
+            {activeFilterChips.map((chip) => (
+              <button
+                key={chip.key}
+                onClick={chip.onClear}
+                className="btn flex items-center gap-1 px-2 py-1 text-xs rounded-full transition-colors duration-150"
+                style={{ backgroundColor: 'var(--bg-card-alt)', border: '1px solid var(--border-warm)', color: 'var(--tx-secondary)' }}
+              >
+                {chip.label}
+                <X size={11} />
+              </button>
+            ))}
+          </div>
+        )}
       </Card>
 
       {/* Add transaction form */}
@@ -621,7 +681,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
         </div>
       )}
 
-      {/* Table */}
+      {/* Rows: table on md+, stacked cards below md */}
       <div className="overflow-hidden rounded-[8px]" style={{ border: '1px solid var(--border-warm)', opacity: loading ? 0.6 : 1, transition: 'opacity 120ms' }}>
         {rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3" style={{ color: 'var(--tx-tertiary)', backgroundColor: 'var(--bg-card)' }}>
@@ -631,63 +691,90 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead style={{ backgroundColor: 'var(--bg-table-head)' }}>
-                <tr>
-                  <th className="px-3 py-3 w-10">
-                    <input
-                      type="checkbox"
-                      checked={allPageSelected}
-                      onChange={toggleSelectAll}
-                      className="cursor-pointer"
-                      title="Select all on this page"
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead style={{ backgroundColor: 'var(--bg-table-head)' }}>
+                  <tr>
+                    <th className="px-3 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={allPageSelected}
+                        onChange={toggleSelectAll}
+                        className="cursor-pointer"
+                        title="Select all on this page"
+                      />
+                    </th>
+                    {([
+                      { key: 'date',        label: 'Date',        sortable: true  },
+                      { key: 'description', label: 'Description', sortable: true  },
+                      { key: 'amount',      label: 'Amount',      sortable: true  },
+                      { key: 'category',    label: 'Category',    sortable: true  },
+                      { key: 'account',     label: 'Account',     sortable: false },
+                      { key: 'status',      label: 'Status',      sortable: false },
+                      { key: 'actions',     label: '',            sortable: false },
+                    ] as const).map(({ key, label, sortable }) =>
+                      sortable ? (
+                        <th key={key}
+                          className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap cursor-pointer select-none"
+                          style={{ color: 'var(--tx-secondary)' }}
+                          onClick={() => toggleSort(key as SortKey)}>
+                          {label}
+                          <SortIcon col={key} sortKey={sortKey} sortDir={sortDir} />
+                        </th>
+                      ) : (
+                        <th key={key}
+                          className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap"
+                          style={{ color: 'var(--tx-secondary)' }}>
+                          {label}
+                        </th>
+                      )
+                    )}
+                  </tr>
+                </thead>
+                <tbody style={{ backgroundColor: 'var(--bg-card)' }}>
+                  {rows.map((t) => (
+                    <LedgerRow
+                      key={t.id}
+                      transaction={t}
+                      accounts={accounts}
+                      categories={categories}
+                      onUpdate={handleUpdate}
+                      onUpdateById={handleUpdateById}
+                      onDelete={handleDelete}
+                      selected={selectedIds.has(t.id)}
+                      onToggleSelect={toggleSelectRow}
                     />
-                  </th>
-                  {([
-                    { key: 'date',        label: 'Date',        sortable: true  },
-                    { key: 'description', label: 'Description', sortable: true  },
-                    { key: 'amount',      label: 'Amount',      sortable: true  },
-                    { key: 'category',    label: 'Category',    sortable: true  },
-                    { key: 'account',     label: 'Account',     sortable: false },
-                    { key: 'status',      label: 'Status',      sortable: false },
-                    { key: 'actions',     label: '',            sortable: false },
-                  ] as const).map(({ key, label, sortable }) =>
-                    sortable ? (
-                      <th key={key}
-                        className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap cursor-pointer select-none"
-                        style={{ color: 'var(--tx-secondary)' }}
-                        onClick={() => toggleSort(key as SortKey)}>
-                        {label}
-                        <SortIcon col={key} sortKey={sortKey} sortDir={sortDir} />
-                      </th>
-                    ) : (
-                      <th key={key}
-                        className="px-3 py-3 text-left text-xs font-medium whitespace-nowrap"
-                        style={{ color: 'var(--tx-secondary)' }}>
-                        {label}
-                      </th>
-                    )
-                  )}
-                </tr>
-              </thead>
-              <tbody style={{ backgroundColor: 'var(--bg-card)' }}>
-                {rows.map((t) => (
-                  <LedgerRow
-                    key={t.id}
-                    transaction={t}
-                    accounts={accounts}
-                    categories={categories}
-                    onUpdate={handleUpdate}
-                    onUpdateById={handleUpdateById}
-                    onDelete={handleDelete}
-                    selected={selectedIds.has(t.id)}
-                    onToggleSelect={toggleSelectRow}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="md:hidden">
+              <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ backgroundColor: 'var(--bg-table-head)', borderBottom: '1px solid var(--border-warm)' }}>
+                <input
+                  type="checkbox"
+                  checked={allPageSelected}
+                  onChange={toggleSelectAll}
+                  className="cursor-pointer"
+                  title="Select all on this page"
+                />
+                <span className="text-xs font-medium" style={{ color: 'var(--tx-secondary)' }}>Select all on this page</span>
+              </div>
+              {rows.map((t) => (
+                <LedgerRowCard
+                  key={t.id}
+                  transaction={t}
+                  categories={categories}
+                  onUpdate={handleUpdate}
+                  onDelete={handleDelete}
+                  onRestore={refetch}
+                  selected={selectedIds.has(t.id)}
+                  onToggleSelect={toggleSelectRow}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
@@ -717,23 +804,15 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
         </div>
       )}
 
-      {/* Bulk action bar */}
+      {/* Bulk action bar — full-width bottom sheet below md, centered pill above it */}
       {selectedIds.size > 0 && (
         <div
+          className="fixed z-50 flex items-center gap-3 flex-wrap left-0 right-0 bottom-0 rounded-t-2xl px-4 py-3 md:left-1/2 md:right-auto md:bottom-6 md:-translate-x-1/2 md:rounded-xl md:flex-nowrap md:px-4 md:py-2.5"
           style={{
-            position: 'fixed',
-            bottom: 24,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 50,
             backgroundColor: 'var(--bg-card)',
             border: '1px solid var(--border-warm-md)',
-            borderRadius: '12px',
             boxShadow: 'var(--shadow-card)',
-            padding: '10px 16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px',
+            paddingBottom: 'calc(env(safe-area-inset-bottom))',
             whiteSpace: 'nowrap',
           }}
         >

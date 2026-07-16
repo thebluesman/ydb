@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     notes?: string
     status?: string
     transferCounterpartAccountId?: number | null
+    reimbursableFor?: string | null
   } = await request.json()
 
   if (!body.date || body.amount === undefined || !body.description || !body.accountId) {
@@ -47,6 +48,7 @@ export async function POST(request: Request) {
     category: body.category ?? '',
     notes: body.notes ?? null,
     status: body.status ?? 'committed',
+    reimbursableFor: body.reimbursableFor ?? null,
   }
 
   // Non-transfer (or transfer without a counterpart): one-row create, same as before.

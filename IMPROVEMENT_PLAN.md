@@ -599,21 +599,41 @@ orange button visible per section.
 - Verify: keyboard-only walkthrough of ledger edit, upload commit, and danger-zone flows; axe
   DevTools (or `@axe-core/playwright` in the Phase 8 smoke) reports no critical issues.
 
-### Phase U3 — Responsive / mobile
+### Phase U3 — Responsive / mobile ✅ (M4)
 
 Target: fully usable on a ~390px phone; comfortable on tablet.
-- **Nav:** collapse to a hamburger (Radix `DropdownMenu` or a simple disclosure) below `md`;
-  include Dashboard (see U5) and Settings in the collapsed menu.
-- **Ledger:** stat cards `grid-cols-1 sm:grid-cols-3`; below `md`, render rows as stacked cards
-  (date + description + amount + badges, actions in an overflow menu) instead of the wide table —
-  a `LedgerRowCard` sibling component sharing the same handlers; bulk bar becomes full-width
-  bottom sheet; filters collapse into a "Filters" disclosure showing active-filter chips.
-- **Chat:** sidebar becomes a slide-over drawer below `md` with a sessions button in the header.
-- **Dashboard:** chart grids stack to one column; filter bar wraps (already `flex-wrap` — verify
-  the `ml-auto` date group behaves); balances rail already scrolls horizontally (keep).
-- **Settings/Upload/Review:** review-table rows already wrap; verify at 390px and fix overflow.
-- Verify: Playwright viewport sweep (390/768/1280) screenshotting each page; no horizontal page
-  scroll at any width.
+- **Nav:** ✅ collapses to a hamburger below `md` (Radix `Popover`, not `DropdownMenu` — avoided a
+  new dependency since `@radix-ui/react-popover` was already installed). `MobileNav` in
+  `NavLinks.tsx` lists all links including Dashboard and Settings, which aren't both in the
+  desktop rail yet (Dashboard nav placement is U5's job — the mobile menu just doesn't wait for it).
+- **Ledger:** ✅ stat cards `grid-cols-1 sm:grid-cols-3`. Below `md`, rows render as
+  `LedgerRowCard.tsx` (date/description/amount/badges, actions behind an overflow chevron) instead
+  of the table; `deleteWithUndo.ts` was factored out of `LedgerRow.tsx` so both the desktop row and
+  the mobile card share the exact same undo-delete logic (including the reimbursement-link and
+  partial-failure fixes from the Phase 4 PR's review round). Bulk bar is a full-width bottom sheet
+  below `md`, a centered pill at `md+`. Filters collapse behind a "Filters" disclosure with an
+  active-filter-count badge and clearable chips shown when collapsed; `md:contents` on the
+  filter-fields wrapper keeps the `md+` layout pixel-identical to before.
+- **Chat:** ✅ `ChatSidebar` split into a static `md+` rail and a `MobileChatDrawer` (Radix `Dialog`,
+  slide-over from the left, new `.ui-drawer-*` CSS primitive in `globals.css`) opened via a
+  "Sessions" button in a mobile-only header bar showing the active chat's title.
+- **Dashboard:** stat cards `grid-cols-1 sm:grid-cols-3`; filter bar's date-range group only gets
+  `ml-auto` at `sm+` (was unconditional, which fought `flex-wrap` on narrow screens) and itself wraps.
+  No other chart grids needed stacking — they were already single-column. Balances rail's existing
+  horizontal scroll kept as-is.
+- **Settings/Upload/Review:** ✅ found and fixed two real overflow bugs via the Playwright sweep
+  below, both in `AccountsForm.tsx`'s per-account row: the opening-balance/date/credit-limit/remove
+  row was a rigid `grid-cols-[auto_auto_auto_1fr]` that didn't fit 390px (now `flex flex-wrap`), and
+  the name/type/currency/active row's fixed auto-columns left the name input less width than its
+  intrinsic minimum (now `grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto_auto]` with the four fixed
+  fields grouped in a `flex flex-wrap sm:contents` wrapper so they reflow below the name field on
+  mobile without changing the `sm+` grid). `TopTransactionsPanel.tsx`'s table was missing the
+  `overflowX: auto` wrapper `CashFlowTable.tsx` already had — added.
+- Verify: ✅ ran an actual Playwright viewport sweep (390/768/1280 × ledger/dashboard/chat/settings/
+  upload/guide, 18 combinations) against the real dev server with a migrated DB — confirmed zero
+  horizontal overflow (`scrollWidth === clientWidth`) on every page/width after the two Settings
+  fixes above, plus interactive screenshots of the mobile nav menu, ledger filter disclosure, and
+  chat drawer opening correctly.
 
 ### Phase U4 — Feedback, loading, and error states
 

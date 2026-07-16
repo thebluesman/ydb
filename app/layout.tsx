@@ -3,7 +3,7 @@ import localFont from "next/font/local";
 import Link from "next/link";
 import Script from "next/script";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { NavLinks, ConfigLink } from "./components/NavLinks";
+import { NavLinks, ConfigLink, MobileNav } from "./components/NavLinks";
 import { ToastProvider } from "./_components/ui";
 import "./globals.css";
 
@@ -52,7 +52,7 @@ export default function RootLayout({
           }}
         />
         <header
-          className="sticky top-0 z-50 flex items-center gap-8 px-6 py-3 shrink-0"
+          className="sticky top-0 z-50 flex items-center gap-4 md:gap-8 px-4 md:px-6 py-3 shrink-0"
           style={{
             backgroundColor: "var(--bg-nav)",
             backdropFilter: "blur(12px)",
@@ -67,9 +67,13 @@ export default function RootLayout({
             ydb
           </Link>
           <NavLinks />
-          <div className="flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-2">
             <ThemeToggle />
             <ConfigLink />
+          </div>
+          <div className="flex md:hidden items-center gap-1 flex-1 justify-end">
+            <ThemeToggle />
+            <MobileNav />
           </div>
         </header>
         <main className="flex-1 flex flex-col">{children}</main>

@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ChatSidebar } from './_components/ChatSidebar'
+import { PanelLeft } from 'lucide-react'
+import { ChatSidebar, MobileChatDrawer } from './_components/ChatSidebar'
 import { ChatPane, type Message } from './_components/ChatPane'
 
 type ChatSession = {
@@ -15,6 +16,7 @@ export default function ChatPage() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
   const [activeMessages, setActiveMessages] = useState<Message[]>([])
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
 
   const loadSession = (id: number) => {
     fetch(`/api/chat-sessions/${id}`)
@@ -91,21 +93,49 @@ export default function ChatPage() {
       .catch(() => {})
   }
 
+  const activeTitle = sessions.find((s) => s.id === activeSessionId)?.title ?? 'Chat'
+
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-      <ChatSidebar
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
-        onDeleteSession={handleDeleteSession}
-      />
-      <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0 }}>
-        <ChatPane
-          sessionId={activeSessionId}
-          initialMessages={activeMessages}
-          onResponseComplete={handleResponseComplete}
+    <div style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column' }}>
+      <div
+        className="md:hidden flex items-center gap-2 px-4 py-2.5 shrink-0"
+        style={{ borderBottom: '1px solid var(--border-warm)' }}
+      >
+        <button
+          onClick={() => setMobileDrawerOpen(true)}
+          aria-label="Open chat sessions"
+          className="flex items-center gap-1.5 text-sm"
+          style={{ color: 'var(--tx-secondary)' }}
+        >
+          <PanelLeft size={16} />
+        </button>
+        <span className="text-sm font-medium truncate" style={{ color: 'var(--tx-primary)' }}>{activeTitle}</span>
+      </div>
+
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+        <ChatSidebar
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+          onDeleteSession={handleDeleteSession}
         />
+        <MobileChatDrawer
+          open={mobileDrawerOpen}
+          onClose={() => setMobileDrawerOpen(false)}
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelectSession={handleSelectSession}
+          onNewSession={handleNewSession}
+          onDeleteSession={handleDeleteSession}
+        />
+        <div style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0 }}>
+          <ChatPane
+            sessionId={activeSessionId}
+            initialMessages={activeMessages}
+            onResponseComplete={handleResponseComplete}
+          />
+        </div>
       </div>
     </div>
   )

@@ -195,8 +195,12 @@ export function AccountsForm({
             className="pb-5 last:pb-0 space-y-3"
             style={{ borderBottom: i < accounts.length - 1 ? '1px solid var(--border-warm)' : 'none' }}
           >
-            {/* Row 1: Name, Type, Currency, Active, saved indicator */}
-            <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 items-end">
+            {/* Row 1: Name, Type, Currency, Active, saved indicator.
+                grid-cols-[1fr_auto_auto_auto_auto] on sm+; below sm the fixed
+                columns don't leave enough room next to a usable name field, so
+                Name gets its own full-width line and the rest flex-wrap below
+                it (sm:contents restores them as direct grid items at sm+). */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto_auto_auto_auto] sm:items-end">
               <div>
                 <Label.Root htmlFor={`acc-name-${i}`} className={labelCls} style={{ color: 'var(--tx-secondary)' }}>
                   Account Name
@@ -214,6 +218,7 @@ export function AccountsForm({
                 />
               </div>
 
+              <div className="flex flex-wrap gap-3 items-end sm:contents">
               <div>
                 <Label.Root htmlFor={`acc-type-${i}`} className={labelCls} style={{ color: 'var(--tx-secondary)' }}>
                   Type
@@ -329,10 +334,13 @@ export function AccountsForm({
                   <Check size={12} style={{ color: 'var(--tx-success, var(--tx-secondary))' }} />
                 )}
               </div>
+              </div>
             </div>
 
-            {/* Row 2: Opening balance + date + credit limit (credit only) + remove */}
-            <div className="grid grid-cols-[auto_auto_auto_1fr] gap-3 items-end">
+            {/* Row 2: Opening balance + date + credit limit (credit only) + remove.
+                flex-wrap instead of a fixed-column grid — the three auto-width
+                fields don't fit a 390px viewport on one line. */}
+            <div className="flex flex-wrap gap-3 items-end">
               <div>
                 <Label.Root htmlFor={`acc-ob-${i}`} className={labelCls} style={{ color: 'var(--tx-secondary)' }}>
                   {account.accountType === 'personal_loan' || account.accountType === 'auto_loan'
@@ -390,7 +398,7 @@ export function AccountsForm({
                 </div>
               )}
 
-              <div className="flex justify-end">
+              <div className="flex justify-end ml-auto">
                 <button
                   onClick={() => removeAccount(i)}
                   disabled={removing === account.id}
