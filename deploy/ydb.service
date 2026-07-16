@@ -1,0 +1,36 @@
+# Sample systemd unit for running ydb in production mode on a home server.
+#
+# Install:
+#   sudo cp deploy/ydb.service /etc/systemd/system/ydb.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ydb
+#
+# Adjust User, WorkingDirectory, and the node path below to match your setup.
+# Build the app once before (or after) enabling the service:
+#   npm ci && npm run build
+
+[Unit]
+Description=ydb — personal finance tracker
+After=network.target
+
+[Service]
+Type=simple
+User=ydb
+WorkingDirectory=/opt/ydb
+# npm path is environment-specific — run `which npm` on the target box and
+# adjust if it isn't at /usr/bin/npm (e.g. nvm-managed installs).
+ExecStart=/usr/bin/npm run start
+# npm run start launches `next start` as a child process, so a plain
+# SIGTERM to npm won't necessarily stop next. KillMode=mixed sends SIGTERM
+# to the main process and SIGKILL to the rest of the cgroup on timeout,
+# ensuring node doesn't linger after `systemctl stop`.
+KillMode=mixed
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+# Uncomment and point at an env file if secrets (e.g. OLLAMA_URL) live outside
+# the repo's .env:
+# EnvironmentFile=/opt/ydb/.env
+
+[Install]
+WantedBy=multi-user.target

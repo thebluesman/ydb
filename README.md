@@ -47,13 +47,25 @@ A personal finance tracker with AI-powered natural language querying. Import ban
    npx prisma migrate dev
    ```
 
-3. **Start the development server**
+3. **Build and start the app**
 
    ```bash
-   npm run dev
+   npm run build && npm run start
    ```
 
-   The app runs on [http://localhost:3333](http://localhost:3333).
+   The app runs on [http://localhost:3333](http://localhost:3333). This is the primary way to
+   run ydb on a home server — `next start` is meaningfully faster than `next dev` and is what the
+   sample systemd unit in [`deploy/ydb.service`](deploy/ydb.service) uses.
+
+### Development
+
+For local development with hot reload:
+
+```bash
+npm run dev
+```
+
+This also runs on [http://localhost:3333](http://localhost:3333).
 
 ## Project Structure
 

@@ -7,6 +7,30 @@ const DB_PATH = path.join(process.cwd(), 'prisma/dev.db')
 
 function createPrismaClient() {
   const adapter = new PrismaBetterSqlite3({ url: DB_PATH })
+
+  // Tune SQLite for concurrent read/write access. journal_mode=WAL is
+  // persisted in the database file itself, but synchronous, busy_timeout,
+  // and foreign_keys are per-connection — they must be set on the exact
+  // better-sqlite3 connection Prisma issues queries through, not a
+  // throwaway one that gets closed before Prisma ever touches it.
+  //
+  // The installed @prisma/adapter-better-sqlite3 has no way to hand it a
+  // pre-configured Database instance — its constructor only takes
+  // `{ url, ...Options }` (readonly/fileMustExist/timeout/verbose/
+  // nativeBinding), and internally it always builds its own connection in
+  // connect(). So we wrap connect() and apply the pragmas to the
+  // connection it just created, before Prisma gets to use it.
+  const originalConnect = adapter.connect.bind(adapter)
+  adapter.connect = async () => {
+    const conn = await originalConnect()
+    const client = (conn as unknown as { client: Database.Database }).client
+    client.pragma('journal_mode = WAL')
+    client.pragma('synchronous = NORMAL')
+    client.pragma('busy_timeout = 5000')
+    client.pragma('foreign_keys = ON')
+    return conn
+  }
+
   return new PrismaClient({ adapter })
 }
 
