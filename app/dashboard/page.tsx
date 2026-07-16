@@ -68,11 +68,19 @@ export default async function DashboardPage({
   const now = new Date()
 
   // ── Resolve selected currency ──────────────────────────────────────────────
-  const [allAccounts, baseCurrencySetting, budgets] = await Promise.all([
+  const [allAccounts, baseCurrencySetting, budgets, anyTransactionCount] = await Promise.all([
     prisma.account.findMany({ where: { isActive: true }, orderBy: { id: 'asc' } }),
     prisma.setting.findFirst({ where: { key: 'baseCurrency' } }),
     prisma.budget.findMany({ orderBy: { category: 'asc' } }),
+    // Whole-DB count (ignores the selected currency/date range) — drives the
+    // first-run onboarding card, which should only show on a truly empty
+    // database, not just an empty *filtered view* of a populated one.
+    prisma.transaction.count(),
   ])
+  // Fresh-DB check also requires zero accounts: a DB with accounts but no
+  // imported transactions yet should still show "import a statement" as the
+  // next step rather than disappearing once an account exists.
+  const isFreshDatabase = allAccounts.length === 0 && anyTransactionCount === 0
 
   const availableCurrencies = [...new Set(allAccounts.map((a) => a.currency))]
   const defaultCurrency =
@@ -218,12 +226,23 @@ export default async function DashboardPage({
 
   // ── Category trend data ─────────────────────────────────────────────────────
   // Trend categories are the debit-in-range categories (identical set to the
-  // category breakdown); colours come from the Category table.
+  // category breakdown); colours come from the Category table. Capped to the
+  // top 8 categories by total spend (categoryBreakdown is already ORDER BY
+  // total DESC) + an "Other" bucket for the rest — an unbounded per-category
+  // line count otherwise turns into unreadable colour soup once a user has
+  // a couple dozen categories (Phase U5).
   const dbCategories = await prisma.category.findMany({ orderBy: { name: 'asc' } })
   const dbColorByName = new Map(dbCategories.map((c) => [c.name, c.color]))
-  const trendCategories: TrendCategory[] = categoryBreakdown
-    .map((c) => ({ name: c.category, color: dbColorByName.get(c.category) ?? '#94a3b8' }))
-    .sort((a, b) => a.name.localeCompare(b.name))
+  const TREND_CATEGORY_CAP = 8
+  const topCategoryNames = new Set(categoryBreakdown.slice(0, TREND_CATEGORY_CAP).map((c) => c.category))
+  const hasOverflowCategories = categoryBreakdown.length > TREND_CATEGORY_CAP
+
+  const trendCategories: TrendCategory[] = [
+    ...categoryBreakdown
+      .slice(0, TREND_CATEGORY_CAP)
+      .map((c) => ({ name: c.category, color: dbColorByName.get(c.category) ?? '#94a3b8' })),
+    ...(hasOverflowCategories ? [{ name: 'Other', color: '#9ca3af' }] : []),
+  ].sort((a, b) => (a.name === 'Other' ? 1 : b.name === 'Other' ? -1 : a.name.localeCompare(b.name)))
 
   const trendMonthMap = new Map<string, Record<string, number>>()
   for (const key of monthMap.keys()) {
@@ -233,7 +252,9 @@ export default async function DashboardPage({
   }
   for (const r of trendRows) {
     const row = trendMonthMap.get(r.ym)
-    if (row) row[r.category] = (row[r.category] ?? 0) + num(r.total)
+    if (!row) continue
+    const key = topCategoryNames.has(r.category) ? r.category : 'Other'
+    row[key] = (row[key] ?? 0) + num(r.total)
   }
   const categoryTrendData = Array.from(trendMonthMap.entries()).map(([key, row]) => ({
     month: monthLabel(key),
@@ -331,6 +352,9 @@ export default async function DashboardPage({
           currentStartDate={startDate.toISOString().split('T')[0]}
           currentEndDate={endDate.toISOString().split('T')[0]}
           budgetData={budgetData}
+          isFreshDatabase={isFreshDatabase}
+          hasAccounts={allAccounts.length > 0}
+          hasBudgets={budgets.length > 0}
         />
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fromCents, parseCents, toCents, formatCents } from '@/lib/money'
+import { fromCents, parseCents, toCents, formatCents, fmtMoney, fmtMoneyShort } from '@/lib/money'
 
 describe('toCents / fromCents', () => {
   it('round-trips common values', () => {
@@ -52,5 +52,30 @@ describe('formatCents', () => {
     const out = formatCents(123_456, 'USD')
     expect(out).toContain('1,234.56')
     expect(out).toMatch(/\$|USD/)
+  })
+})
+
+describe('fmtMoney', () => {
+  it('formats a plain positive amount with the ISO currency code and thousands separators', () => {
+    expect(fmtMoney(123_456, 'AED')).toBe('AED 1,234.56')
+  })
+  it('adds a real minus sign (not a hyphen) for negative amounts', () => {
+    expect(fmtMoney(-123_456, 'AED')).toBe('−AED 1,234.56')
+  })
+  it('adds a leading + for positive amounts only when showPlus is set', () => {
+    expect(fmtMoney(500, 'AED', { showPlus: true })).toBe('+AED 5.00')
+    expect(fmtMoney(0, 'AED', { showPlus: true })).toBe('AED 0.00')
+  })
+})
+
+describe('fmtMoneyShort', () => {
+  it('renders sub-1000 amounts as whole numbers', () => {
+    expect(fmtMoneyShort(45_000)).toBe('450')
+  })
+  it('renders 1000+ amounts as a "k" suffix', () => {
+    expect(fmtMoneyShort(1_234_500)).toBe('12.3k')
+  })
+  it('keeps the sign on negative short amounts', () => {
+    expect(fmtMoneyShort(-1_500_000)).toBe('−15.0k')
   })
 })

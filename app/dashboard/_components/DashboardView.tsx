@@ -21,8 +21,12 @@ import { BudgetWidget } from './BudgetWidget'
 import { NetWorthWidget } from './NetWorthWidget'
 import type { AccountBalance, CashFlowRow, TopTransaction, TrendCategory, BudgetData } from '../page'
 import { DatePicker } from '@/app/_components/DatePicker'
+import { DateRangePresets } from '@/app/_components/DateRangePresets'
 import { isLiability } from '@/lib/accounts'
-import { fromCents } from '@/lib/money'
+import { fromCents, fmtMoney, fmtMoneyShort } from '@/lib/money'
+import { OnboardingCard } from './OnboardingCard'
+import { EmptyStateCard } from './EmptyStateCard'
+import type { DateRange } from '@/lib/date-presets'
 
 type CategoryBreakdown = { category: string; total: number; count: number }
 type MonthlyData = { month: string; income: number; expenses: number; net: number }
@@ -64,6 +68,9 @@ export function DashboardView({
   currentStartDate,
   currentEndDate,
   budgetData,
+  isFreshDatabase,
+  hasAccounts,
+  hasBudgets,
 }: {
   categoryBreakdown: CategoryBreakdown[]
   monthlyData: MonthlyData[]
@@ -79,6 +86,11 @@ export function DashboardView({
   currentStartDate: string
   currentEndDate: string
   budgetData: BudgetData[]
+  /** True when the whole DB has no transactions yet (regardless of the
+   *  selected range/currency) — drives the first-run onboarding card. */
+  isFreshDatabase: boolean
+  hasAccounts: boolean
+  hasBudgets: boolean
 }) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -114,17 +126,17 @@ export function DashboardView({
   const grid   = isDark ? 'rgba(242,241,237,0.07)' : 'rgba(38,37,30,0.07)'
   const cursor = isDark ? 'rgba(242,241,237,0.06)' : 'rgba(38,37,30,0.04)'
 
-  // All incoming values are integer cents; convert before formatting.
-  const fmt = (cents: number) =>
-    `${currency} ${fromCents(cents).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const fmtShort = (cents: number) => {
-    const v = fromCents(cents)
-    return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v))
-  }
+  // All incoming values are integer cents; route through the shared money
+  // helpers (lib/money.ts) instead of hand-rolled toLocaleString/toFixed calls.
+  const fmt = (cents: number) => fmtMoney(cents, currency)
+  const fmtShort = fmtMoneyShort
 
-  const pushParams = (overrides: Record<string, string>) => {
+  const pushParams = (overrides: Record<string, string | null>) => {
     const p = new URLSearchParams(searchParams?.toString() ?? '')
-    for (const [k, v] of Object.entries(overrides)) p.set(k, v)
+    for (const [k, v] of Object.entries(overrides)) {
+      if (v == null) p.delete(k)
+      else p.set(k, v)
+    }
     router.push(`/dashboard?${p.toString()}`)
   }
 
@@ -133,6 +145,14 @@ export function DashboardView({
   const handleApplyDates = () => {
     if (startDate && endDate) pushParams({ startDate, endDate })
   }
+
+  const handlePreset = (range: DateRange) => {
+    setStartDate(range.startDate ?? '')
+    setEndDate(range.endDate ?? '')
+    pushParams({ startDate: range.startDate, endDate: range.endDate })
+  }
+
+  const hasActivityInRange = summaryStats.txCount > 0
 
   const pillBase: React.CSSProperties = {
     border: '1px solid var(--border-warm)',
@@ -145,6 +165,11 @@ export function DashboardView({
 
   return (
     <div className="space-y-5">
+      {/* ── First-run onboarding ───────────────────────────────────────────── */}
+      {isFreshDatabase && (
+        <OnboardingCard hasAccounts={hasAccounts} hasTransactions={false} hasBudgets={hasBudgets} />
+      )}
+
       {/* ── Filter bar ─────────────────────────────────────────────────────── */}
       <div
         className="p-4 rounded-[8px] flex flex-wrap items-center gap-4"
@@ -177,6 +202,7 @@ export function DashboardView({
             screens instead of forcing itself to the right edge and wrapping
             awkwardly; ml-auto only kicks in once there's room (sm+). */}
         <div className="flex items-center gap-2 flex-wrap sm:ml-auto">
+          <DateRangePresets onSelect={handlePreset} />
           <span className="text-[11px] font-medium uppercase tracking-[0.048px]" style={{ color: 'var(--tx-secondary)' }}>
             Period
           </span>
@@ -323,8 +349,12 @@ export function DashboardView({
           <p className="text-[11px] font-medium uppercase tracking-[0.048px] mb-1" style={{ color: 'var(--tx-secondary)' }}>
             Budgets
           </p>
-          <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>Selected period · spend vs prorated limit</p>
+          <p className="text-xs mb-1" style={{ color: 'var(--tx-faint)' }}>Selected period · spend vs prorated limit</p>
           <BudgetWidget budgetData={budgetData} currency={currency} />
+          <p className="text-[11px] mt-4" style={{ color: 'var(--tx-faint)' }}>
+            Budgets are monthly limits — the amount shown scales with how many months your selected
+            period covers (a 3-month range compares spend against 3× the monthly limit).
+          </p>
         </div>
       )}
 
@@ -355,7 +385,9 @@ export function DashboardView({
           Spending by Category
         </p>
         <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>Selected period · expenses only</p>
-        {categoryBreakdown.length === 0 ? (
+        {!hasActivityInRange ? (
+          <EmptyStateCard />
+        ) : categoryBreakdown.length === 0 ? (
           <p className="text-sm py-8 text-center" style={{ color: 'var(--tx-faint)' }}>No expense data yet.</p>
         ) : (
           <ResponsiveContainer width="100%" height={Math.max(categoryBreakdown.length * 38, 200)}>
@@ -394,6 +426,9 @@ export function DashboardView({
           Monthly Overview
         </p>
         <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>Selected period · income vs. expenses</p>
+        {!hasActivityInRange ? (
+          <EmptyStateCard title="No activity in this period" message="Nothing to chart yet — import a statement to see your income and expenses over time." />
+        ) : (
         <ResponsiveContainer width="100%" height={320}>
           <ComposedChart data={monthlyData} margin={{ top: 8, right: 24, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={grid} />
@@ -417,6 +452,7 @@ export function DashboardView({
             <Line type="monotone" dataKey="net" stroke={SERIES.net} strokeWidth={1.5} dot={false} name="Net" />
           </ComposedChart>
         </ResponsiveContainer>
+        )}
       </div>
 
       {/* ── Category Trends ────────────────────────────────────────────────── */}
@@ -424,8 +460,12 @@ export function DashboardView({
         <p className="text-[11px] font-medium uppercase tracking-[0.048px] mb-1" style={{ color: 'var(--tx-secondary)' }}>
           Category Trends
         </p>
-        <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>Monthly spend per category</p>
-        <CategoryTrendChart data={categoryTrendData} categories={trendCategories} />
+        <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>Monthly spend per category · top 8 + Other</p>
+        {!hasActivityInRange ? (
+          <EmptyStateCard title="No activity in this period" message="No category spend to trend yet — import a statement to get started." />
+        ) : (
+          <CategoryTrendChart data={categoryTrendData} categories={trendCategories} />
+        )}
       </div>
 
       {/* ── Cash Flow Statement ────────────────────────────────────────────── */}

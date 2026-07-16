@@ -43,6 +43,10 @@ export type LedgerQuery = {
   dir: 'asc' | 'desc'
   pendingReimbursements: boolean
   format: 'json' | 'csv'
+  // Inclusive YYYY-MM-DD bounds (Phase U5 ledger date filter). Either/both may
+  // be null — an unset bound leaves that side of the range open.
+  startDate: string | null
+  endDate: string | null
 }
 
 // Currency scope resolves the "which accounts count" question so the stat
@@ -114,7 +118,18 @@ export function parseLedgerQuery(params: URLSearchParams): LedgerQuery {
     dir,
     pendingReimbursements: params.get('pendingReimbursements') === '1',
     format,
+    startDate: parseIsoDateParam(params.get('startDate')),
+    endDate: parseIsoDateParam(params.get('endDate')),
   }
+}
+
+// A malformed ?startDate=/?endDate= would otherwise turn into a broken SQL
+// date-literal comparison — validate the YYYY-MM-DD shape (and that it parses
+// to a real date) up front and drop anything else, same fail-open approach
+// the dashboard's date parsing already uses.
+function parseIsoDateParam(value: string | null): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  return isNaN(new Date(value).getTime()) ? null : value
 }
 
 function normalizeEnum(value: string | null, allowed: string[]): string | null {
@@ -188,6 +203,18 @@ export function buildFilterSql(
       `(${a}."description" LIKE ? ESCAPE '\\' OR ${a}."originalDescription" LIKE ? ESCAPE '\\')`,
     )
     params.push(like, like)
+  }
+  // Inclusive [startDate, endDate] bound (Phase U5 ledger date filter). Dates
+  // are compared in UTC — the same convention transactions are stored and
+  // bucketed in elsewhere in this file (see toDbDate) — so a `2026-07-01`
+  // bound always means "from the start of that UTC calendar day".
+  if (q.startDate) {
+    clauses.push(`${a}."date" >= ?`)
+    params.push(toDbDate(new Date(`${q.startDate}T00:00:00.000Z`)))
+  }
+  if (q.endDate) {
+    clauses.push(`${a}."date" <= ?`)
+    params.push(toDbDate(new Date(`${q.endDate}T23:59:59.999Z`)))
   }
 
   return { clause: clauses.join(' AND '), params }
