@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
-import { Modal, Button } from '@/app/_components/ui'
+import { Modal, Button, useToast } from '@/app/_components/ui'
 
 type ClearScope = {
   transactions: boolean
@@ -34,6 +34,7 @@ const ROWS: { key: keyof ClearScope; label: string; sub: string; danger?: true }
 
 export function DangerZone() {
   const router = useRouter()
+  const toast = useToast()
   const [showModal, setShowModal] = useState(false)
   const [scope, setScope] = useState<ClearScope>(DEFAULT_SCOPE)
   const [confirmText, setConfirmText] = useState('')
@@ -68,14 +69,25 @@ export function DangerZone() {
   const handleClear = async () => {
     if (!canConfirm || clearing) return
     setClearing(true)
-    await fetch('/api/clear-data', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ confirmation: 'DELETE ALL DATA', scope }),
-    })
-    router.refresh()
-    setClearing(false)
-    close()
+    try {
+      const res = await fetch('/api/clear-data', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'DELETE ALL DATA', scope }),
+      })
+      // Previously the modal closed as if the wipe succeeded even on failure.
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.error ?? `Server returned ${res.status}`)
+      }
+      router.refresh()
+      setClearing(false)
+      close()
+      toast.success('Selected data cleared')
+    } catch (e) {
+      setClearing(false)
+      toast.error(`Clear failed: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
   return (

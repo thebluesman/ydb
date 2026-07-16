@@ -4,7 +4,7 @@ import { memo, useCallback, useState, useEffect, useRef } from 'react'
 import { X, ChevronDown, Plus, Check } from 'lucide-react'
 import * as RSelect from '@radix-ui/react-select'
 import { DatePicker } from '@/app/_components/DatePicker'
-import { Select, Button, Modal, Field, Input } from '@/app/_components/ui'
+import { Select, Button, Modal, Field, Input, useToast } from '@/app/_components/ui'
 import { toCents } from '@/lib/money'
 
 export type DraftTransaction = {
@@ -671,6 +671,7 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
   onCommit: () => Promise<void>
   onDiscard: () => void
 }) {
+  const toast = useToast()
   const [committing, setCommitting] = useState(false)
   const [error, setError] = useState('')
   const [duplicateIds, setDuplicateIds] = useState<Set<string>>(new Set())
@@ -717,7 +718,9 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
     })
       .then((r) => r.json())
       .then((data) => setDuplicateIds(new Set(data.duplicateIds ?? [])))
-      .catch(() => { /* silent */ })
+      .catch(() => toast.error('Could not check for duplicate transactions'))
+  // toast is stable (memoised in the provider); intentionally excluded from deps.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drafts.length])
 
   const update = useCallback((id: string, field: keyof DraftTransaction, value: string | number | null) => {
@@ -828,9 +831,13 @@ export function ReviewTable({ drafts, accounts: initialAccounts, categories: ini
       })
       if (!res.ok) throw new Error(await res.text())
       dismissRuleSuggestion(id)
-    } catch { /* silent */ } finally {
+      toast.success('Rule saved')
+    } catch (e) {
+      toast.error(`Could not save rule: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
       setSavingRuleId(null)
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dismissRuleSuggestion])
 
   const openAddCategoryForRow = useCallback((id: string) => setAddCategoryForRow(id), [])

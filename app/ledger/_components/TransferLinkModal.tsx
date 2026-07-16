@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Modal } from '@/app/_components/ui'
+import { Modal, useToast } from '@/app/_components/ui'
 import { fromCents } from '@/lib/money'
 
 type Transaction = {
@@ -34,6 +34,7 @@ export function TransferLinkModal({
 }) {
   const [candidates, setCandidates] = useState<Transaction[]>([])
   const [search, setSearch] = useState('')
+  const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [linking, setLinking] = useState<number | null>(null)
 
@@ -74,7 +75,10 @@ export function TransferLinkModal({
       if (!res.ok) throw new Error(await res.text())
       const updated = await res.json()
       onLink(targetId, updated)
-    } catch { /* silent */ } finally {
+      toast.success('Transfer linked')
+    } catch (e) {
+      toast.error(`Could not link transfer: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
       setLinking(null)
     }
   }

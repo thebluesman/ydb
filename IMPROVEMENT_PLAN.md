@@ -255,6 +255,14 @@ income/expense) — they are documented in comments there and mirrored in the ch
   time judged against the 0.5 baseline (working guardrail: ~150 ms with the 50k-row seed — same
   caveat as Phase 1: the structural requirement is "no full-table reads", not the exact number).
 
+> **M3 status:** done. `app/dashboard/page.tsx` now loads via grouped raw SQL in
+> `lib/transactions-query.ts` (a fresh copy of this file, since M2b's own copy hasn't merged to
+> `main` yet as of this branch — reconcile the two when M2b lands). `tests/dashboard.oracle.test.ts`
+> ports the old in-memory algorithm as the oracle, covering splits, linked reimbursements,
+> transfers, and multi-currency, and passes before the JS aggregation was deleted. Totals were
+> spot-checked against the existing dev DB before/after; no seed data was available this session,
+> so the 50k-row/150ms guardrail is unbenchmarked (same caveat as Phase 1 — track under Phase 8).
+
 ### Phase 3 — API hygiene
 
 **3.1 Chat session refetch storm.** In `app/chat/page.tsx`, `handleMessagesChange` refetches
@@ -292,6 +300,15 @@ for both prompts, and cap each message's length.
 (`request.signal`), and set `options: { temperature: 0 }` for the SQL-generation call. Add a tiny
 `GET /api/ollama/health` that pings `${OLLAMA_URL}/api/tags` — the UI phases can use it for a clear
 "Ollama is not running" state instead of failing mid-flow.
+
+> **M3 status:** done — 3.1 (`onResponseComplete` fires once post-stream in `ChatPane`), 3.2
+> (`?withCounts=1` split, SQL counts for non-regex match types in `lib/vendor-rule-match.ts`,
+> lazy client fetch in `VendorRuleManager`, category-color migration moved into
+> `instrumentation.ts`), 3.3 (`check-duplicates` batched into one date/account-scoped query, cap
+> raised with a `checked/skipped` field), 3.4 (`executeReadonlyQuery` now iterates and truncates
+> at 500 rows with a `truncated` flag, covered in `tests/sqlGuard.test.ts`), 3.5 (chat history
+> capped to the last 8 messages), 3.6 (timeouts, abort forwarding, `temperature: 0` for SQL gen,
+> `GET /api/ollama/health`).
 
 ### Phase 4 — Client rendering cleanups
 
@@ -617,6 +634,16 @@ Target: fully usable on a ~390px phone; comfortable on tablet.
   failed" + collapsible technical detail instead of a raw SQLite error as the message body).
 - Verify: `grep -rn "alert(\|confirm(" app` returns nothing; killing Ollama mid-chat and failing a
   save both produce visible, non-blocking feedback.
+
+> **M3 status:** done. `Toast.tsx` + `useToast()` (`app/_components/ui`), mounted once in
+> `layout.tsx`; every `alert()`/silent `catch` across ledger, settings, upload, and chat now routes
+> through it (`grep -rn "alert(\|confirm(" app` is empty). `DangerZone.handleClear` checks
+> `res.ok`. `loading.tsx` skeletons added for dashboard/ledger/settings/upload/guide
+> (`Skeleton.tsx` primitive). Upload flow shows an editable "Detected: X ▾" format chip before
+> parsing, whose "done" screen links to `/ledger?status=review`. Chat has a stop-generation button
+> wired to the existing `AbortController` and a copy button on assistant messages. **Deferred**:
+> the ledger delete 5-second Undo toast is explicitly a Phase 4 item per this plan, not
+> implemented here.
 
 ### Phase U5 — Information architecture & screen-level UX
 

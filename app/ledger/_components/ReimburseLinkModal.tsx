@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Modal } from '@/app/_components/ui'
+import { Modal, useToast } from '@/app/_components/ui'
 import { fromCents } from '@/lib/money'
 
 type TxSummary = {
@@ -33,6 +33,7 @@ export function ReimburseLinkModal({
 }) {
   const [candidates, setCandidates] = useState<TxSummary[]>([])
   const [search, setSearch] = useState('')
+  const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [linking, setLinking] = useState<number | null>(null)
 
@@ -71,7 +72,10 @@ export function ReimburseLinkModal({
       if (!res.ok) throw new Error(await res.text())
       const updated = await res.json()
       onLink(settlementId, updated)
-    } catch { /* silent */ } finally {
+      toast.success('Reimbursement linked')
+    } catch (e) {
+      toast.error(`Could not link reimbursement: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
       setLinking(null)
     }
   }

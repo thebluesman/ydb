@@ -5,13 +5,22 @@ import { CheckCircle } from 'lucide-react'
 import { ThinkingLoader } from '@/app/_components/ThinkingLoader'
 import { FileDropzone } from './FileDropzone'
 import { ReviewTable, type DraftTransaction } from './ReviewTable'
+import { Select, Button } from '@/app/_components/ui'
 import { detectFormat, normalizeTransactions, type StatementFormat } from '@/lib/statementFormats'
 import { findMatchingRule } from '@/lib/vendor-rule-match'
 import { toCents } from '@/lib/money'
 
 type Account = { id: number; name: string; currency: string; accountType: string }
 type Category = { id: number; name: string; color: string }
-type Phase = 'idle' | 'ocr' | 'parsing' | 'review' | 'done'
+type Phase = 'idle' | 'ocr' | 'confirm-format' | 'parsing' | 'review' | 'done'
+type FormatType = StatementFormat['type']
+
+const FORMAT_OPTIONS: { value: FormatType; label: string; hint: string }[] = [
+  { value: 'credit-card',  label: 'Credit card statement', hint: 'Single amount column; plain numbers are expenses, CR = payments' },
+  { value: 'bank-account', label: 'Bank account statement', hint: 'Separate debit and credit columns' },
+  { value: 'unknown',      label: 'Auto / other',            hint: 'Infer sign from the amount value' },
+]
+const formatLabel = (t: FormatType) => FORMAT_OPTIONS.find((o) => o.value === t)?.label ?? 'Auto / other'
 
 const cardStyle: React.CSSProperties = {
   backgroundColor: 'var(--bg-card)',
@@ -32,11 +41,18 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
   const [passwordPhase, setPasswordPhase] = useState<'none' | 'needed' | 'wrong'>('none')
   const abortRef = React.useRef<AbortController | null>(null)
   const [parseLog, setParseLog] = useState<string>('')
+  // OCR text is captured once, then parsing waits on the format-confirmation
+  // step so a mis-detected credit-card/bank-account format (which flips amount
+  // signs) can be corrected before it reaches the model.
+  const ocrTextRef = React.useRef<string>('')
+  const [detectedFormat, setDetectedFormat] = useState<FormatType>('unknown')
+  const [chosenFormat, setChosenFormat] = useState<FormatType>('unknown')
 
   const reset = () => {
     setPhase('idle'); setFile(null); setOcrProgress(0)
     setOcrPage({ current: 0, total: 0 }); setDrafts([]); setError('')
     setPdfPassword(''); setPasswordPhase('none')
+    ocrTextRef.current = ''
   }
 
   const handleProcess = async () => {
@@ -150,8 +166,21 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
       setError('No text could be extracted. Try a clearer image.'); setPhase('idle'); return
     }
 
-    const fmt: StatementFormat = detectFormat(ocrText)
+    // Detect the format, then pause so the user can confirm/override it before
+    // parsing (mis-detection silently flips amount signs).
+    const detected = detectFormat(ocrText).type
+    ocrTextRef.current = ocrText
+    setDetectedFormat(detected)
+    setChosenFormat(detected)
     setPasswordPhase('none')
+    setPhase('confirm-format')
+  }
+
+  const runParse = async () => {
+    const ocrText = ocrTextRef.current
+    if (!ocrText.trim()) { setPhase('idle'); return }
+    const fmt: StatementFormat = { type: chosenFormat } as StatementFormat
+    setError('')
     setPhase('parsing')
     setParseLog('Starting…')
     let accumulated = ''
@@ -321,11 +350,18 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
           {committedCount} transaction{committedCount !== 1 ? 's' : ''} saved
         </h2>
         <p className="text-sm" style={{ color: 'var(--tx-secondary)' }}>They are now in your ledger.</p>
-        <button onClick={reset}
-          className="btn px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 hover:text-error"
-          style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
-          Upload another
-        </button>
+        <div className="flex items-center justify-center gap-3">
+          <button onClick={reset}
+            className="btn px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150 hover:text-error"
+            style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
+            Upload another
+          </button>
+          <a href="/ledger?status=review"
+            className="btn px-[14px] py-[10px] rounded-[8px] text-sm font-semibold transition-colors duration-150"
+            style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}>
+            Review them in the ledger →
+          </a>
+        </div>
       </div>
     )
   }
@@ -406,6 +442,39 @@ export function UploadFlow({ accounts, categories }: { accounts: Account[]; cate
             {parseLog && (
               <p className="text-xs font-mono" style={{ color: 'var(--tx-tertiary)' }}>{parseLog}</p>
             )}
+          </div>
+        )}
+
+        {phase === 'confirm-format' && (
+          <div className="space-y-3 pt-1">
+            <div className="flex flex-wrap items-center gap-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
+              <span>Detected format:</span>
+              <div style={{ minWidth: 230 }}>
+                <Select
+                  value={chosenFormat}
+                  onValueChange={(v) => setChosenFormat(v as FormatType)}
+                  ariaLabel="Statement format"
+                  size="sm"
+                  options={FORMAT_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                />
+              </div>
+              {chosenFormat !== detectedFormat && (
+                <span className="text-xs" style={{ color: 'var(--tx-tertiary)' }}>
+                  (overriding “{formatLabel(detectedFormat)}”)
+                </span>
+              )}
+            </div>
+            <p className="text-xs" style={{ color: 'var(--tx-tertiary)' }}>
+              {FORMAT_OPTIONS.find((o) => o.value === chosenFormat)?.hint}
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <Button variant="primary" size="md" onClick={runParse}>
+                Parse transactions
+              </Button>
+              <Button variant="ghost" size="sm" onClick={reset}>
+                Cancel
+              </Button>
+            </div>
           </div>
         )}
 

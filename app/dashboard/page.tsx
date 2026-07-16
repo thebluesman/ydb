@@ -1,6 +1,20 @@
 import { prisma } from '@/lib/prisma'
 import { DashboardView } from './_components/DashboardView'
 import { computeBalance, isAsset } from '@/lib/accounts'
+import {
+  toDbDate,
+  monthlySql,
+  categorySql,
+  categoryTrendSql,
+  preRangeAssetSumSql,
+  type MonthlyRow,
+  type CategoryRow,
+  type TrendRow,
+} from '@/lib/transactions-query'
+
+// Raw SQLite integer aggregates can come back as bigint via the driver; coerce
+// to number (cents stay well within 2^53 for any realistic single-user DB).
+const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number) ?? 0)
 
 export const metadata = { title: 'Dashboard — ydb' }
 
@@ -69,75 +83,63 @@ export default async function DashboardPage({
   const accountIds = accountsForCurrency.map((a) => a.id)
 
   // ── Resolve date range ─────────────────────────────────────────────────────
-  const endDate = params.endDate ? new Date(params.endDate) : now
-  const startDate = params.startDate
-    ? new Date(params.startDate)
-    : new Date(now.getFullYear(), now.getMonth() - 11, 1)
+  const defaultStartDate = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+  const parsedEndDate = params.endDate ? new Date(params.endDate) : now
+  const parsedStartDate = params.startDate ? new Date(params.startDate) : defaultStartDate
+  // A malformed ?startDate=/?endDate= produces an Invalid Date; toDbDate()'s
+  // toISOString() throws RangeError on those, so fall back to the defaults
+  // instead of 500ing the page.
+  const endDate = isNaN(parsedEndDate.getTime()) ? now : parsedEndDate
+  const startDate = isNaN(parsedStartDate.getTime()) ? defaultStartDate : parsedStartDate
 
   // Always clamp endDate to end-of-day so the inclusive upper bound covers
   // every transaction on the chosen end date (picker gives start-of-day).
   endDate.setHours(23, 59, 59, 999)
 
-  // ── Fetch transactions ─────────────────────────────────────────────────────
-  const txs = await prisma.transaction.findMany({
-    where: {
-      accountId: { in: accountIds },
-      status: { in: ['committed', 'reconciled'] },
-    },
-    orderBy: { date: 'asc' },
-    include: { account: { select: { name: true } } },
-  })
+  // ── Aggregate in SQL ───────────────────────────────────────────────────────
+  // The split-parent / matched-reimbursement / transfer exclusion rules that
+  // used to run as ~6 full in-memory passes over every committed transaction
+  // now run as grouped SQLite queries. The exclusion predicate lives once in
+  // lib/transactions-query.ts (inclusionSql) so this screen and the ledger
+  // stat cards can't drift; tests/dashboard.oracle.test.ts asserts the SQL is
+  // equivalent to the previous JS aggregation on a splits/reimbursements/
+  // transfers/multi-currency fixture.
+  const startIso = toDbDate(startDate)
+  const endIso = toDbDate(endDate)
 
-  // Rows to hide from aggregations:
-  //   - a split parent is a placeholder summary of its legs — if legs exist,
-  //     count the legs (their categories are more granular) and drop the parent.
-  //   - both sides of a linked reimbursement pair net to zero; leaving either
-  //     in inflates income and expenses equally. reimbursementTxId marks the
-  //     expense side; the settlement side appears as the target id.
-  const splitParentIds = new Set<number>()
-  const settlementIds = new Set<number>()
-  const reimbursedExpenseIds = new Set<number>()
-  for (const t of txs) {
-    if (t.parentTransactionId !== null) splitParentIds.add(t.parentTransactionId)
-    if (t.reimbursementTxId !== null) {
-      reimbursedExpenseIds.add(t.id)
-      settlementIds.add(t.reimbursementTxId)
-    }
-  }
-  const hiddenTxIds = new Set<number>([...splitParentIds, ...settlementIds, ...reimbursedExpenseIds])
-  const includeInTotals = (t: { id: number }) => !hiddenTxIds.has(t.id)
+  const [monthlyRows, categoryRows, trendRows] = accountIds.length === 0
+    ? [[], [], []] as [MonthlyRow[], CategoryRow[], TrendRow[]]
+    : await Promise.all([
+        prisma.$queryRawUnsafe<MonthlyRow[]>(monthlySql(accountIds, startIso, endIso)),
+        prisma.$queryRawUnsafe<CategoryRow[]>(categorySql(accountIds, startIso, endIso)),
+        prisma.$queryRawUnsafe<TrendRow[]>(categoryTrendSql(accountIds, startIso, endIso)),
+      ])
 
-  // ── Category breakdown (expenses only, in date range, exclude Transfer) ────
-  const catMap = new Map<string, { total: number; count: number }>()
-  for (const t of txs) {
-    const d = new Date(t.date)
-    if (d < startDate || d > endDate) continue
-    if (t.transactionType !== 'debit') continue
-    if (!includeInTotals(t)) continue
-    const cur = catMap.get(t.category) ?? { total: 0, count: 0 }
-    catMap.set(t.category, { total: cur.total + Math.abs(t.amount), count: cur.count + 1 })
-  }
-  const categoryBreakdown = Array.from(catMap.entries())
-    .map(([category, { total, count }]) => ({ category, total, count }))
-    .sort((a, b) => b.total - a.total)
+  // ── Category breakdown (expenses only, in date range) ──────────────────────
+  // SQL already orders by total DESC. rangeCatMap (used by budgets below) is
+  // the same debit-in-range spend keyed by category.
+  const categoryBreakdown = categoryRows.map((r) => ({
+    category: r.category,
+    total: num(r.total),
+    count: num(r.cnt),
+  }))
+  const rangeCatMap = new Map(categoryBreakdown.map((c) => [c.category, c.total]))
 
   // ── Monthly data (in date range, exclude Transfer) ─────────────────────────
+  // Seed every month in [start, end] so empty months render as zeroes, then
+  // fill from the grouped SQL result.
   const monthMap = new Map<string, { income: number; expenses: number }>()
   const cur = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
   while (cur <= endDate) {
     monthMap.set(monthKey(cur), { income: 0, expenses: 0 })
     cur.setMonth(cur.getMonth() + 1)
   }
-  for (const t of txs) {
-    const d = new Date(t.date)
-    if (d < startDate || d > endDate) continue
-    if (t.transactionType === 'transfer') continue
-    if (!includeInTotals(t)) continue
-    const key = monthKey(d)
-    const m = monthMap.get(key)
-    if (!m) continue
-    if (t.transactionType === 'credit') m.income += Math.abs(t.amount)
-    else if (t.transactionType === 'debit') m.expenses += Math.abs(t.amount)
+  let totalIncome = 0, totalExpenses = 0, txCount = 0
+  for (const r of monthlyRows) {
+    const income = num(r.income), expenses = num(r.expenses), cnt = num(r.cnt)
+    totalIncome += income; totalExpenses += expenses; txCount += cnt
+    const m = monthMap.get(r.ym)
+    if (m) { m.income += income; m.expenses += expenses }
   }
   const monthlyData = Array.from(monthMap.entries()).map(([key, { income, expenses }]) => ({
     month: monthLabel(key),
@@ -147,20 +149,8 @@ export default async function DashboardPage({
   }))
 
   // ── Summary stats (in date range, exclude Transfer) ─────────────────────────
-  // Classify by transactionType (user's declared intent) rather than amount
-  // sign so Dashboard totals match Ledger totals on the same filter. Skip
-  // split parents (legs carry the real categories) and matched reimbursement
-  // pairs (they net to zero and otherwise inflate both sides).
-  let totalIncome = 0, totalExpenses = 0, txCount = 0
-  for (const t of txs) {
-    const d = new Date(t.date)
-    if (d < startDate || d > endDate) continue
-    if (t.transactionType === 'transfer') continue
-    if (!includeInTotals(t)) continue
-    txCount++
-    if (t.transactionType === 'credit') totalIncome += Math.abs(t.amount)
-    else if (t.transactionType === 'debit') totalExpenses += Math.abs(t.amount)
-  }
+  // Derived from the monthly aggregate (income/expenses classified by
+  // transactionType so Dashboard totals match the Ledger on the same filter).
   const summaryStats = { totalIncome, totalExpenses, net: totalIncome - totalExpenses, txCount }
 
   // ── Account balances ────────────────────────────────────────────────────────
@@ -201,29 +191,13 @@ export default async function DashboardPage({
   const assetAccountIds = assetAccounts.map((a) => a.id)
   let preRangeAssetSum = 0
   if (assetAccountIds.length > 0) {
-    const preRangeRows = await prisma.transaction.findMany({
-      where: {
-        accountId: { in: assetAccountIds },
-        status: { in: ['committed', 'reconciled'] },
-        date: { lt: startDate },
-      },
-      select: { id: true, amount: true, parentTransactionId: true, reimbursementTxId: true },
-    })
-    const preSplitParents = new Set<number>()
-    const preSettlements = new Set<number>()
-    const preReimbExpenses = new Set<number>()
-    for (const t of preRangeRows) {
-      if (t.parentTransactionId !== null) preSplitParents.add(t.parentTransactionId)
-      if (t.reimbursementTxId !== null) {
-        preReimbExpenses.add(t.id)
-        preSettlements.add(t.reimbursementTxId)
-      }
-    }
-    const preHidden = new Set<number>([...preSplitParents, ...preSettlements, ...preReimbExpenses])
-    for (const t of preRangeRows) {
-      if (preHidden.has(t.id)) continue
-      preRangeAssetSum += t.amount
-    }
+    // Single grouped SUM with the same hidden-rows exclusion as the main
+    // window (scoped to date < startDate). Includes transfers — the seed is a
+    // raw signed balance, not an income/expense figure.
+    const [preRow] = await prisma.$queryRawUnsafe<{ s: number | bigint }[]>(
+      preRangeAssetSumSql(assetAccountIds, startIso),
+    )
+    preRangeAssetSum = num(preRow?.s)
   }
   const cashFlowData: CashFlowRow[] = []
   {
@@ -243,22 +217,13 @@ export default async function DashboardPage({
   }
 
   // ── Category trend data ─────────────────────────────────────────────────────
+  // Trend categories are the debit-in-range categories (identical set to the
+  // category breakdown); colours come from the Category table.
   const dbCategories = await prisma.category.findMany({ orderBy: { name: 'asc' } })
-  const trendCategories: TrendCategory[] = []
-  const trendCatSet = new Set<string>()
-
-  for (const t of txs) {
-    const d = new Date(t.date)
-    if (d < startDate || d > endDate) continue
-    if (t.transactionType !== 'debit') continue
-    if (!includeInTotals(t)) continue
-    if (!trendCatSet.has(t.category)) {
-      trendCatSet.add(t.category)
-      const dbCat = dbCategories.find((c) => c.name === t.category)
-      trendCategories.push({ name: t.category, color: dbCat?.color ?? '#94a3b8' })
-    }
-  }
-  trendCategories.sort((a, b) => a.name.localeCompare(b.name))
+  const dbColorByName = new Map(dbCategories.map((c) => [c.name, c.color]))
+  const trendCategories: TrendCategory[] = categoryBreakdown
+    .map((c) => ({ name: c.category, color: dbColorByName.get(c.category) ?? '#94a3b8' }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   const trendMonthMap = new Map<string, Record<string, number>>()
   for (const key of monthMap.keys()) {
@@ -266,14 +231,9 @@ export default async function DashboardPage({
     for (const cat of trendCategories) row[cat.name] = 0
     trendMonthMap.set(key, row)
   }
-  for (const t of txs) {
-    const d = new Date(t.date)
-    if (d < startDate || d > endDate) continue
-    if (t.transactionType !== 'debit') continue
-    if (!includeInTotals(t)) continue
-    const key = monthKey(d)
-    const row = trendMonthMap.get(key)
-    if (row) row[t.category] = (row[t.category] ?? 0) + Math.abs(t.amount)
+  for (const r of trendRows) {
+    const row = trendMonthMap.get(r.ym)
+    if (row) row[r.category] = (row[r.category] ?? 0) + num(r.total)
   }
   const categoryTrendData = Array.from(trendMonthMap.entries()).map(([key, row]) => ({
     month: monthLabel(key),
@@ -281,18 +241,10 @@ export default async function DashboardPage({
   }))
 
   // ── Budget data (follows the dashboard date range) ───────────
-  // Actuals = category spend in the selected window. Budget scales by the
-  // number of months covered so a 3-month window compares against 3× the
-  // monthly limit, keeping the bar meaningful regardless of range.
+  // Actuals = category spend in the selected window (rangeCatMap, computed with
+  // the category breakdown above). Budget scales by the number of months
+  // covered so a 3-month window compares against 3× the monthly limit.
   const monthsInRange = Math.max(1, monthMap.size)
-  const rangeCatMap = new Map<string, number>()
-  for (const t of txs) {
-    const d = new Date(t.date)
-    if (d < startDate || d > endDate) continue
-    if (t.transactionType !== 'debit') continue
-    if (!includeInTotals(t)) continue
-    rangeCatMap.set(t.category, (rangeCatMap.get(t.category) ?? 0) + Math.abs(t.amount))
-  }
   const budgetData: BudgetData[] = budgets.map((b) => ({
     category: b.category,
     budget: b.monthlyLimit * monthsInRange,
@@ -301,9 +253,15 @@ export default async function DashboardPage({
 
   // ── Top 10 transactions ──────────────────────────────────────────────────────
   // Exclude transfers (movement between your own accounts isn't "spend" or
-  // "income") and split parents (their legs carry the real breakdown).
-  // Reimbursement-linked rows are excluded client-side since the inverse 1:1
-  // relation can't be filtered cleanly in a Prisma where clause.
+  // "income") and split parents (their legs carry the real breakdown), plus
+  // both sides of a matched reimbursement pair: the expense side carries
+  // reimbursementTxId (non-null); the settlement side is pointed at by the
+  // inverse `reimbursedExpense` relation. Filtering both in the query removes
+  // the previous full-set client-side hidden-id pass.
+  const reimbursementFree = {
+    reimbursementTxId: null,
+    reimbursedExpense: { is: null },
+  } as const
   const [topPositive, topNegative] = await Promise.all([
     prisma.transaction.findMany({
       where: {
@@ -313,6 +271,7 @@ export default async function DashboardPage({
         parentTransactionId: null,
         amount: { gt: 0 },
         date: { gte: startDate, lte: endDate },
+        ...reimbursementFree,
       },
       orderBy: { amount: 'desc' },
       take: 20,
@@ -326,6 +285,7 @@ export default async function DashboardPage({
         parentTransactionId: null,
         amount: { lt: 0 },
         date: { gte: startDate, lte: endDate },
+        ...reimbursementFree,
       },
       orderBy: { amount: 'asc' },
       take: 20,
@@ -334,7 +294,6 @@ export default async function DashboardPage({
   ])
 
   const topTransactions: TopTransaction[] = [...topPositive, ...topNegative]
-    .filter((t) => !hiddenTxIds.has(t.id))
     .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
     .slice(0, 10)
     .map((t) => ({

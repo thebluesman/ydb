@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import * as Select from '@radix-ui/react-select'
 import { AlertCircle, ChevronDown, ChevronRight, X, FlaskConical } from 'lucide-react'
 import { pillTextColor } from '@/lib/category-colors'
 import { fromCents, toCents } from '@/lib/money'
+import { useToast } from '@/app/_components/ui'
 
 type VendorRule = {
   id: number
@@ -106,6 +107,7 @@ export function VendorRuleManager({
   categories: Category[]
   currency: string
 }) {
+  const toast = useToast()
   const [list, setList] = useState<VendorRule[]>(rules)
 
   // Add form
@@ -133,6 +135,22 @@ export function VendorRuleManager({
 
   // Collapsed vendor groups
   const [collapsed, setCollapsed]         = useState<Set<string>>(new Set())
+
+  // Match counts are fetched lazily after mount so /settings renders instantly
+  // instead of blocking its SSR on running every rule against 5,000 rows. The
+  // counts endpoint computes them in SQL (JS only for regex rules).
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/vendor-rules?withCounts=1')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((withCounts: VendorRule[]) => {
+        if (cancelled) return
+        const byId = new Map(withCounts.map((r) => [r.id, r.matchCount]))
+        setList((prev) => prev.map((r) => ({ ...r, matchCount: byId.get(r.id) ?? r.matchCount })))
+      })
+      .catch(() => { /* counts are non-critical */ })
+    return () => { cancelled = true }
+  }, [])
 
   const allCategories = [...new Set([...categories.map((c) => c.name), 'Income', 'Other'])]
 
@@ -261,12 +279,14 @@ export function VendorRuleManager({
 
   const handleDelete = async (id: number) => {
     try {
-      await fetch(`/api/vendor-rules?id=${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/vendor-rules?id=${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
       setList((prev) => prev.filter((r) => r.id !== id))
       if (editingRuleId === id) setEditingRuleId(null)
       if (testingRuleId === id) setTestingRuleId(null)
-    } catch {
-      setAddError('Failed to delete')
+      toast.success('Rule deleted')
+    } catch (e) {
+      toast.error(`Failed to delete rule: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -279,9 +299,13 @@ export function VendorRuleManager({
     setTestLoading(true)
     try {
       const res = await fetch(`/api/vendor-rules/test?id=${rule.id}`)
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
       const data = await res.json()
       setTestResults(data)
-    } catch { /* silent */ } finally {
+    } catch (e) {
+      toast.error(`Could not test rule: ${e instanceof Error ? e.message : String(e)}`)
+      setTestingRuleId(null)
+    } finally {
       setTestLoading(false)
     }
   }

@@ -309,3 +309,152 @@ export function toNumber(value: unknown): number {
   if (typeof value === 'string') return Number(value)
   return 0
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared transaction-aggregation SQL (Dashboard — Phase 2).
+//
+// This module is the single source of truth for the "hidden rows" exclusion
+// rules that both the Dashboard (app/dashboard/page.tsx) and the ledger stat
+// cards depend on. Historically each screen re-implemented the rules in an
+// in-memory JS pass over every committed transaction; that both scaled badly
+// and let the two screens silently drift. The rules are:
+//
+//   1. A split parent is a placeholder that summarises its legs. When legs
+//      exist, the legs carry the real (granular) categories, so the PARENT is
+//      hidden and the legs are counted.
+//   2. Both sides of a matched reimbursement pair net to zero. The expense side
+//      carries `reimbursementTxId` (the settlement row's id); the settlement
+//      side is the row that id points at. Leaving either in inflates income and
+//      expenses equally, so BOTH are hidden.
+//   3. Transfers are movements between the user's own accounts and are excluded
+//      from income/expense figures (handled by the callers' WHERE clauses, not
+//      here — the inclusion predicate below is type-agnostic so it can also be
+//      used for the raw-balance pre-range seed which DOES include transfers).
+//
+// The predicate is emitted as a fully-inlined SQL string (no bound params) so
+// the *exact same* SQL text runs under Prisma `$queryRawUnsafe` in the app and
+// under a plain better-sqlite3 connection in tests/dashboard.oracle.test.ts.
+// Only non-user-controlled values are ever inlined: account ids (integers from
+// the DB) and ISO date literals we format ourselves — never free-form strings.
+//
+// Month bucketing uses strftime(..., 'localtime') deliberately: the DB stores
+// dates as UTC ISO strings (e.g. 2024-03-15T00:00:00.000+00:00) but the
+// previous JS aggregation bucketed months with Date.getMonth() in the server's
+// LOCAL timezone. 'localtime' reproduces that exactly (verified against a
+// non-UTC TZ), so a home server keeps identical month boundaries after the
+// rewrite.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const COMMITTED_STATUSES = "('committed','reconciled')"
+
+/** Format a Date as the exact UTC ISO string SQLite stores, so lexicographic
+ *  string comparison against stored `date` values is order-preserving. */
+export function toDbDate(d: Date): string {
+  // Prisma's SQLite adapter stores "…+00:00", not "…Z"; matching that suffix
+  // keeps `date < 'literal'` comparisons exact at instant boundaries.
+  return d.toISOString().replace('Z', '+00:00')
+}
+
+function assertIntIds(ids: number[]): void {
+  for (const id of ids) {
+    if (!Number.isInteger(id)) throw new Error(`account id must be an integer, got ${id}`)
+  }
+}
+
+/** The base row filter shared by the outer query and the EXISTS subqueries.
+ *  `alias.accountId IN (…) AND alias.status IN (…) [AND alias.date < '…']`.
+ *  An empty id list yields a predicate that matches no rows. */
+function scopeSql(alias: string, accountIds: number[], dateLtIso?: string): string {
+  assertIntIds(accountIds)
+  const idList = accountIds.length > 0 ? accountIds.join(',') : '-1'
+  let s = `${alias}.accountId IN (${idList}) AND ${alias}.status IN ${COMMITTED_STATUSES}`
+  if (dateLtIso) s += ` AND ${alias}.date < '${dateLtIso}'`
+  return s
+}
+
+/**
+ * SQL predicate that is TRUE for rows to KEEP (i.e. not hidden). Excludes split
+ * parents that have legs and both sides of matched reimbursement pairs. The
+ * EXISTS subqueries are scoped to the same base filter as the outer query so
+ * the result matches the old JS `hiddenTxIds` set exactly.
+ *
+ * @param mainAlias alias of the outer row (e.g. "main")
+ * @param accountIds accounts in scope
+ * @param dateLtIso  optional `date < ISO` upper bound applied to the scope
+ */
+export function inclusionSql(mainAlias: string, accountIds: number[], dateLtIso?: string): string {
+  const child = scopeSql('c', accountIds, dateLtIso)
+  const reimb = scopeSql('r', accountIds, dateLtIso)
+  return (
+    `${mainAlias}.reimbursementTxId IS NULL` +
+    ` AND NOT EXISTS (SELECT 1 FROM "Transaction" c WHERE c.parentTransactionId = ${mainAlias}.id AND ${child})` +
+    ` AND NOT EXISTS (SELECT 1 FROM "Transaction" r WHERE r.reimbursementTxId = ${mainAlias}.id AND ${reimb})`
+  )
+}
+
+// ── Aggregation query builders ───────────────────────────────────────────────
+// Each returns a fully-formed SQL string. `accountIds` are inlined integers;
+// date bounds are inlined ISO literals via toDbDate. Results are grouped/summed
+// entirely in SQLite so no full-table read reaches the application.
+
+export type MonthlyRow = { ym: string; income: number; expenses: number; cnt: number }
+export type CategoryRow = { category: string; total: number; cnt: number }
+export type TrendRow = { ym: string; category: string; total: number }
+
+/** Monthly income/expense sums + non-transfer row count, within [start,end]. */
+export function monthlySql(accountIds: number[], startIso: string, endIso: string): string {
+  const scope = scopeSql('main', accountIds)
+  const incl = inclusionSql('main', accountIds)
+  return (
+    `SELECT strftime('%Y-%m', date, 'localtime') AS ym,` +
+    ` SUM(CASE WHEN transactionType = 'credit' THEN ABS(amount) ELSE 0 END) AS income,` +
+    ` SUM(CASE WHEN transactionType = 'debit'  THEN ABS(amount) ELSE 0 END) AS expenses,` +
+    ` COUNT(*) AS cnt` +
+    ` FROM "Transaction" main` +
+    ` WHERE ${scope} AND main.transactionType != 'transfer'` +
+    ` AND main.date >= '${startIso}' AND main.date <= '${endIso}'` +
+    ` AND ${incl}` +
+    ` GROUP BY ym`
+  )
+}
+
+/** Debit (expense) totals + counts per category, within [start,end]. */
+export function categorySql(accountIds: number[], startIso: string, endIso: string): string {
+  const scope = scopeSql('main', accountIds)
+  const incl = inclusionSql('main', accountIds)
+  return (
+    `SELECT category, SUM(ABS(amount)) AS total, COUNT(*) AS cnt` +
+    ` FROM "Transaction" main` +
+    ` WHERE ${scope} AND main.transactionType = 'debit'` +
+    ` AND main.date >= '${startIso}' AND main.date <= '${endIso}'` +
+    ` AND ${incl}` +
+    ` GROUP BY category ORDER BY total DESC`
+  )
+}
+
+/** Debit totals per (month, category) for the stacked trend chart. */
+export function categoryTrendSql(accountIds: number[], startIso: string, endIso: string): string {
+  const scope = scopeSql('main', accountIds)
+  const incl = inclusionSql('main', accountIds)
+  return (
+    `SELECT strftime('%Y-%m', date, 'localtime') AS ym, category, SUM(ABS(amount)) AS total` +
+    ` FROM "Transaction" main` +
+    ` WHERE ${scope} AND main.transactionType = 'debit'` +
+    ` AND main.date >= '${startIso}' AND main.date <= '${endIso}'` +
+    ` AND ${incl}` +
+    ` GROUP BY ym, category`
+  )
+}
+
+/** Raw (signed) balance of asset accounts strictly before `startIso`, used to
+ *  seed the cash-flow opening row. Includes all types (transfers too); only the
+ *  hidden-rows exclusion applies. */
+export function preRangeAssetSumSql(assetAccountIds: number[], startIso: string): string {
+  const scope = scopeSql('main', assetAccountIds, startIso)
+  const incl = inclusionSql('main', assetAccountIds, startIso)
+  return (
+    `SELECT COALESCE(SUM(amount), 0) AS s` +
+    ` FROM "Transaction" main` +
+    ` WHERE ${scope} AND ${incl}`
+  )
+}

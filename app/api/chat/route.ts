@@ -47,6 +47,26 @@ type HistoryMessage = { role: 'user' | 'assistant'; text: string }
 // noisy output).
 const NARRATION_ROW_CAP = 20
 
+// Keep the model prompt bounded: only the last few turns of context, and cap
+// each message so a pasted wall of text can't blow out num_ctx.
+const HISTORY_MESSAGE_CAP = 8
+const HISTORY_CHAR_CAP = 2000
+
+// Ollama can hang indefinitely on a stuck model; bound every call and forward
+// the client's abort so navigating away cancels generation server-side too.
+const OLLAMA_TIMEOUT_MS = 120_000
+function ollamaSignal(clientSignal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(OLLAMA_TIMEOUT_MS)
+  return clientSignal ? AbortSignal.any([clientSignal, timeout]) : timeout
+}
+
+function trimHistory(history: unknown): HistoryMessage[] {
+  if (!Array.isArray(history)) return []
+  return (history as HistoryMessage[])
+    .slice(-HISTORY_MESSAGE_CAP)
+    .map((m) => ({ role: m.role, text: String(m.text ?? '').slice(0, HISTORY_CHAR_CAP) }))
+}
+
 export async function POST(request: Request) {
   const { question, history } = await request.json()
 
@@ -63,14 +83,17 @@ export async function POST(request: Request) {
   const ollamaUrl = process.env.OLLAMA_URL ?? 'http://localhost:11434'
   const chatModel = process.env.CHAT_MODEL ?? 'qwen2.5:32b'
 
+  const trimmedHistory = trimHistory(history)
+
   // Build SQL prompt with prior conversation context so follow-up references resolve correctly
-  const sqlPrompt = Array.isArray(history) && history.length > 0
-    ? (history as HistoryMessage[])
+  const sqlPrompt = trimmedHistory.length > 0
+    ? trimmedHistory
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
         .join('\n') + `\nUser: ${question}`
     : question
 
-  // Phase 1: generate SQL (non-streaming)
+  // Phase 1: generate SQL (non-streaming). temperature 0 — SQL generation wants
+  // determinism, not creativity.
   let sqlGenRes: Response
   try {
     sqlGenRes = await fetch(`${ollamaUrl}/api/generate`, {
@@ -81,7 +104,9 @@ export async function POST(request: Request) {
         system: SQL_SYSTEM_PROMPT,
         prompt: sqlPrompt,
         stream: false,
+        options: { temperature: 0 },
       }),
+      signal: ollamaSignal(request.signal),
     })
   } catch {
     return new Response(
@@ -118,8 +143,11 @@ export async function POST(request: Request) {
 
   // Execute the SQL on a read-only connection to prevent mutations
   let rows: unknown[]
+  let dbTruncated = false
   try {
-    rows = executeReadonlyQuery(sql)
+    const result = executeReadonlyQuery(sql)
+    rows = result.rows
+    dbTruncated = result.truncated
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     const status = err instanceof ReadonlyQueryError ? 422 : 422
@@ -130,19 +158,21 @@ export async function POST(request: Request) {
   }
 
   // Build conversation context for narration
-  const priorContext = Array.isArray(history) && history.length > 0
-    ? (history as HistoryMessage[])
+  const priorContext = trimmedHistory.length > 0
+    ? trimmedHistory
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
         .join('\n') + '\n\n'
     : ''
 
   // Cap narration input. 200 rows of JSON blows out the prompt token budget
   // and rarely improves the answer — the model can reason about an aggregate
-  // result (a handful of rows) just as well.
-  const truncated = rows.length > NARRATION_ROW_CAP
-  const narrationRows = truncated ? rows.slice(0, NARRATION_ROW_CAP) : rows
-  const truncationNote = truncated
-    ? `\n\nNote: query returned ${rows.length} rows; only the first ${NARRATION_ROW_CAP} are shown above.`
+  // result (a handful of rows) just as well. dbTruncated means the read-only
+  // driver already cut the result at its hard row cap upstream.
+  const narrationTruncated = rows.length > NARRATION_ROW_CAP
+  const narrationRows = narrationTruncated ? rows.slice(0, NARRATION_ROW_CAP) : rows
+  const truncationNote = (narrationTruncated || dbTruncated)
+    ? `\n\nNote: query returned ${dbTruncated ? 'a large number of' : String(rows.length)} rows` +
+      `${dbTruncated ? ' (capped by the server)' : ''}; only the first ${Math.min(NARRATION_ROW_CAP, rows.length)} are shown above.`
     : ''
 
   // Phase 2: narration (streaming)
@@ -157,6 +187,7 @@ export async function POST(request: Request) {
         prompt: `${priorContext}User: ${question}\n\nData:\n${JSON.stringify(narrationRows, null, 2)}${truncationNote}`,
         stream: true,
       }),
+      signal: ollamaSignal(request.signal),
     })
   } catch {
     return new Response(

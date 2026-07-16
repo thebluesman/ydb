@@ -113,12 +113,21 @@ function stripLiteralsAndComments(sql: string): string {
 
 export class ReadonlyQueryError extends Error {}
 
+// Hard cap on rows materialised from an LLM-generated query. A model that omits
+// the requested LIMIT (or asks for a huge one) could otherwise pull an entire
+// table into JSON and blow the response/token budget. We iterate rather than
+// stmt.all() so we stop reading after the cap instead of buffering everything.
+export const READONLY_ROW_CAP = 500
+
+export type ReadonlyQueryResult = { rows: unknown[]; truncated: boolean }
+
 /**
  * Execute a SELECT (or WITH...SELECT) query on a read-only database
  * connection. Rejects queries that reference sensitive tables or that
- * aren't a read at all.
+ * aren't a read at all. Caps the result at READONLY_ROW_CAP rows, returning
+ * `{ rows, truncated }` so callers can tell the user the result was cut off.
  */
-export function executeReadonlyQuery(sql: string): unknown[] {
+export function executeReadonlyQuery(sql: string): ReadonlyQueryResult {
   const trimmed = sql.trim().replace(/;+\s*$/, '')
   if (!/^\s*(SELECT|WITH)\b/i.test(trimmed)) {
     throw new ReadonlyQueryError('Only SELECT or WITH ... SELECT statements are allowed')
@@ -137,5 +146,17 @@ export function executeReadonlyQuery(sql: string): unknown[] {
 
   const db = getReadonlyDb()
   const stmt = db.prepare(trimmed)
-  return stmt.all()
+  // Non-row-returning statements (shouldn't reach here given the SELECT/WITH
+  // guard, but defensive) can't be iterated — fall back to run().
+  if (!stmt.reader) {
+    stmt.run()
+    return { rows: [], truncated: false }
+  }
+  const rows: unknown[] = []
+  let truncated = false
+  for (const row of stmt.iterate()) {
+    if (rows.length >= READONLY_ROW_CAP) { truncated = true; break }
+    rows.push(row)
+  }
+  return { rows, truncated }
 }

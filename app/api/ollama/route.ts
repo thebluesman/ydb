@@ -2,6 +2,15 @@ export const runtime = 'nodejs'
 
 import { prisma } from '@/lib/prisma'
 
+// Extraction can legitimately take minutes on a large statement + big model, so
+// use a generous ceiling — but still bounded, and still forwarding the client's
+// abort so cancelling the upload cancels generation server-side.
+const OLLAMA_TIMEOUT_MS = 300_000
+function ollamaSignal(clientSignal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(OLLAMA_TIMEOUT_MS)
+  return clientSignal ? AbortSignal.any([clientSignal, timeout]) : timeout
+}
+
 async function buildSystemPrompt(formatHint?: string): Promise<string> {
   const [dbCategories, vendorRules, learnedTxns] = await Promise.all([
     prisma.category.findMany({ orderBy: { name: 'asc' } }),
@@ -117,6 +126,7 @@ export async function POST(request: Request) {
         stream: true,
         options: { num_ctx: 32768, num_predict: -1 },
       }),
+      signal: ollamaSignal(request.signal),
     })
   } catch {
     return new Response(
