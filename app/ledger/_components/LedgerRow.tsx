@@ -74,7 +74,6 @@ function SimpleSelect({
   value: string
   onChange: (v: string) => void
   options: { value: string; label: string }[]
-  className?: string
 }) {
   return <Select value={value} onValueChange={onChange} options={options} />
 }
@@ -641,11 +640,11 @@ export function LedgerRow({
         {/* 4 · Amount */}
         <td className="px-3 py-3 amount whitespace-nowrap" style={{ letterSpacing: '-0.275px' }}>
           <div className="text-sm" style={{ color: amtColor(transaction.amount) }}>
-            {transaction.amount < 0 ? '−' : ''}{currency}{fmtMoney(transaction.amount)}
+            {transaction.amount < 0 ? '−' : '+'}{currency}{fmtMoney(transaction.amount)}
           </div>
           {netAmount !== null && (
             <div className="text-[10px] font-normal mt-0.5" style={{ color: 'var(--tx-secondary)', letterSpacing: 0 }}>
-              net {netAmount < 0 ? '−' : ''}{currency}{fmtMoney(netAmount)}
+              net {netAmount < 0 ? '−' : '+'}{currency}{fmtMoney(netAmount)}
             </div>
           )}
         </td>
@@ -774,7 +773,7 @@ export function LedgerRow({
             {leg.description}
           </td>
           <td className="px-3 py-2.5 text-sm amount whitespace-nowrap" style={{ color: amtColor(leg.amount), letterSpacing: '-0.275px' }}>
-            {leg.amount < 0 ? '−' : ''}{currency}{fmtMoney(leg.amount)}
+            {leg.amount < 0 ? '−' : '+'}{currency}{fmtMoney(leg.amount)}
           </td>
           <td className="px-3 py-2.5 text-sm" style={{ color: 'var(--tx-faint)' }}>
             {leg.category}
