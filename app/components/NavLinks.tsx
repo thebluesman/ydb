@@ -9,8 +9,8 @@ import * as Popover from '@radix-ui/react-popover'
 const LINKS = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/ledger',    label: 'Ledger'    },
-  { href: '/chat',      label: 'Chat'      },
   { href: '/upload',    label: 'Upload'    },
+  { href: '/chat',      label: 'Chat'      },
   { href: '/guide',     label: 'Guide'     },
 ]
 
@@ -50,7 +50,7 @@ export function ConfigLink() {
   return (
     <Link
       href="/settings"
-      aria-label="Config"
+      aria-label="Settings"
       className="hidden md:flex items-center gap-1.5 px-3 py-1 rounded-full text-xs transition-colors duration-150"
       style={{
         backgroundColor: active ? 'var(--bg-nav-active)' : 'var(--bg-btn)',
@@ -60,7 +60,7 @@ export function ConfigLink() {
       }}
     >
       <Settings size={13} />
-      <span>Config</span>
+      <span>Settings</span>
     </Link>
   )
 }

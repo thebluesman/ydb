@@ -177,6 +177,7 @@ export function AccountsForm({
     <div className="space-y-5">
       {/* Accounts card */}
       <div
+        id="accounts"
         className="p-6 space-y-5 rounded-[8px]"
         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', transition: 'box-shadow 0.18s ease, transform 0.18s ease' }}
       >

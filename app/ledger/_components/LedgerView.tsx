@@ -8,8 +8,9 @@ import { LedgerRow } from './LedgerRow'
 import { LedgerRowCard } from './LedgerRowCard'
 import { ReimbursementSuggestModal } from './ReimbursementSuggestModal'
 import { DatePicker } from '@/app/_components/DatePicker'
+import { DateRangePresets } from '@/app/_components/DateRangePresets'
 import { Select, Card, Button, useToast } from '@/app/_components/ui'
-import { fromCents, toCents } from '@/lib/money'
+import { toCents, fmtMoney } from '@/lib/money'
 import { DEFAULT_PAGE_SIZE, SORT_KEYS, type SortKey } from '@/lib/transactions-query'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
@@ -81,6 +82,8 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
   const categoryFilter = searchParams.get('category') ?? 'all'
   const statusFilter = searchParams.get('status') ?? 'all'
   const urlSearch = searchParams.get('search') ?? ''
+  const urlStartDate = searchParams.get('startDate') ?? ''
+  const urlEndDate = searchParams.get('endDate') ?? ''
   const sortKey = (SORT_KEYS as readonly string[]).includes(searchParams.get('sort') ?? '')
     ? (searchParams.get('sort') as SortKey)
     : 'date'
@@ -90,6 +93,8 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
 
   const [searchInput, setSearchInput] = useState(urlSearch)
   const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [dateStart, setDateStart] = useState(urlStartDate)
+  const [dateEnd, setDateEnd] = useState(urlEndDate)
   const [showSuggestModal, setShowSuggestModal] = useState(false)
 
   // Add transaction form
@@ -167,6 +172,9 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
 
   // Keep the search box in sync if the URL search changes elsewhere (e.g. Clear).
   useEffect(() => { setSearchInput(urlSearch) }, [urlSearch])
+  // Same for the date-range pickers (e.g. Clear, or a preset applied elsewhere).
+  useEffect(() => { setDateStart(urlStartDate) }, [urlStartDate])
+  useEffect(() => { setDateEnd(urlEndDate) }, [urlEndDate])
 
   // Debounce the search input → URL (250ms).
   useEffect(() => {
@@ -320,10 +328,21 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
     }
   }
 
-  const hasFilters = accountFilter !== 'all' || typeFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || urlSearch || showPendingOnly
+  const hasFilters = accountFilter !== 'all' || typeFilter !== 'all' || categoryFilter !== 'all' || statusFilter !== 'all' || urlSearch || showPendingOnly || urlStartDate || urlEndDate
   const clearFilters = () => {
     setSearchInput('')
-    updateParams({ accountId: null, type: null, category: null, status: null, search: null, pendingReimbursements: null })
+    setDateStart('')
+    setDateEnd('')
+    updateParams({ accountId: null, type: null, category: null, status: null, search: null, pendingReimbursements: null, startDate: null, endDate: null })
+  }
+
+  const applyDateRange = () => {
+    updateParams({ startDate: dateStart || null, endDate: dateEnd || null })
+  }
+  const handleDatePreset = (range: { startDate: string | null; endDate: string | null }) => {
+    setDateStart(range.startDate ?? '')
+    setDateEnd(range.endDate ?? '')
+    updateParams({ startDate: range.startDate, endDate: range.endDate })
   }
 
   // Chip summary of active filters — shown below `md` when the filter
@@ -340,8 +359,15 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
     if (statusFilter !== 'all') chips.push({ key: 'status', label: statusFilter, onClear: () => updateParams({ status: null }) })
     if (categoryFilter !== 'all') chips.push({ key: 'category', label: categoryFilter, onClear: () => updateParams({ category: null }) })
     if (showPendingOnly) chips.push({ key: 'pending', label: 'Pending reimbursements', onClear: () => updateParams({ pendingReimbursements: null }) })
+    if (urlStartDate || urlEndDate) {
+      chips.push({
+        key: 'dateRange',
+        label: `${urlStartDate || '…'} → ${urlEndDate || '…'}`,
+        onClear: () => { setDateStart(''); setDateEnd(''); updateParams({ startDate: null, endDate: null }) },
+      })
+    }
     return chips
-  }, [urlSearch, accountFilter, typeFilter, statusFilter, categoryFilter, showPendingOnly, accounts, updateParams])
+  }, [urlSearch, accountFilter, typeFilter, statusFilter, categoryFilter, showPendingOnly, urlStartDate, urlEndDate, accounts, updateParams])
 
   const selectStyle: React.CSSProperties = { border: '1px solid var(--border-warm)', backgroundColor: 'var(--bg-input)', color: 'var(--tx-primary)' }
 
@@ -371,9 +397,9 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { label: 'Income',   value: `+${currency} ${fromCents(stats.income).toFixed(2)}`,   sub: `${stats.incomeCount} transaction${stats.incomeCount !== 1 ? 's' : ''}`,   bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
-          { label: 'Expenses', value: `−${currency} ${fromCents(stats.expenses).toFixed(2)}`, sub: `${stats.expenseCount} transaction${stats.expenseCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
-          { label: 'Net',      value: `${stats.net >= 0 ? '+' : '−'}${currency} ${fromCents(Math.abs(stats.net)).toFixed(2)}`, sub: `${total} shown`, bg: 'var(--bg-stat-net)', tx: stats.net >= 0 ? 'var(--tx-stat-net-pos)' : 'var(--tx-stat-net-neg)' },
+          { label: 'Income',   value: fmtMoney(stats.income, currency, { showPlus: true }),   sub: `${stats.incomeCount} transaction${stats.incomeCount !== 1 ? 's' : ''}`,   bg: 'var(--bg-stat-income)',  tx: 'var(--tx-stat-income)' },
+          { label: 'Expenses', value: fmtMoney(-stats.expenses, currency),                     sub: `${stats.expenseCount} transaction${stats.expenseCount !== 1 ? 's' : ''}`, bg: 'var(--bg-stat-expense)', tx: 'var(--tx-stat-expense)' },
+          { label: 'Net',      value: fmtMoney(stats.net, currency, { showPlus: true }),        sub: `${total} shown`, bg: 'var(--bg-stat-net)', tx: stats.net >= 0 ? 'var(--tx-stat-net-pos)' : 'var(--tx-stat-net-neg)' },
         ].map(({ label, value, sub, bg, tx }) => (
           <div key={label} className="card-hover p-5 rounded-[8px]" style={{ backgroundColor: bg, border: '1px solid var(--border-warm)' }}>
             <p className="text-card-label mb-2">{label}</p>
@@ -409,7 +435,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
             <span>
               {stats.pendingReimbursementCount} pending reimbursement{stats.pendingReimbursementCount !== 1 ? 's' : ''} awaiting settlement
               {' — '}
-              {currency}{fromCents(stats.pendingReimbursementOutstanding).toFixed(2)} outstanding
+              {fmtMoney(stats.pendingReimbursementOutstanding, currency)} outstanding
             </span>
           </button>
           <button
@@ -540,6 +566,23 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
           >
             <Download size={14} />
             Export
+          </button>
+        </div>
+
+        {/* Date range — its own row so it doesn't fight the select group for
+            space; reuses the DatePicker pair + shared preset pills from the
+            dashboard so "3M"/"YTD"/etc. mean the same thing on both screens. */}
+        <div className="flex flex-wrap items-center gap-2 mt-3 pt-3" style={{ borderTop: '1px solid var(--border-warm)' }}>
+          <DateRangePresets onSelect={handleDatePreset} currentRange={{ startDate: urlStartDate, endDate: urlEndDate }} />
+          <DatePicker value={dateStart} onChange={setDateStart} size="sm" />
+          <span className="text-xs" style={{ color: 'var(--tx-faint)' }}>to</span>
+          <DatePicker value={dateEnd} onChange={setDateEnd} size="sm" />
+          <button
+            onClick={applyDateRange}
+            className="btn px-3 py-1 text-xs rounded-[6px] transition-colors duration-150"
+            style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+          >
+            Apply
           </button>
         </div>
 
