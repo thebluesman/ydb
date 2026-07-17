@@ -542,6 +542,22 @@ tr.row-hover:hover {
   background-color: var(--bg-row-hover);
 }
 
+/* ── Ledger keyboard row navigation (roving tabindex) ─────────────────────
+   Arrow keys move real DOM focus to a row (LedgerView's global keydown
+   handler). Background mirrors the mouse-hover token above so keyboard and
+   mouse feel consistent; box-shadow (not outline) is used for the ring so
+   it doesn't get clipped by table row layout the way `outline` sometimes
+   does, and reuses the same ring color as the rest of the app's
+   :focus-visible treatment while staying visually distinct (drawn tight to
+   the row) from the button/input ring. */
+tr[data-kbd-focused='true'] {
+  background-color: var(--bg-row-hover);
+}
+tr:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
 /* ── Calendar popover entry ───────────────────────────────────────────── */
 @keyframes calendarIn {
   from { opacity: 0; transform: translateY(-4px) scale(0.98); }

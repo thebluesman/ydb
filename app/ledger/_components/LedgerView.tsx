@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X, SlidersHorizontal, Rows3, Rows2 } from 'lucide-react'
 import * as RSelect from '@radix-ui/react-select'
-import { LedgerRow } from './LedgerRow'
+import { LedgerRow, type LedgerRowHandle } from './LedgerRow'
 import { LedgerRowCard } from './LedgerRowCard'
 import { ReimbursementSuggestModal } from './ReimbursementSuggestModal'
 import { DatePicker } from '@/app/_components/DatePicker'
@@ -131,6 +131,13 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
   const [bulkStatus, setBulkStatus] = useState('')
   const [bulkApplying, setBulkApplying] = useState(false)
 
+  // ── Ledger keyboard shortcuts (desktop table only — see the global keydown
+  // effect below): `/` focuses search, arrows move a keyboard-focused row
+  // (roving tabindex), `e` opens that row's existing inline-edit mode.
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const rowHandles = useRef<Map<number, LedgerRowHandle>>(new Map())
+  const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null)
+
   const currency = stats.currency
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -195,6 +202,78 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
     const t = setTimeout(() => updateParams({ search: searchInput || null }), 250)
     return () => clearTimeout(t)
   }, [searchInput, urlSearch, updateParams])
+
+  // Row list changed (new page, new filters, refetch) — the previous
+  // keyboard-focused index no longer points at a meaningful row.
+  useEffect(() => { setFocusedRowIndex(null) }, [rows])
+
+  // ── Global keyboard shortcuts ────────────────────────────────────────────
+  // Desktop table only (below `md` the ledger renders cards, not rows, and
+  // arrow-key row nav doesn't apply on touch). Scoped to `document` since
+  // there's no single ledger-container element wrapping just the table.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Leave modified keystrokes (Cmd/Ctrl/Alt combos) to the browser/OS —
+      // these shortcuts are bare-key only, same convention as `/` on GitHub.
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      const isEditable =
+        !!target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+
+      // `/` focuses search — standard convention, ignored while typing
+      // elsewhere so it doesn't hijack a literal `/` mid-field.
+      if (e.key === '/' && !isEditable) {
+        e.preventDefault()
+        searchInputRef.current?.focus()
+        return
+      }
+
+      if (e.key === 'Escape') {
+        // Radix Dialog/Select already close themselves on Escape and manage
+        // their own focus trap — don't also touch row/search state while
+        // one is open, since that's a different (and already-handled)
+        // Escape target.
+        if (document.querySelector('[role="dialog"], [role="listbox"]')) return
+        if (focusedRowIndex !== null) { setFocusedRowIndex(null); return }
+        if (target === searchInputRef.current) searchInputRef.current?.blur()
+        return
+      }
+
+      // Everything below is desktop-table row navigation — skip while
+      // typing, and skip while a modal/select is open so its focus trap
+      // isn't fought (arrow keys inside an open Select should move its
+      // options, `e` shouldn't leak through to the row underneath).
+      if (isEditable) return
+      if (document.querySelector('[role="dialog"], [role="listbox"]')) return
+      if (rows.length === 0) return
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setFocusedRowIndex((prev) => (prev === null ? 0 : Math.min(prev + 1, rows.length - 1)))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setFocusedRowIndex((prev) => (prev === null ? 0 : Math.max(prev - 1, 0)))
+      } else if (e.key === 'e' && focusedRowIndex !== null) {
+        const row = rows[focusedRowIndex]
+        if (row) {
+          e.preventDefault()
+          rowHandles.current.get(row.id)?.startEdit()
+        }
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [rows, focusedRowIndex])
+
+  // Move real DOM focus to the row whenever the keyboard-focused index
+  // changes, so the row's :focus-visible ring and the roving-tabindex
+  // pattern both stay correct (Tab from here moves relative to this row).
+  useEffect(() => {
+    if (focusedRowIndex === null) return
+    const row = rows[focusedRowIndex]
+    if (row) rowHandles.current.get(row.id)?.focus()
+  }, [focusedRowIndex, rows])
 
   const toggleSort = (key: SortKey) => {
     if (key === sortKey) updateParams({ sort: key, dir: sortDir === 'asc' ? 'desc' : 'asc' })
@@ -477,10 +556,11 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
       {/* Filters */}
       <Card className="p-4">
         <div className="flex flex-wrap gap-3 items-center">
-          <input type="search" placeholder="Search descriptions…" value={searchInput}
+          <input ref={searchInputRef} type="search" placeholder="Search descriptions…" value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="flex-1 min-w-[200px] px-3 py-2 text-sm rounded-[8px] outline-none transition-colors duration-150"
             style={selectStyle}
+            title="Press / to search"
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm-md)')}
             onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--border-warm)')}
           />
@@ -608,6 +688,11 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
             Apply
           </button>
         </div>
+
+        {/* Keyboard hint — desktop table only, understated like the rest of the app's microcopy */}
+        <p className="hidden md:block text-[11px] mt-2" style={{ color: 'var(--tx-faint)' }}>
+          Press / to search, ↑/↓ to move between rows, e to edit the selected row.
+        </p>
 
         {/* Active-filter chips — mobile only, visible while the disclosure above is collapsed */}
         {!showMobileFilters && activeFilterChips.length > 0 && (
@@ -830,9 +915,13 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                   </tr>
                 </thead>
                 <tbody style={{ backgroundColor: 'var(--bg-card)' }}>
-                  {rows.map((t) => (
+                  {rows.map((t, i) => (
                     <LedgerRow
                       key={t.id}
+                      ref={(el) => {
+                        if (el) rowHandles.current.set(t.id, el)
+                        else rowHandles.current.delete(t.id)
+                      }}
                       transaction={t}
                       accounts={accounts}
                       categories={categories}
@@ -842,6 +931,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                       onRestore={refetch}
                       selected={selectedIds.has(t.id)}
                       onToggleSelect={toggleSelectRow}
+                      keyboardFocused={focusedRowIndex === i}
                     />
                   ))}
                 </tbody>

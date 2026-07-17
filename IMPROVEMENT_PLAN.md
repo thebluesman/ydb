@@ -636,6 +636,53 @@ Ordered by value for a single home user:
 > formatting). No envelope/rollover mechanics, per the explicit non-goal above. `npm run lint`,
 > `npm run test:run` (215 passed), and `npm run build` all clean.
 
+> **M8d status:** done. Added a single `document`-level `keydown` listener in `LedgerView.tsx`,
+> scoped to the desktop table (below `md` the ledger renders `LedgerRowCard`s, not rows, so arrow
+> nav is skipped there by construction — mobile cards untouched). `/` focuses the search input
+> (via a new `searchInputRef`) unless an input/textarea/contenteditable is already focused, and
+> `preventDefault()`s so it never types a literal `/`. Up/Down move a `focusedRowIndex` through the
+> current page of `rows` — this is a real roving-tabindex, not a visual-only overlay: each
+> `LedgerRow`'s `<tr>` got `tabIndex={-1}` and a new `LedgerRowHandle` (`forwardRef` +
+> `useImperativeHandle`, so `LedgerRow` is now `memo(forwardRef(...))`) exposing `focus()`/
+> `startEdit()`; the ledger calls `.focus()` on the target row on every index change, so it's the
+> actual `document.activeElement`, and `e` calls `.startEdit()` — which just calls the row's
+> existing `setEditing(true)`, the same state `LedgerRow`'s own "Edit" button already sets, so
+> there's one edit pathway, not two. Escape clears `focusedRowIndex` (or blurs the search box if
+> that's focused instead), but the handler bails out entirely — before touching Escape, arrows, or
+> `e` — whenever `document.querySelector('[role="dialog"], [role="listbox"]')` matches, i.e. a
+> Radix `Dialog` or open `Select`/category-filter dropdown is on screen; Radix owns Escape and its
+> own focus trap in that case, confirmed by Playwright rather than assumed (below). All
+> shortcuts additionally no-op on any modified keystroke (Cmd/Ctrl/Alt) and while typing in a
+> field. **Visual:** the keyboard-focused row gets `data-kbd-focused="true"` → the same
+> `--bg-row-hover` token the existing `tr.row-hover:hover` rule already uses (no new color
+> introduced), plus a new `tr:focus-visible { box-shadow: inset 0 0 0 2px var(--color-accent) }`
+> rule in `globals.css` — `box-shadow` rather than `outline` so it isn't clipped by table-row
+> layout, and visually distinct (tight inset ring on the row itself) from the existing
+> box-shadow-based `--focus-ring` used on buttons/inputs elsewhere, so the two don't read as the
+> same affordance despite both being focus-visible-driven. **Hint:** a one-line, `md`-only,
+> `--tx-faint` caption under the filter row ("Press / to search, ↑/↓ to move between rows, e to
+> edit the selected row") plus a `title="Press / to search"` tooltip on the search input itself —
+> no shortcuts-help modal, per the explicit out-of-scope note.
+>
+> **Verified:** `npx tsc --noEmit`, `npm run lint` (0 errors, 3 pre-existing warnings, all in
+> unrelated files — unchanged baseline), `npm run test:run` (211/211, after running
+> `npx prisma migrate deploy` to create this worktree's missing `prisma/dev.db` — the failures
+> before that were a missing-DB-file setup issue, not a regression), and `npm run build` all
+> clean. Also **actually driven end-to-end** with Playwright (already installed in this sandbox
+> under the npx cache from a prior phase, per the M7a note's pattern — not added to
+> `package.json`) against a `next start` production server seeded via `scripts/seed.ts`
+> (~49k transactions): scripted 13 assertions covering `/` focusing search, `/` typing normally
+> inside a text field instead of being hijacked, two `ArrowDown`s + one `ArrowUp` landing on the
+> expected row indices with both `data-kbd-focused` and real `document.activeElement` set
+> correctly, `e` opening the focused row's inline edit, opening the account-filter `Select` and
+> confirming its own `ArrowDown`/`Escape` behavior is untouched by the ledger listener, and
+> opening the delete-confirmation `Dialog` and confirming a subsequent `e` keystroke does *not*
+> leak through to open a row's edit mode underneath it, then confirming `Escape` closes the
+> dialog. All 13/13 passed on the second run — the first run had one false-negative from a test
+> bug (matching `"Save"` text, which the pre-existing vendor-rule-suggestion strip also uses,
+> instead of `"Cancel"`, which is unique to inline-edit mode), not from the feature; fixed the
+> assertion and reran clean.
+
 ### Phase 8 — Testing, tooling, deployment
 
 - **Seed script** `scripts/seed.ts` (accounts + 50k realistic transactions incl. splits, transfers,

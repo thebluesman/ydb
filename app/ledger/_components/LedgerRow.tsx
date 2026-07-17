@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useState } from 'react'
+import { forwardRef, memo, useImperativeHandle, useRef, useState, type ForwardedRef } from 'react'
 import { X, Link2, Unlink, Scissors, ChevronDown, ChevronRight, RotateCcw, CheckCircle2 } from 'lucide-react'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { TransferLinkModal } from './TransferLinkModal'
@@ -103,6 +103,13 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge variant={cfg.variant} pop>{cfg.label}</Badge>
 }
 
+/** Imperative handle so the ledger's keyboard nav (arrow keys + `e`) can move
+ * DOM focus to a row and open its inline edit without a second edit pathway. */
+export type LedgerRowHandle = {
+  focus: () => void
+  startEdit: () => void
+}
+
 function LedgerRowInner({
   transaction,
   accounts,
@@ -113,6 +120,7 @@ function LedgerRowInner({
   onRestore,
   selected,
   onToggleSelect,
+  keyboardFocused,
 }: {
   transaction: Transaction
   accounts: Account[]
@@ -124,8 +132,14 @@ function LedgerRowInner({
   onRestore?: () => void
   selected?: boolean
   onToggleSelect?: (id: number) => void
-}) {
+  /** True when this row is the current target of arrow-key navigation
+   * (roving tabindex) — mirrors the mouse-hover background so keyboard and
+   * mouse feel consistent, plus a real DOM focus-visible ring since the row
+   * itself receives focus. */
+  keyboardFocused?: boolean
+}, ref: ForwardedRef<LedgerRowHandle>) {
   const toast = useToast()
+  const trRef = useRef<HTMLTableRowElement>(null)
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -303,6 +317,11 @@ function LedgerRowInner({
       setUnlinkingReimburse(false)
     }
   }
+
+  useImperativeHandle(ref, () => ({
+    focus: () => trRef.current?.focus(),
+    startEdit: () => setEditing(true),
+  }))
 
   const isTransfer = transaction.transactionType === 'transfer'
   const amtColor = (amt: number) =>
@@ -573,6 +592,9 @@ function LedgerRowInner({
   return (
     <>
       <tr
+        ref={trRef}
+        tabIndex={-1}
+        data-kbd-focused={keyboardFocused ? 'true' : undefined}
         className="group row-hover transition-colors duration-100"
         style={{ ...rowBorder, cursor: 'default' }}
       >
@@ -889,4 +911,6 @@ function LedgerRowInner({
 // transaction reference, same `selected` flag) need not. All handlers passed
 // in are stable (`useCallback` in LedgerView), and select/update/delete are
 // id-based, so React.memo's shallow prop comparison is safe here.
-export const LedgerRow = memo(LedgerRowInner)
+// forwardRef exposes LedgerRowHandle (focus/startEdit) so the ledger's
+// keyboard nav can drive a specific row without a second edit pathway.
+export const LedgerRow = memo(forwardRef(LedgerRowInner))
