@@ -559,6 +559,33 @@ Ordered by value for a single home user:
    dashboard: 1) create account → 2) import statement → 3) set budgets, each linking to the page.
 9. **Keyboard support** in the ledger: `/` focuses search, `e` edits focused row, arrows navigate.
 
+> **M8c status (item 7 — Rules retro-apply): DONE.** Implemented on `claude/m8c-rules-retro-apply`.
+> `POST /api/vendor-rules/[id]/apply` reuses `matchesRule` from `lib/vendor-rule-match.ts` (the
+> Phase 3.2 matcher, not a reimplementation) against uncategorized rows (`category === ''`, the
+> schema default) with status `committed`/`reconciled`. `?dryRun=1` returns `{ count }` without
+> writing; the real POST re-checks `category: ''` at write time (`updateMany` where clause) so a
+> race with another categorization between read and write can't clobber it, upserts the target
+> category via `colorForCategory` (same Phase 6.4 auto-create pattern as
+> `PATCH /api/transactions/bulk`), then returns `{ updated }`. `VendorRuleManager` gained a
+> "Apply to existing" button (`CheckCheck` icon) next to the existing Test button: click →
+> dry-run count fetched into a `Modal` confirmation ("This will categorize N uncategorized
+> transactions as X. Continue?") → confirm → real apply → `useToast` success/error, matching the
+> file's existing button/modal/toast conventions. Test: `tests/vendorRuleApply.test.ts` (in-memory
+> mock-prisma, same pattern as `tests/transactionDeleteCascade.test.ts`) — 5 cases covering 404 on
+> unknown rule, dry-run doesn't write, apply skips already-categorized rows, direction/amount/
+> pattern gates, and the zero-match no-op skipping the category upsert. `npm run lint`: same 3
+> pre-existing warnings in untouched files, zero introduced. `npm run test:run`: all passing tests
+> green (216 passed; `tests/sqlGuard.test.ts`'s 6 failures are a pre-existing environment gap —
+> no `dev.db` in this worktree until `prisma migrate deploy` was run for the build check — verified
+> identical failures on `main` before this change). `npm run build`: compiles clean,
+> `/api/vendor-rules/[id]/apply` listed as a new route.
+>
+> **Review fix:** the candidates query didn't exclude `transactionType: 'transfer'` — a broad rule
+> (e.g. matching a bank's transfer memo text) could bulk-assign a spending category to a transfer
+> between the user's own accounts. Added `transactionType: { not: 'transfer' }` to the candidates
+> `where`. New test case in `tests/vendorRuleApply.test.ts` confirms a matching transfer row is
+> skipped while a matching debit row with the same pattern still applies.
+
 ### Phase 8 — Testing, tooling, deployment
 
 - **Seed script** `scripts/seed.ts` (accounts + 50k realistic transactions incl. splits, transfers,
