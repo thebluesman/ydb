@@ -4,17 +4,21 @@ type Tx = { id: number; date: Date; amount: number; description: string; categor
 type FullTx = Tx & { status: string; transactionType: string; accountId: number }
 
 // getRecurringSeries's DB query fetches newest-first (review fix on PR #18: an
-// `asc` order fed the detector a years-stale slice). It no longer passes a global
-// `take` — capping is done per description group in JS (takeRecentPerGroup) — so
-// this fake just honors `orderBy` and returns every matching row.
+// `asc` order fed the detector a years-stale slice), bounded by a `take` backstop
+// (review fix on PR #20 — see RECURRING_QUERY_ROW_CAP in lib/recurring.ts) on top
+// of the per-group JS windowing (takeRecentPerGroup). This fake honors both
+// `orderBy` and `take` so both behaviors stay covered.
 let fixtureTxs: FullTx[] = []
+let lastFindManyArgs: { orderBy: { date: 'asc' | 'desc' }; take?: number } | undefined
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     transaction: {
-      findMany: async ({ orderBy }: { orderBy: { date: 'asc' | 'desc' } }) => {
-        return [...fixtureTxs].sort((a, b) =>
-          orderBy.date === 'desc' ? b.date.getTime() - a.date.getTime() : a.date.getTime() - b.date.getTime(),
+      findMany: async (args: { orderBy: { date: 'asc' | 'desc' }; take?: number }) => {
+        lastFindManyArgs = args
+        const sorted = [...fixtureTxs].sort((a, b) =>
+          args.orderBy.date === 'desc' ? b.date.getTime() - a.date.getTime() : a.date.getTime() - b.date.getTime(),
         )
+        return args.take != null ? sorted.slice(0, args.take) : sorted
       },
     },
   },
@@ -181,5 +185,53 @@ describe('getRecurringSeries', () => {
     const series = await getRecurringSeries(asOf)
 
     expect(series.map((s) => s.description)).toContain('Netflix Subscription')
+  })
+
+  it('bounds the DB query with a row-cap backstop on top of per-group windowing', async () => {
+    // Review fix on PR #20: dropping the old global `take: 2000` entirely (in
+    // favor of only per-group windowing) turned the query into a full-table
+    // read. `getRecurringSeries` now passes a `take` backstop straight through
+    // to `findMany` — lock in that it's actually wired up.
+    fixtureTxs = [
+      { ...tx('2026-06-15', -1500), status: 'committed', transactionType: 'debit', accountId: 1 },
+    ]
+    await getRecurringSeries(new Date('2026-06-20T00:00:00Z'))
+
+    expect(lastFindManyArgs?.take).toBeGreaterThan(2000)
+    expect(lastFindManyArgs?.orderBy).toEqual({ date: 'desc' })
+  })
+
+  it('applies the staleness cutoff consistently regardless of the host timezone', async () => {
+    // Review fix on PR #20: the staleness filter used to compare a local-time
+    // `startOfToday` against a UTC-parsed `lastDate`, so the ~90-day
+    // (MAX_STALE_CYCLES=3, ~30-day cadence) cutoff could drift by the host's
+    // UTC offset. Both sides are now computed in UTC, so the same series
+    // should be dropped/kept the same way under any TZ.
+    const dying: FullTx[] = [
+      { id: 1, date: new Date('2026-01-15T00:00:00Z'), amount: -1500, description: 'Gym Membership', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 2, date: new Date('2026-02-14T00:00:00Z'), amount: -1500, description: 'Gym Membership', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 3, date: new Date('2026-03-16T00:00:00Z'), amount: -1500, description: 'Gym Membership', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
+    ]
+    fixtureTxs = dying
+    // Last occurrence 2026-03-16, avgGap ~30 days: exactly on the MAX_STALE_CYCLES=3
+    // boundary is ~90 days later (2026-06-14). Pick asOf just past it in UTC.
+    const asOf = new Date('2026-06-15T12:00:00Z')
+
+    const originalTz = process.env.TZ
+    try {
+      process.env.TZ = 'UTC'
+      const utcResult = await getRecurringSeries(asOf)
+
+      process.env.TZ = 'Pacific/Kiritimati' // UTC+14, the largest positive offset in use
+      const farAheadResult = await getRecurringSeries(asOf)
+
+      process.env.TZ = 'Etc/GMT+12' // UTC-12, the largest negative offset in use
+      const farBehindResult = await getRecurringSeries(asOf)
+
+      expect(farAheadResult.map((s) => s.description)).toEqual(utcResult.map((s) => s.description))
+      expect(farBehindResult.map((s) => s.description)).toEqual(utcResult.map((s) => s.description))
+    } finally {
+      process.env.TZ = originalTz
+    }
   })
 })
