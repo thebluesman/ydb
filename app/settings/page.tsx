@@ -7,6 +7,7 @@ import { ImportHistory } from './_components/ImportHistory'
 import { DangerZone } from './_components/DangerZone'
 import { BackupManager } from './_components/BackupManager'
 import { ReconciliationManager } from './_components/ReconciliationManager'
+import { SettingsSubNav } from './_components/SettingsSubNav'
 import { listBackups } from '@/lib/backup'
 
 export const metadata = {
@@ -53,6 +54,7 @@ export default async function SettingsPage() {
             Configure your accounts, categories, and preferences.
           </p>
         </div>
+        <SettingsSubNav />
         <SettingsCategoryBridge
           initialAccounts={rawAccounts.map((a) => ({
             ...a,
@@ -69,7 +71,7 @@ export default async function SettingsPage() {
         {/* Budgets card */}
         <div
           id="budgets"
-          className="p-6 rounded-[8px]"
+          className="p-6 rounded-[8px] scroll-mt-24"
           style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
         >
           <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
@@ -83,7 +85,8 @@ export default async function SettingsPage() {
 
         {/* Recurring transactions card */}
         <div
-          className="p-6 rounded-[8px]"
+          id="recurring"
+          className="p-6 rounded-[8px] scroll-mt-24"
           style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
         >
           <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
@@ -120,7 +123,8 @@ export default async function SettingsPage() {
 
         {/* Import history card */}
         <div
-          className="p-6 rounded-[8px]"
+          id="imports"
+          className="p-6 rounded-[8px] scroll-mt-24"
           style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
         >
           <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
@@ -134,7 +138,8 @@ export default async function SettingsPage() {
 
         {/* Backups card */}
         <div
-          className="p-6 rounded-[8px]"
+          id="backups"
+          className="p-6 rounded-[8px] scroll-mt-24"
           style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
         >
           <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
@@ -146,7 +151,9 @@ export default async function SettingsPage() {
           <BackupManager initialBackups={backups} />
         </div>
 
-        <DangerZone />
+        <div id="danger-zone" className="scroll-mt-24">
+          <DangerZone />
+        </div>
       </div>
     </div>
   )

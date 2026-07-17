@@ -54,7 +54,8 @@ export function SettingsCategoryBridge({
       />
       {preferencesSlot}
       <div
-        className="p-6 rounded-[8px]"
+        id="rules"
+        className="p-6 rounded-[8px] scroll-mt-24"
         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
       >
         <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>

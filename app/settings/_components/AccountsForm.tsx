@@ -178,7 +178,7 @@ export function AccountsForm({
       {/* Accounts card */}
       <div
         id="accounts"
-        className="p-6 space-y-5 rounded-[8px]"
+        className="p-6 space-y-5 rounded-[8px] scroll-mt-24"
         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)', transition: 'box-shadow 0.18s ease, transform 0.18s ease' }}
       >
         <div>
@@ -432,7 +432,8 @@ export function AccountsForm({
 
       {/* Categories card */}
       <div
-        className="p-6 rounded-[8px]"
+        id="categories"
+        className="p-6 rounded-[8px] scroll-mt-24"
         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
       >
         <h2 className="text-[22px] font-semibold mb-4" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
