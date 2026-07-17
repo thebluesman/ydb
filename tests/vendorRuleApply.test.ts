@@ -29,6 +29,7 @@ type Tx = {
   amount: number
   status: string
   category: string
+  transactionType?: string
 }
 
 let rules: Rule[] = []
@@ -42,9 +43,18 @@ vi.mock('@/lib/prisma', () => ({
         rules.find((r) => r.id === id) ?? null,
     },
     transaction: {
-      findMany: async ({ where }: { where: { status: { in: string[] }; category: string } }) =>
+      findMany: async ({
+        where,
+      }: {
+        where: { status: { in: string[] }; category: string; transactionType?: { not: string } }
+      }) =>
         txns
-          .filter((t) => where.status.in.includes(t.status) && t.category === where.category)
+          .filter(
+            (t) =>
+              where.status.in.includes(t.status) &&
+              t.category === where.category &&
+              (!where.transactionType || (t.transactionType ?? 'debit') !== where.transactionType.not),
+          )
           .map(({ id, description, originalDescription, amount }) => ({ id, description, originalDescription, amount })),
       updateMany: async ({ where, data }: { where: { id: { in: number[] }; category: string }; data: { category: string } }) => {
         let count = 0
@@ -144,6 +154,19 @@ describe('POST /api/vendor-rules/[id]/apply', () => {
     expect(txns[1].category).toBe('')
     expect(txns[2].category).toBe('')
     expect(txns[3].category).toBe('')
+  })
+
+  it('excludes transfer rows from candidates even when the pattern matches', async () => {
+    rules = [rule({ id: 1, pattern: 'to savings', category: 'Groceries' })]
+    txns = [
+      { id: 1, description: 'TRANSFER TO SAVINGS', originalDescription: null, amount: -5000, status: 'committed', category: '', transactionType: 'transfer' },
+      { id: 2, description: 'TRANSFER TO SAVINGS FEE', originalDescription: null, amount: -500, status: 'committed', category: '', transactionType: 'debit' },
+    ]
+    const res = await callApply(1)
+    const body = await res.json()
+    expect(body.updated).toBe(1)
+    expect(txns[0].category).toBe('')
+    expect(txns[1].category).toBe('Groceries')
   })
 
   it('returns 0 updated and skips the category upsert when nothing matches', async () => {

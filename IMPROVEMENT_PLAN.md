@@ -579,6 +579,12 @@ Ordered by value for a single home user:
 > no `dev.db` in this worktree until `prisma migrate deploy` was run for the build check — verified
 > identical failures on `main` before this change). `npm run build`: compiles clean,
 > `/api/vendor-rules/[id]/apply` listed as a new route.
+>
+> **Review fix:** the candidates query didn't exclude `transactionType: 'transfer'` — a broad rule
+> (e.g. matching a bank's transfer memo text) could bulk-assign a spending category to a transfer
+> between the user's own accounts. Added `transactionType: { not: 'transfer' }` to the candidates
+> `where`. New test case in `tests/vendorRuleApply.test.ts` confirms a matching transfer row is
+> skipped while a matching debit row with the same pattern still applies.
 
 ### Phase 8 — Testing, tooling, deployment
 

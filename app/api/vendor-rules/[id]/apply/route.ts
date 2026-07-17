@@ -25,7 +25,11 @@ export async function POST(
   if (!rule) return NextResponse.json({ error: 'Rule not found' }, { status: 404 })
 
   const candidates = await prisma.transaction.findMany({
-    where: { status: { in: ['committed', 'reconciled'] }, category: '' },
+    where: {
+      status: { in: ['committed', 'reconciled'] },
+      category: '',
+      transactionType: { not: 'transfer' },
+    },
     select: { id: true, description: true, originalDescription: true, amount: true },
   })
 
