@@ -5,6 +5,8 @@ export const metadata = {
   title: 'Upload — ydb',
 }
 
+export const dynamic = 'force-dynamic'
+
 export default async function UploadPage() {
   const [accounts, categories] = await Promise.all([
     prisma.account.findMany({ where: { isActive: true }, orderBy: { id: 'asc' } }),

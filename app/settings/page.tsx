@@ -14,6 +14,8 @@ export const metadata = {
   title: 'Settings — ydb',
 }
 
+export const dynamic = 'force-dynamic'
+
 export default async function SettingsPage() {
   const backups = listBackups()
 
