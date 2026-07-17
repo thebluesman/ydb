@@ -2,10 +2,10 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import * as Select from '@radix-ui/react-select'
-import { AlertCircle, ChevronDown, ChevronRight, X, FlaskConical } from 'lucide-react'
+import { AlertCircle, ChevronDown, ChevronRight, X, FlaskConical, CheckCheck } from 'lucide-react'
 import { pillTextColor } from '@/lib/category-colors'
 import { fromCents, toCents } from '@/lib/money'
-import { useToast } from '@/app/_components/ui'
+import { useToast, Modal } from '@/app/_components/ui'
 
 type VendorRule = {
   id: number
@@ -135,6 +135,12 @@ export function VendorRuleManager({
   const [testingRuleId, setTestingRuleId] = useState<number | null>(null)
   const [testResults, setTestResults]     = useState<{ total: number; transactions: TestRow[] } | null>(null)
   const [testLoading, setTestLoading]     = useState(false)
+
+  // Apply-to-existing (dry-run confirm modal)
+  const [applyRule, setApplyRule]         = useState<VendorRule | null>(null)
+  const [applyCount, setApplyCount]       = useState<number | null>(null)
+  const [applyLoading, setApplyLoading]   = useState(false)
+  const [applying, setApplying]           = useState(false)
 
   // Collapsed vendor groups
   const [collapsed, setCollapsed]         = useState<Set<string>>(new Set())
@@ -313,6 +319,42 @@ export function VendorRuleManager({
     }
   }
 
+  // ── Apply to existing ───────────────────────────────────────────────────────
+
+  const startApply = async (rule: VendorRule) => {
+    setApplyRule(rule)
+    setApplyCount(null)
+    setApplyLoading(true)
+    try {
+      const res = await fetch(`/api/vendor-rules/${rule.id}/apply?dryRun=1`, { method: 'POST' })
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      const data = await res.json()
+      setApplyCount(data.count)
+    } catch (e) {
+      toast.error(`Could not check rule: ${e instanceof Error ? e.message : String(e)}`)
+      setApplyRule(null)
+    } finally {
+      setApplyLoading(false)
+    }
+  }
+
+  const confirmApply = async () => {
+    if (!applyRule) return
+    setApplying(true)
+    try {
+      const res = await fetch(`/api/vendor-rules/${applyRule.id}/apply`, { method: 'POST' })
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      const data = await res.json()
+      toast.success(`Categorized ${data.updated} transaction${data.updated !== 1 ? 's' : ''} as ${applyRule.category}`)
+      setApplyRule(null)
+      setApplyCount(null)
+    } catch (e) {
+      toast.error(`Failed to apply rule: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setApplying(false)
+    }
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   const catColor = (name: string) =>
@@ -482,6 +524,14 @@ export function VendorRuleManager({
                           title="Test this rule against your transactions"
                         >
                           <FlaskConical size={14} />
+                        </button>
+                        <button
+                          onClick={() => startApply(rule)}
+                          className="transition-colors hover:opacity-80"
+                          style={{ color: 'var(--tx-tertiary)' }}
+                          title="Apply this rule to existing uncategorized transactions"
+                        >
+                          <CheckCheck size={14} />
                         </button>
                         <button
                           onClick={() => handleDelete(rule.id)}
@@ -831,6 +881,47 @@ export function VendorRuleManager({
       </div>
 
       {addError && <p className="text-xs" style={{ color: 'var(--tx-error)' }}>{addError}</p>}
+
+      {/* Apply-to-existing confirm modal */}
+      <Modal
+        open={applyRule !== null}
+        onClose={() => { if (!applying) { setApplyRule(null); setApplyCount(null) } }}
+        title="Apply rule to existing transactions"
+        maxWidth={400}
+      >
+        {applyRule && (
+          <>
+            {applyLoading && (
+              <p className="text-sm" style={{ color: 'var(--tx-secondary)' }}>Checking matches…</p>
+            )}
+            {!applyLoading && applyCount !== null && (
+              <p className="text-sm" style={{ color: 'var(--tx-secondary)' }}>
+                {applyCount === 0
+                  ? 'No uncategorized transactions match this rule.'
+                  : `This will categorize ${applyCount} uncategorized transaction${applyCount !== 1 ? 's' : ''} as "${applyRule.category}". Continue?`}
+              </p>
+            )}
+            <div className="flex gap-2 mt-4 justify-end">
+              <button
+                onClick={() => { setApplyRule(null); setApplyCount(null) }}
+                disabled={applying}
+                className="btn px-3 py-1.5 text-xs rounded-[6px] disabled:opacity-40"
+                style={{ color: 'var(--tx-secondary)', border: '1px solid var(--border-warm)' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmApply}
+                disabled={applying || applyLoading || applyCount === 0}
+                className="btn px-3 py-1.5 text-xs rounded-[6px] disabled:opacity-40"
+                style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}
+              >
+                {applying ? '…' : 'Apply'}
+              </button>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   )
 }
