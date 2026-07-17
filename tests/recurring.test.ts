@@ -3,25 +3,24 @@ import { describe, expect, it, vi } from 'vitest'
 type Tx = { id: number; date: Date; amount: number; description: string; category: string }
 type FullTx = Tx & { status: string; transactionType: string; accountId: number }
 
-// getRecurringSeries's DB query needs the *newest* rows within its `take` cap, not
-// the oldest (review fix on PR #18 — see lib/recurring.ts for the rationale). This
-// fake mirrors the `orderBy: desc, take: N` + slice behavior so the ordering bug
-// can't silently come back.
+// getRecurringSeries's DB query fetches newest-first (review fix on PR #18: an
+// `asc` order fed the detector a years-stale slice). It no longer passes a global
+// `take` — capping is done per description group in JS (takeRecentPerGroup) — so
+// this fake just honors `orderBy` and returns every matching row.
 let fixtureTxs: FullTx[] = []
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     transaction: {
-      findMany: async ({ orderBy, take }: { orderBy: { date: 'asc' | 'desc' }; take: number }) => {
-        const sorted = [...fixtureTxs].sort((a, b) =>
+      findMany: async ({ orderBy }: { orderBy: { date: 'asc' | 'desc' } }) => {
+        return [...fixtureTxs].sort((a, b) =>
           orderBy.date === 'desc' ? b.date.getTime() - a.date.getTime() : a.date.getTime() - b.date.getTime(),
         )
-        return sorted.slice(0, take)
       },
     },
   },
 }))
 
-const { detectRecurring, getRecurringSeries } = await import('@/lib/recurring')
+const { detectRecurring, getRecurringSeries, takeRecentPerGroup } = await import('@/lib/recurring')
 
 let nextId = 1
 function tx(dateIso: string, amount: number, description = 'Netflix Subscription', category = 'Entertainment'): Tx {
@@ -99,16 +98,43 @@ describe('detectRecurring', () => {
   })
 })
 
+describe('takeRecentPerGroup', () => {
+  it('keeps only the most recent N rows per normalized description group', () => {
+    // Newest-first input across two groups; cap of 2 per group.
+    const rows = [
+      { id: 1, description: 'Netflix Subscription', date: '2026-06' },
+      { id: 2, description: 'Store Purchase', date: '2026-05' },
+      { id: 3, description: 'Netflix Subscription', date: '2026-04' },
+      { id: 4, description: 'Netflix Subscription', date: '2026-03' }, // over cap for its group
+      { id: 5, description: 'Store Purchase', date: '2026-02' },
+      { id: 6, description: 'Store Purchase', date: '2026-01' }, // over cap for its group
+    ]
+    const kept = takeRecentPerGroup(rows, 2)
+    expect(kept.map((r) => r.id)).toEqual([1, 2, 3, 5])
+  })
+
+  it('buckets by the same normalized key detectRecurring uses (punctuation/case insensitive)', () => {
+    const rows = [
+      { id: 1, description: 'NETFLIX Subscription!!!' },
+      { id: 2, description: 'netflix subscription #999' },
+    ]
+    // Both normalize to 'netflix subscription' → one group; cap of 1 keeps the first.
+    expect(takeRecentPerGroup(rows, 1).map((r) => r.id)).toEqual([1])
+  })
+})
+
 describe('getRecurringSeries', () => {
-  it('fetches the most recent rows under the take cap, not the oldest, when history exceeds it', async () => {
-    // A years-old, no-longer-active series (would starve out a recent one if the
-    // query fetched oldest-first under a small cap).
+  it('drops a years-old, no-longer-active series in favor of a currently-active one', async () => {
+    // A dead 2020 series. Per-group windowing no longer truncates it out of the
+    // detection window (each group keeps its own recent history), so it IS
+    // detected — but the liveness cut drops it: its last occurrence is many
+    // cadence periods before asOf.
     const stale: FullTx[] = [
       { id: 1, date: new Date('2020-01-01T00:00:00Z'), amount: -1000, description: 'Old Gym', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
       { id: 2, date: new Date('2020-02-01T00:00:00Z'), amount: -1000, description: 'Old Gym', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
       { id: 3, date: new Date('2020-03-01T00:00:00Z'), amount: -1000, description: 'Old Gym', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
     ]
-    // A currently-active series, ~30 days apart, entirely more recent than `stale`.
+    // A currently-active series, ~30 days apart.
     const active: FullTx[] = [
       { id: 10, date: new Date('2026-04-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
       { id: 11, date: new Date('2026-05-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
@@ -117,11 +143,43 @@ describe('getRecurringSeries', () => {
     fixtureTxs = [...stale, ...active]
 
     const asOf = new Date('2026-06-20T00:00:00Z')
-    // A tiny cap simulates "history exceeds `take`": only 3 of the 6 fixture rows
-    // fit. `desc` order must keep the 3 active (newest) rows, not the 3 stale ones.
-    const series = await getRecurringSeries(asOf, undefined, 3)
+    const series = await getRecurringSeries(asOf)
 
     expect(series).toHaveLength(1)
     expect(series[0].description).toBe('Netflix Subscription')
+  })
+
+  it('detects a low-volume monthly series buried under high unrelated transaction volume', async () => {
+    // A genuine monthly subscription: 4 occurrences over ~4 months.
+    const netflix: FullTx[] = [
+      { id: 1, date: new Date('2026-03-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 2, date: new Date('2026-04-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 3, date: new Date('2026-05-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 4, date: new Date('2026-06-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
+    ]
+    // A large volume of unrelated one-off debits, ALL newer than the Netflix
+    // series and numerous enough to exceed the old global cap (2000). Each has a
+    // distinct description, so they form many single-row groups (never recurring)
+    // — but under a global newest-first cap they'd fill the whole window and push
+    // every Netflix occurrence out of it, so the series would go undetected.
+    const noise: FullTx[] = []
+    for (let i = 0; i < 2100; i++) {
+      noise.push({
+        id: 1000 + i,
+        date: new Date('2026-07-01T00:00:00Z'),
+        amount: -(500 + i),
+        description: `Store Purchase ${i}`,
+        category: 'Shopping',
+        status: 'committed',
+        transactionType: 'debit',
+        accountId: 1,
+      })
+    }
+    fixtureTxs = [...netflix, ...noise]
+
+    const asOf = new Date('2026-07-10T00:00:00Z')
+    const series = await getRecurringSeries(asOf)
+
+    expect(series.map((s) => s.description)).toContain('Netflix Subscription')
   })
 })
