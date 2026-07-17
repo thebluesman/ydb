@@ -32,6 +32,14 @@ export function colorForCategory(name: string): string {
   return PALETTE[hashStr(name) % PALETTE.length]
 }
 
+/** Looks up a category's persisted colour, falling back to the same
+ *  deterministic palette colour the auto-create path (`prisma.category.upsert`
+ *  + `colorForCategory`) would assign — so a category dot never differs
+ *  depending on whether the row has been persisted to the Category table yet. */
+export function categoryColor(name: string, categories: { name: string; color: string }[]): string {
+  return categories.find((c) => c.name === name)?.color ?? colorForCategory(name)
+}
+
 // ── WCAG contrast helpers ─────────────────────────────────────────────────────
 
 function toLinear(c: number): number {

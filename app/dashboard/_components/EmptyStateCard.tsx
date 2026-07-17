@@ -23,7 +23,7 @@ export function EmptyStateCard({
         className="flex items-center justify-center rounded-full"
         style={{ width: 40, height: 40, backgroundColor: 'var(--bg-card-alt)', color: 'var(--tx-tertiary)' }}
       >
-        <Inbox size={18} />
+        <Inbox size={20} />
       </span>
       <p className="text-sm font-medium" style={{ color: 'var(--tx-primary)' }}>{title}</p>
       <p className="text-xs max-w-xs" style={{ color: 'var(--tx-faint)' }}>{message}</p>

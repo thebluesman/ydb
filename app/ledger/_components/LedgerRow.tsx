@@ -6,9 +6,10 @@ import { DatePicker } from '@/app/_components/DatePicker'
 import { TransferLinkModal } from './TransferLinkModal'
 import { ReimburseLinkModal } from './ReimburseLinkModal'
 import { SplitForm } from './SplitForm'
-import { Select, Badge, Button, Modal, useToast } from '@/app/_components/ui'
+import { Select, Badge, Button, Modal, CategoryDot, useToast } from '@/app/_components/ui'
 import type { BadgeVariant } from '@/app/_components/ui'
 import { fromCents, toCents } from '@/lib/money'
+import { categoryColor } from '@/lib/category-colors'
 import { deleteWithUndo } from './deleteWithUndo'
 
 type SplitLeg = { id: number; amount: number; category: string; description: string }
@@ -71,12 +72,14 @@ function SimpleSelect({
   value,
   onChange,
   options,
+  showDot = false,
 }: {
   value: string
   onChange: (v: string) => void
-  options: { value: string; label: string }[]
+  options: { value: string; label: string; dot?: string }[]
+  showDot?: boolean
 }) {
-  return <Select value={value} onValueChange={onChange} options={options} />
+  return <Select value={value} onValueChange={onChange} options={options} showDot={showDot} />
 }
 
 function formatDate(d: string | Date) {
@@ -331,7 +334,7 @@ function LedgerRowInner({
               <button onClick={handleCreateRule} disabled={ruleSaving} className="btn px-2.5 py-0.5 rounded-[4px] text-xs font-medium disabled:opacity-40" style={{ backgroundColor: 'var(--bg-btn)', border: '1px solid var(--border-warm)', color: 'var(--tx-primary)' }}>
                 {ruleSaving ? '…' : 'Save'}
               </button>
-              <button onClick={() => setRuleSuggestion(null)} className="transition-opacity hover:opacity-60" style={{ color: 'var(--tx-tertiary)' }}><X size={11} /></button>
+              <button onClick={() => setRuleSuggestion(null)} className="transition-opacity hover:opacity-60" style={{ color: 'var(--tx-tertiary)' }}><X size={12} /></button>
             </div>
           </div>
           {/* Row 2: editable fields */}
@@ -451,10 +454,11 @@ function LedgerRowInner({
                   <SimpleSelect
                     value={draft.category}
                     onChange={(v) => set('category', v)}
+                    showDot
                     options={[
-                      ...categories.map((c) => ({ value: c.name, label: c.name })),
+                      ...categories.map((c) => ({ value: c.name, label: c.name, dot: c.color })),
                       ...(!categories.find((c) => c.name === draft.category) && draft.category
-                        ? [{ value: draft.category, label: draft.category }]
+                        ? [{ value: draft.category, label: draft.category, dot: categoryColor(draft.category, categories) }]
                         : []),
                     ]}
                   />
@@ -628,7 +632,7 @@ function LedgerRowInner({
                     title="Linked transfer"
                     style={{ backgroundColor: 'var(--bg-card-alt)', color: 'var(--tx-tertiary)' }}
                   >
-                    <Link2 size={9} />
+                    <Link2 size={12} />
                     linked
                   </span>
                 )}
@@ -638,7 +642,7 @@ function LedgerRowInner({
                     shape="tag"
                     title={`Pending reimbursement from ${transaction.reimbursableFor}`}
                   >
-                    <RotateCcw size={9} />
+                    <RotateCcw size={12} />
                     reimbursement pending
                   </Badge>
                 )}
@@ -648,7 +652,7 @@ function LedgerRowInner({
                     title={`Reimbursed: ${transaction.reimbursementTx.description}`}
                     style={{ backgroundColor: 'var(--bg-badge-committed)', color: 'var(--tx-badge-committed)' }}
                   >
-                    <CheckCircle2 size={9} />
+                    <CheckCircle2 size={12} />
                     reimbursed
                   </span>
                 )}
@@ -658,7 +662,7 @@ function LedgerRowInner({
                     title={`Reimburses: ${transaction.reimbursedExpense.description}`}
                     style={{ backgroundColor: 'var(--bg-badge-committed)', color: 'var(--tx-badge-committed)' }}
                   >
-                    <RotateCcw size={9} />
+                    <RotateCcw size={12} />
                     reimburses
                   </span>
                 )}
@@ -687,11 +691,16 @@ function LedgerRowInner({
               className="btn flex items-center gap-1 text-sm"
               style={{ color: 'var(--tx-secondary)' }}
             >
-              {showSplitLegs ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              {showSplitLegs ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               Split ×{transaction.splitLegs.length}
             </button>
+          ) : transaction.category ? (
+            <span className="flex items-center gap-1.5">
+              <CategoryDot color={categoryColor(transaction.category, categories)} />
+              {transaction.category}
+            </span>
           ) : (
-            transaction.category || <span style={{ color: 'var(--tx-faint)' }}>—</span>
+            <span style={{ color: 'var(--tx-faint)' }}>—</span>
           )}
         </td>
 
@@ -724,7 +733,7 @@ function LedgerRowInner({
                 title="Unlink transfer"
                 aria-label="Unlink transfer"
               >
-                <Unlink size={13} />
+                <Unlink size={14} />
               </button>
             ) : (
               <button
@@ -734,7 +743,7 @@ function LedgerRowInner({
                 title="Link as transfer"
                 aria-label="Link as transfer"
               >
-                <Link2 size={13} />
+                <Link2 size={14} />
               </button>
             )}
             {transaction.reimbursableFor && (
@@ -746,7 +755,7 @@ function LedgerRowInner({
                   title="Unlink reimbursement"
                   aria-label="Unlink reimbursement"
                 >
-                  <Unlink size={13} />
+                  <Unlink size={14} />
                 </button>
               ) : (
                 <button
@@ -756,7 +765,7 @@ function LedgerRowInner({
                   title="Link reimbursement transaction"
                   aria-label="Link reimbursement transaction"
                 >
-                  <RotateCcw size={13} />
+                  <RotateCcw size={14} />
                 </button>
               )
             )}
@@ -768,7 +777,7 @@ function LedgerRowInner({
                 title="Split transaction"
                 aria-label="Split transaction"
               >
-                <Scissors size={13} />
+                <Scissors size={14} />
               </button>
             )}
             <button
@@ -831,7 +840,12 @@ function LedgerRowInner({
             {leg.amount < 0 ? '−' : '+'}{currency}{fmtMoney(leg.amount)}
           </td>
           <td className="px-3 py-2.5 text-sm" style={{ color: 'var(--tx-faint)' }}>
-            {leg.category}
+            {leg.category && (
+              <span className="flex items-center gap-1.5">
+                <CategoryDot color={categoryColor(leg.category, categories)} />
+                {leg.category}
+              </span>
+            )}
           </td>
           <td colSpan={3} />
         </tr>

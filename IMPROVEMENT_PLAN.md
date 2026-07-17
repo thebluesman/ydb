@@ -966,7 +966,44 @@ Target: fully usable on a ~390px phone; comfortable on tablet.
 - Verify: every page reachable from the nav in one click; a new user can go from empty DB →
   imported statement → categorized ledger without reading the guide.
 
-### Phase U6 — Visual polish & performance of the UI itself
+> **M6 gap-fill status: DONE.** Nav/ledger-date-filter/money-formatting/empty-states/first-run
+> landed in `claude/m6b-ia-ux` (#12); this closes the two items M6's checkpoint definition of done
+> listed but that PR didn't cover:
+>
+> 1. **Category color dots — done.** New `lib/category-colors.ts` `categoryColor(name, categories)`
+>    looks up a category's persisted colour, falling back to the same deterministic
+>    `colorForCategory` the auto-create path already uses, so a dot is never missing even for a
+>    category not yet in the `Category` table. New shared `<CategoryDot>` primitive
+>    (`app/_components/ui/CategoryDot.tsx`). Wired into: `LedgerRow.tsx` (read-only cell, split-leg
+>    rows, and the inline-edit category `Select` via a `dot` per option), `LedgerRowCard.tsx` (the
+>    category `Badge`), `LedgerView.tsx` (the hand-rolled Radix category filter), and
+>    `ReviewTable.tsx`'s `CategorySelect` (trigger + dropdown items). `CategoryManager.tsx` already
+>    rendered full-colour pills, so it was left as-is — a stronger treatment than a dot, not a gap.
+>    Native `<select>`/`<datalist>` category inputs (the ledger "Add transaction" form,
+>    `LedgerRowCard`'s inline edit) can't render a coloured swatch inside `<option>` cross-browser,
+>    so those were deliberately left alone.
+> 2. **Settings sub-navigation — done.** New `SettingsSubNav.tsx`, a sticky (`top-14`, below the
+>    global header) pill nav for the 8 sections the checkpoint named. Added the 3 missing anchor ids
+>    it needed (`categories` on `AccountsForm.tsx`'s Categories card, `rules` on
+>    `SettingsCategoryBridge.tsx`'s Patterns card, `danger-zone` wrapping `<DangerZone />` in
+>    `settings/page.tsx`) — `accounts`/`budgets` already existed from #12's own review fix. Active
+>    section tracks scroll position via each target's `getBoundingClientRect().top` on a scroll
+>    listener rather than `IntersectionObserver`: an observer with a narrow top-of-viewport band goes
+>    stale while scrolled through an *untracked* section (Preferences, Reconciliation — neither is
+>    part of the named 8 and has no anchor id), since nothing tracked intersects the band there: the
+>    walk-every-section approach always finds the last one reached, gap or not. Every anchor target
+>    also got `scroll-mt-24` so the anchor-scroll lands below the sticky header + sub-nav instead of
+>    under it.
+>
+> **Verified:** `tsc --noEmit`, `npx eslint app lib` (31 problems — unchanged baseline), and
+> `npm run test:run` (146/146) all clean. Screenshotted with Playwright (installed ad hoc, not added
+> to `package.json` — same pattern PR #10 used for `@axe-core/playwright`) against seeded test data:
+> confirmed the category dot renders in the ledger row, the category filter dropdown, the inline-edit
+> `Select`, and the row-edit `TYPE`/`CATEGORY` selects; confirmed the sub-nav's active pill tracks
+> scroll position correctly through the Preferences/Reconciliation gaps and that clicking a pill lands
+> the target section below the sticky chrome, not under it.
+
+### Phase U6 — Visual polish & performance of the UI itself ✅ (M7b)
 
 - Convert the 9 `.ttf` fonts to `.woff2` and drop unused IBM Plex Mono weights (keep 400/500/600);
   `next/font/local` supports woff2 directly. Cuts several hundred KB from first load.
@@ -979,6 +1016,45 @@ Target: fully usable on a ~390px phone; comfortable on tablet.
   CSS-var-driven `stroke`/`fill` so charts re-theme without a re-render).
 - Verify: Lighthouse (production build) — a11y score ≥ 95, no layout shift from fonts
   (`font-display: swap` already set), total font transfer < 200 KB.
+
+> **M7b status:** done. **Fonts:** all 9 `.ttf` files converted to `.woff2` via `fontTools`
+> (`flavor = 'woff2'`); IBM Plex Mono trimmed from 7 weights to 3 (400/500/600 — Thin,
+> ExtraLight, Light, Bold deleted). `app/layout.tsx`'s `next/font/local` declarations updated to
+> point at the woff2 files with the trimmed weight list; `display: 'swap'` was already set and
+> untouched. Total font payload: 1,143,200 B (9 `.ttf`, ~1.09 MiB) → 196,020 B (5 `.woff2`,
+> ~191 KiB) — an 83% reduction, confirmed under the 200 KB target by measuring the actual
+> `/_next/static/media/*.woff2` transfer sizes off a production build. **Radius:** added a
+> `--radius-xs/sm/md/lg/pill` (4/6/8/12/9999px) scale to `globals.css` and pointed the shared
+> primitives (`.card`, `.btn`, `.ui-input`, `.ui-modal-content`, `.skeleton`, `Select.tsx`,
+> `Badge.tsx`, the global `:focus-visible` rule) at it instead of hardcoded px; the one true
+> off-scale outlier found (`BackupManager`'s `rounded-[5px]`) was fixed to the 6px token. The
+> remaining ad hoc `rounded-[Npx]` call sites across ledger/dashboard/settings already matched
+> the 4/6/8 scale numerically, so per the plan's "does not need to be exhaustive" they were left
+> as-is rather than swept file-by-file. **Icon sizes:** normalized every off-scale
+> `size={9|10|11|13|15|18}` lucide prop across the primitives, nav, and ledger/dashboard/settings
+> screens to the 12/14/16/20/28 set (9/10/11→12, 13→14, 15→16, 18→20); a handful of large
+> decorative/illustration icons in upload/chat success states (22/32/36/40) were left alone as
+> out-of-scope for a "no redesign" pass. **Chart theming:** `DashboardView.tsx`,
+> `CategoryTrendChart.tsx`, and `NetWorthWidget.tsx` no longer branch tick/grid/cursor/tooltip
+> colors on an `isDark` MutationObserver state — added `--chart-tick`/`--chart-grid`/
+> `--chart-cursor` tokens (light + `.dark` override) to `globals.css` and pass them directly as
+> Recharts `stroke`/`fill` strings; the dashboard's account-balance gradient fade (the other
+> `isDark` consumer) now reads `var(--bg-page)` instead. All three files' `isDark` state,
+> `useEffect`, and `MutationObserver` were removed entirely — not just left dormant — since
+> nothing remaining needed a JS-level re-render for color. **Table density:** added a
+> comfortable/compact toggle button next to Export in `LedgerView`'s desktop table header
+> (`Rows2`/`Rows3` icons), persisted to `localStorage` (`ledgerDensity`, same pattern as the theme
+> toggle); compact mode applies a `.ledger-table-compact` class picked up by a `td`/`th` CSS rule
+> in `globals.css` that tightens vertical padding and font-size without threading a density prop
+> through `LedgerRow`. **Verify:** `npm run lint && npm run test:run && npm run build` all green
+> (the pre-existing lint errors/warnings in `guide`/`upload`/`RecurringTransactions`/
+> `SettingsCategoryBridge` are unchanged from `main`, confirmed via `git diff --stat origin/main`
+> on those files). No Lighthouse CLI was available in this sandboxed environment, so a11y ≥ 95
+> wasn't measured numerically here; instead verified manually via Playwright (Chromium) headless
+> screenshots of `/dashboard`, `/ledger`, `/settings` in both light and dark mode — layout,
+> spacing, and theme all render correctly with no visual regression — plus confirmed
+> `font-display: swap` survived in the built CSS and the woff2 files are actually served
+> (`/_next/static/media/*.woff2`, verified via `curl`).
 
 ---
 

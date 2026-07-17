@@ -59,7 +59,7 @@ export function ConfigLink() {
         fontWeight: 600,
       }}
     >
-      <Settings size={13} />
+      <Settings size={14} />
       <span>Settings</span>
     </Link>
   )

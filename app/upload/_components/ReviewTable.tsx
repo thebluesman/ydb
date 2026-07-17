@@ -4,8 +4,9 @@ import { memo, useCallback, useState, useEffect, useRef } from 'react'
 import { X, ChevronDown, Plus, Check } from 'lucide-react'
 import * as RSelect from '@radix-ui/react-select'
 import { DatePicker } from '@/app/_components/DatePicker'
-import { Select, Button, Modal, Field, Input, useToast } from '@/app/_components/ui'
+import { Select, Button, Modal, Field, Input, CategoryDot, useToast } from '@/app/_components/ui'
 import { toCents } from '@/lib/money'
+import { categoryColor } from '@/lib/category-colors'
 
 export type DraftTransaction = {
   _id: string; date: string; description: string; originalDescription: string; amount: number
@@ -174,6 +175,7 @@ function CategorySelect({
         className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm rounded-[6px] outline-none"
         style={inputStyle}
       >
+        {value && <CategoryDot color={categoryColor(value, categories)} />}
         <span className="flex-1 truncate text-left">{value}</span>
         <RSelect.Icon className="ml-auto shrink-0" style={{ color: 'var(--tx-tertiary)' }}>
           <ChevronDown size={12} />
@@ -206,6 +208,7 @@ function CategorySelect({
                 style={{ color: 'var(--tx-primary)' }}
               >
                 <Check size={12} style={{ flexShrink: 0, color: 'var(--tx-secondary)' }} />
+                <CategoryDot color={categoryColor(value, categories)} />
                 <RSelect.ItemText>{value}</RSelect.ItemText>
               </RSelect.Item>
             )}
@@ -218,6 +221,7 @@ function CategorySelect({
                 <span style={{ width: 12, flexShrink: 0 }}>
                   {c.name === value && <Check size={12} style={{ color: 'var(--tx-secondary)' }} />}
                 </span>
+                <CategoryDot color={c.color} />
                 <RSelect.ItemText>{c.name}</RSelect.ItemText>
               </RSelect.Item>
             ))}
@@ -594,7 +598,7 @@ const Row = memo(function Row({
           style={{ color: 'var(--tx-tertiary)' }}
           aria-label="Remove row"
         >
-          <X size={15} />
+          <X size={16} />
         </button>
       </div>
 
@@ -624,7 +628,7 @@ const Row = memo(function Row({
                 className="transition-opacity hover:opacity-60"
                 style={{ color: 'var(--tx-tertiary)' }}
               >
-                <X size={11} />
+                <X size={12} />
               </button>
             </div>
           </div>

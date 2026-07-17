@@ -56,7 +56,7 @@ export function ThemeToggle() {
         color: 'var(--tx-secondary)',
       }}
     >
-      <Icon size={13} />
+      <Icon size={14} />
       <span>{LABEL[theme]}</span>
     </button>
   )

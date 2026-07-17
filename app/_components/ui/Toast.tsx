@@ -98,7 +98,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 animation: 'ydb-toast-in 0.18s cubic-bezier(0.22,1,0.36,1) both',
               }}
             >
-              <Icon size={15} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+              <Icon size={16} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
               <span style={{ flex: 1, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{t.message}</span>
               {t.action && (
                 <button
@@ -116,7 +116,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 aria-label="Dismiss"
                 style={{ flexShrink: 0, color: s.fg, opacity: 0.6, background: 'none', border: 'none', cursor: 'pointer', marginTop: 1 }}
               >
-                <X size={13} />
+                <X size={14} />
               </button>
             </div>
           )

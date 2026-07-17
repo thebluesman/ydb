@@ -121,7 +121,7 @@ export function DangerZone() {
         maxWidth={448}
         title={
           <span className="flex items-center gap-2">
-            <AlertTriangle size={15} style={{ color: 'var(--tx-error)' }} />
+            <AlertTriangle size={16} style={{ color: 'var(--tx-error)' }} />
             Clear Data
           </span>
         }

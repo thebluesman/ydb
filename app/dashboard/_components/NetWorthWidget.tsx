@@ -1,6 +1,5 @@
 'use client'
 
-import { useState, useEffect } from 'react'
 import {
   ResponsiveContainer,
   LineChart,
@@ -21,6 +20,18 @@ function fmtShort(cents: number) {
   return v.toFixed(0)
 }
 
+// Tick/grid/tooltip colors come from CSS custom properties (globals.css)
+// rather than a JS isDark branch, so the chart re-themes for free when the
+// .dark class toggles.
+const CHART_TICK_STYLE = { fontSize: 11, fill: 'var(--chart-tick)' }
+const TOOLTIP_STYLE: React.CSSProperties = {
+  backgroundColor: 'var(--bg-card)',
+  border: '1px solid var(--border-warm)',
+  borderRadius: 'var(--radius-sm)',
+  fontSize: '12px',
+  color: 'var(--tx-primary)',
+}
+
 export function NetWorthWidget({
   accountBalances,
   netWorthHistory,
@@ -30,16 +41,6 @@ export function NetWorthWidget({
   netWorthHistory: NetWorthPoint[]
   currency: string
 }) {
-  const [isDark, setIsDark] = useState(false)
-
-  useEffect(() => {
-    const update = () => setIsDark(document.documentElement.classList.contains('dark'))
-    update()
-    const obs = new MutationObserver(update)
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-    return () => obs.disconnect()
-  }, [])
-
   // Under the canonical convention (lib/accounts.ts) currentBalance is cash
   // for assets and debt owed for liabilities. Treat both sign-aligned.
   const assets = accountBalances
@@ -51,17 +52,6 @@ export function NetWorthWidget({
     .reduce((s, a) => s + Math.max(a.currentBalance, 0), 0)
 
   const netWorth = assets - liabilities
-
-  const tick   = isDark ? 'rgba(242,241,237,0.45)' : 'rgba(38,37,30,0.45)'
-  const grid   = isDark ? 'rgba(242,241,237,0.07)' : 'rgba(38,37,30,0.07)'
-
-  const tooltipStyle: React.CSSProperties = {
-    backgroundColor: 'var(--bg-card)',
-    border: '1px solid var(--border-warm)',
-    borderRadius: '6px',
-    fontSize: '12px',
-    color: 'var(--tx-primary)',
-  }
 
   const fmt = (cents: number) => `${currency} ${fromCents(Math.abs(cents)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
@@ -87,16 +77,16 @@ export function NetWorthWidget({
       {netWorthHistory.length > 1 && (
         <ResponsiveContainer width="100%" height={160}>
           <LineChart data={netWorthHistory} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={grid} />
-            <XAxis dataKey="period" tick={{ fontSize: 11, fill: tick }} axisLine={false} tickLine={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+            <XAxis dataKey="period" tick={CHART_TICK_STYLE} axisLine={false} tickLine={false} />
             <YAxis
-              tick={{ fontSize: 11, fill: tick }}
+              tick={CHART_TICK_STYLE}
               tickFormatter={(v) => `${currency} ${fmtShort(v)}`}
               axisLine={false} tickLine={false} width={72}
             />
             <Tooltip
               formatter={((value: unknown) => [fmt(Number(value)), 'Net Worth']) as never}
-              contentStyle={tooltipStyle}
+              contentStyle={TOOLTIP_STYLE}
             />
             <Line
               type="monotone"
