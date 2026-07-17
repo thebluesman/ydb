@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { DashboardView } from './_components/DashboardView'
 import { computeBalance, isAsset } from '@/lib/accounts'
+import { getRecurringSeries, type RecurringSeries } from '@/lib/recurring'
 import {
   toDbDate,
   monthlySql,
@@ -96,6 +97,10 @@ export default async function DashboardPage({
 
   const accountsForCurrency = allAccounts.filter((a) => a.currency === selectedCurrency)
   const accountIds = accountsForCurrency.map((a) => a.id)
+
+  // Recurring detection (Phase 7 item 5), scoped to the selected currency's
+  // accounts so the widget's currency label matches the amounts shown.
+  const recurringSeries = accountIds.length === 0 ? [] : await getRecurringSeries(now, accountIds)
 
   // ── Resolve date range ─────────────────────────────────────────────────────
   const defaultStartDate = new Date(now.getFullYear(), now.getMonth() - 11, 1)
@@ -314,6 +319,14 @@ export default async function DashboardPage({
     actual: rangeCatMap.get(b.category) ?? 0,
   }))
 
+  // ── Upcoming bills (Phase 7 item 5) ─────────────────────────────────────────
+  // Detected series whose projected next occurrence falls in the current
+  // calendar month, plus any overdue from an earlier month — sorted soonest
+  // (or most overdue) first.
+  const upcomingBills: RecurringSeries[] = recurringSeries
+    .filter((s) => s.isDueThisMonth || s.isOverdue)
+    .sort((a, b) => a.nextDate.localeCompare(b.nextDate))
+
   // ── Top 10 transactions ──────────────────────────────────────────────────────
   // Exclude transfers (movement between your own accounts isn't "spend" or
   // "income") and split parents (their legs carry the real breakdown), plus
@@ -395,6 +408,7 @@ export default async function DashboardPage({
           currentStartDate={startDate.toISOString().split('T')[0]}
           currentEndDate={endDate.toISOString().split('T')[0]}
           budgetData={budgetData}
+          upcomingBills={upcomingBills}
           isFreshDatabase={isFreshDatabase}
           hasAccounts={allAccounts.length > 0}
           hasBudgets={budgets.length > 0}
