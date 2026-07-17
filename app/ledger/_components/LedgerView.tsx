@@ -136,7 +136,15 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
   // (roving tabindex), `e` opens that row's existing inline-edit mode.
   const searchInputRef = useRef<HTMLInputElement>(null)
   const rowHandles = useRef<Map<number, LedgerRowHandle>>(new Map())
-  const [focusedRowIndex, setFocusedRowIndex] = useState<number | null>(null)
+  // Tracked by row id, not array index: a same-page refetch (e.g. saving the
+  // row's own inline edit) replaces `rows` with a new array reference, but the
+  // edited row's id is still in it at the same or a nearby position — deriving
+  // the index from the id lets keyboard focus survive that refetch instead of
+  // resetting to nothing after every save. An actual page/filter change won't
+  // contain the old id, so this still naturally clears focus in that case.
+  const [focusedRowId, setFocusedRowId] = useState<number | null>(null)
+  const focusedRowIndexRaw = focusedRowId === null ? -1 : rows.findIndex((r) => r.id === focusedRowId)
+  const focusedRowIndex = focusedRowIndexRaw === -1 ? null : focusedRowIndexRaw
 
   const currency = stats.currency
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -203,10 +211,6 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
     return () => clearTimeout(t)
   }, [searchInput, urlSearch, updateParams])
 
-  // Row list changed (new page, new filters, refetch) — the previous
-  // keyboard-focused index no longer points at a meaningful row.
-  useEffect(() => { setFocusedRowIndex(null) }, [rows])
-
   // ── Global keyboard shortcuts ────────────────────────────────────────────
   // Desktop table only (below `md` the ledger renders cards, not rows, and
   // arrow-key row nav doesn't apply on touch). Scoped to `document` since
@@ -235,7 +239,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
         // one is open, since that's a different (and already-handled)
         // Escape target.
         if (document.querySelector('[role="dialog"], [role="listbox"]')) return
-        if (focusedRowIndex !== null) { setFocusedRowIndex(null); return }
+        if (focusedRowIndex !== null) { setFocusedRowId(null); return }
         if (target === searchInputRef.current) searchInputRef.current?.blur()
         return
       }
@@ -250,10 +254,12 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
 
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setFocusedRowIndex((prev) => (prev === null ? 0 : Math.min(prev + 1, rows.length - 1)))
+        const next = focusedRowIndex === null ? 0 : Math.min(focusedRowIndex + 1, rows.length - 1)
+        setFocusedRowId(rows[next].id)
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setFocusedRowIndex((prev) => (prev === null ? 0 : Math.max(prev - 1, 0)))
+        const next = focusedRowIndex === null ? 0 : Math.max(focusedRowIndex - 1, 0)
+        setFocusedRowId(rows[next].id)
       } else if (e.key === 'e' && focusedRowIndex !== null) {
         const row = rows[focusedRowIndex]
         if (row) {

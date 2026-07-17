@@ -682,6 +682,21 @@ Ordered by value for a single home user:
 > bug (matching `"Save"` text, which the pre-existing vendor-rule-suggestion strip also uses,
 > instead of `"Cancel"`, which is unique to inline-edit mode), not from the feature; fixed the
 > assertion and reran clean.
+>
+> **Review fix:** `focusedRowIndex` was plain array-index state, reset to `null` on every `rows`
+> change — including the same-page refetch that saving an inline edit triggers. That broke the
+> arrow→`e`→edit→save→arrow loop the shortcut exists for: each save lost the cursor's place, so the
+> next `ArrowDown` restarted from row 0 instead of continuing near the row just edited. Changed the
+> underlying state to `focusedRowId` (the row's id, not its index) and derive `focusedRowIndex` each
+> render via `rows.findIndex(...)` — a same-page refetch still contains the edited row's id, so the
+> derived index just follows it to its (possibly unchanged) new position; an actual page/filter
+> change won't contain the old id, so it still naturally resolves to `null`, with no explicit reset
+> effect needed at all (deleted the old one). Re-verified live against the same seeded production
+> server: arrowed to a row, captured its date cell text, pressed `e`, clicked Save with no changes,
+> and confirmed the same row (by cell text) still carries `data-kbd-focused="true"` after the
+> refetch settles; separately confirmed clicking to the next ledger page still clears keyboard focus
+> (0 focused rows) as before. `npx tsc --noEmit`, `npm run lint`, and `npm run test:run` (211/211)
+> all stayed clean.
 
 ### Phase 8 — Testing, tooling, deployment
 
