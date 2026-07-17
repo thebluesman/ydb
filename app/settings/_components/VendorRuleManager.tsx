@@ -359,7 +359,7 @@ export function VendorRuleManager({
                   <button
                     onClick={() => setCollapsed((s) => {
                       const n = new Set(s)
-                      n.has(vendorName) ? n.delete(vendorName) : n.add(vendorName)
+                      if (n.has(vendorName)) { n.delete(vendorName) } else { n.add(vendorName) }
                       return n
                     })}
                     className="btn flex items-center gap-1.5 flex-1 min-w-0 text-left"

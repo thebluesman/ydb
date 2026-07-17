@@ -17,15 +17,12 @@ export function RecurringTransactions() {
   const [data, setData] = useState<RecurringRow[] | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const load = () => {
-    setLoading(true)
+  useEffect(() => {
     fetch('/api/recurring')
       .then((r) => r.json())
       .then((rows) => { setData(rows); setLoading(false) })
       .catch(() => { setData([]); setLoading(false) })
-  }
-
-  useEffect(() => { load() }, [])
+  }, [])
 
   if (loading) {
     return (

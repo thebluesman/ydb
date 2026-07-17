@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RefreshCw, Target, RotateCcw, CheckCircle2, FlaskConical, AlertTriangle, History, Settings } from 'lucide-react'
+import { Upload, ScanText, CheckCircle, LayoutDashboard, Gem, MessageCircle, Database, FileCode2, TextQuote, Link2, Scissors, Download, RotateCcw, CheckCircle2, FlaskConical, AlertTriangle } from 'lucide-react'
 import { GuideNav } from './GuideNav'
 import { FormatDemo, TransactionRowDemo, ChatConversationDemo, ReimbursementDemo } from './GuideDemos'
 
@@ -722,7 +722,7 @@ export function GuideView({ currency }: { currency: string }) {
                 Patterns are rules that match raw bank statement text and apply a set of outputs: a
                 human-readable <strong>display name</strong>, a <strong>category</strong>, and optionally
                 a <strong>transaction type</strong> override. They run at import time — before the review
-                table — so you see friendly names immediately. Patterns take priority over Qwen's guesses.
+                table — so you see friendly names immediately. Patterns take priority over Qwen&apos;s guesses.
               </BodyText>
               <BodyText>
                 The raw bank text is always preserved as a secondary line beneath the display name,
@@ -762,10 +762,10 @@ export function GuideView({ currency }: { currency: string }) {
 
               <SubHeading>Set type</SubHeading>
               <BodyText>
-                <strong>Set type</strong> is an output assignment — when a pattern matches, the transaction's
+                <strong>Set type</strong> is an output assignment — when a pattern matches, the transaction&apos;s
                 type is stamped as Debit, Credit, or Transfer. Use this for transactions whose type
                 is always known from the description, e.g. <em>CREDIT CARD PAYMENT</em> → Transfer.
-                If left as "Don't override", the type is inferred from the amount sign.
+                If left as &quot;Don&apos;t override&quot;, the type is inferred from the amount sign.
               </BodyText>
 
               <SubHeading>Priority</SubHeading>
@@ -817,7 +817,7 @@ export function GuideView({ currency }: { currency: string }) {
 
               <Tip>
                 Start with your most frequent vendors (supermarkets, subscriptions, transport) as
-                explicit patterns. Use <strong>Set type</strong> for anything that's always a Transfer
+                explicit patterns. Use <strong>Set type</strong> for anything that&apos;s always a Transfer
                 (credit card payments, inter-account moves). Let learned patterns fill in the rest over time.
               </Tip>
             </Section>
@@ -826,8 +826,8 @@ export function GuideView({ currency }: { currency: string }) {
             <Section id="budgets" num="06" title="Budgets">
               <BodyText>
                 Budgets let you set a monthly spending limit per category. Once set, the Dashboard shows
-                a live progress bar for each budget — green while you're on track, amber when you're
-                approaching the limit (80 %), and red if you've gone over.
+                a live progress bar for each budget — green while you&apos;re on track, amber when you&apos;re
+                approaching the limit (80 %), and red if you&apos;ve gone over.
               </BodyText>
 
               <DemoShell label="Budget progress — current month">
@@ -862,7 +862,7 @@ export function GuideView({ currency }: { currency: string }) {
                 <StatCardsDemo currency={currency} />
               </DemoShell>
 
-              <SubHeading>What's on the dashboard</SubHeading>
+              <SubHeading>What&apos;s on the dashboard</SubHeading>
               <div className="space-y-2 mt-2 text-sm" style={{ color: 'var(--tx-secondary)' }}>
                 {[
                   ['Account balances', 'Opening balance + all committed transactions = current balance for each account.'],
@@ -915,7 +915,7 @@ export function GuideView({ currency }: { currency: string }) {
               <SubHeading>What to do with them</SubHeading>
               <BodyText>
                 Use the list as a prompt to create vendor rules or budgets for any recurring charge
-                you haven't already categorised. It's also a quick way to spot forgotten subscriptions.
+                you haven&apos;t already categorised. It&apos;s also a quick way to spot forgotten subscriptions.
               </BodyText>
 
               <Tip>
@@ -1102,7 +1102,7 @@ export function GuideView({ currency }: { currency: string }) {
             <Section id="settings" num="12" title="Settings">
               <BodyText>
                 <Link href="/settings" className="underline underline-offset-2" style={{ color: 'var(--tx-primary)' }}>Settings</Link>{' '}
-                is the control panel for everything that isn't a transaction. Accounts, categories, patterns,
+                is the control panel for everything that isn&apos;t a transaction. Accounts, categories, patterns,
                 budgets, backups, and preferences all live here — along with a few housekeeping tools.
               </BodyText>
 
@@ -1144,7 +1144,7 @@ export function GuideView({ currency }: { currency: string }) {
                       ['Categories',      'Removes all categories and their associated budget targets.'],
                       ['Patterns',        'Removes all vendor rules. Past transactions are unaffected; future imports will not match.'],
                       ['Chat History',    'Deletes all AI assistant conversations. Transaction data is untouched.'],
-                    ].map(([label, desc], i, arr) => (
+                    ].map(([label, desc]) => (
                       <tr key={label} style={{ borderTop: '1px solid var(--border-warm)' }}>
                         <td className="px-4 py-2.5 font-medium align-top" style={{ color: 'var(--tx-primary)' }}>{label}</td>
                         <td className="px-4 py-2.5 align-top" style={{ color: 'var(--tx-secondary)' }}>{desc}</td>

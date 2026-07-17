@@ -1,7 +1,7 @@
 'use client'
 
 import { useDropzone } from 'react-dropzone'
-import { Upload, FileText, Image, FileSpreadsheet } from 'lucide-react'
+import { Upload, FileText, Image as ImageIcon, FileSpreadsheet } from 'lucide-react'
 
 export function FileDropzone({
   onFile, disabled, file, onClear, accept, hint,
@@ -34,7 +34,7 @@ export function FileDropzone({
             ? <FileSpreadsheet size={22} style={{ color: 'var(--tx-secondary)' }} />
             : file.type === 'application/pdf'
               ? <FileText size={22} style={{ color: 'var(--tx-secondary)' }} />
-              : <Image size={22} style={{ color: 'var(--tx-secondary)' }} />}
+              : <ImageIcon size={22} style={{ color: 'var(--tx-secondary)' }} />}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate" style={{ color: 'var(--tx-primary)' }}>{file.name}</p>

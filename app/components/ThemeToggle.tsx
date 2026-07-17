@@ -16,12 +16,15 @@ const ICON = { light: Sun, dark: Moon, system: Monitor }
 const LABEL: Record<Theme, string> = { light: 'Light', dark: 'Dark', system: 'System' }
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>('system')
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === 'undefined') return 'system'
+    const stored = localStorage.getItem('theme')
+    return stored === 'light' || stored === 'dark' ? stored : 'system'
+  })
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    const stored = localStorage.getItem('theme')
-    setTheme(stored === 'light' || stored === 'dark' ? stored : 'system')
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time hydration-safe mount flag, not derived render state
     setMounted(true)
   }, [])
 
