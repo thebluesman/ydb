@@ -105,16 +105,26 @@ export function detectRecurring(txs: Tx[], asOf: Date = new Date()): RecurringSe
 export async function getRecurringSeries(
   asOf: Date = new Date(),
   accountIds?: number[],
+  take = 2000,
 ): Promise<RecurringSeries[]> {
+  // `take: 2000` needs the *most recent* 2000 rows, not the oldest — a `date: 'asc'`
+  // order here would silently starve the detector of any transaction past the first
+  // 2000 ever recorded on accounts with long history (review fix on PR #18: this was
+  // carried over from the original /api/recurring route, where a stale detection
+  // window was low-stakes, but it became load-bearing once this feeds the dashboard's
+  // "Upcoming this month" widget — a stale window can misreport bills as overdue or
+  // miss recently-started ones). Fetch newest-first, then re-sort ascending since
+  // detectRecurring's gap math assumes chronological order.
   const txs = await prisma.transaction.findMany({
     where: {
       status: { in: ['committed', 'reconciled'] },
       transactionType: 'debit',
       ...(accountIds ? { accountId: { in: accountIds } } : {}),
     },
-    orderBy: { date: 'asc' },
+    orderBy: { date: 'desc' },
     select: { id: true, date: true, amount: true, description: true, category: true },
-    take: 2000,
+    take,
   })
+  txs.reverse()
   return detectRecurring(txs, asOf)
 }

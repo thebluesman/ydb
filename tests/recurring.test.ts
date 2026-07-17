@@ -1,7 +1,27 @@
-import { describe, expect, it } from 'vitest'
-import { detectRecurring } from '@/lib/recurring'
+import { describe, expect, it, vi } from 'vitest'
 
 type Tx = { id: number; date: Date; amount: number; description: string; category: string }
+type FullTx = Tx & { status: string; transactionType: string; accountId: number }
+
+// getRecurringSeries's DB query needs the *newest* rows within its `take` cap, not
+// the oldest (review fix on PR #18 — see lib/recurring.ts for the rationale). This
+// fake mirrors the `orderBy: desc, take: N` + slice behavior so the ordering bug
+// can't silently come back.
+let fixtureTxs: FullTx[] = []
+vi.mock('@/lib/prisma', () => ({
+  prisma: {
+    transaction: {
+      findMany: async ({ orderBy, take }: { orderBy: { date: 'asc' | 'desc' }; take: number }) => {
+        const sorted = [...fixtureTxs].sort((a, b) =>
+          orderBy.date === 'desc' ? b.date.getTime() - a.date.getTime() : a.date.getTime() - b.date.getTime(),
+        )
+        return sorted.slice(0, take)
+      },
+    },
+  },
+}))
+
+const { detectRecurring, getRecurringSeries } = await import('@/lib/recurring')
 
 let nextId = 1
 function tx(dateIso: string, amount: number, description = 'Netflix Subscription', category = 'Entertainment'): Tx {
@@ -76,5 +96,32 @@ describe('detectRecurring', () => {
     const series = detectRecurring([...netflix, ...gym], new Date('2026-06-20T00:00:00Z'))
     expect(series).toHaveLength(2)
     expect(series.map((s) => s.description).sort()).toEqual(['Gym Membership Fee', 'Netflix Subscription'])
+  })
+})
+
+describe('getRecurringSeries', () => {
+  it('fetches the most recent rows under the take cap, not the oldest, when history exceeds it', async () => {
+    // A years-old, no-longer-active series (would starve out a recent one if the
+    // query fetched oldest-first under a small cap).
+    const stale: FullTx[] = [
+      { id: 1, date: new Date('2020-01-01T00:00:00Z'), amount: -1000, description: 'Old Gym', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 2, date: new Date('2020-02-01T00:00:00Z'), amount: -1000, description: 'Old Gym', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 3, date: new Date('2020-03-01T00:00:00Z'), amount: -1000, description: 'Old Gym', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
+    ]
+    // A currently-active series, ~30 days apart, entirely more recent than `stale`.
+    const active: FullTx[] = [
+      { id: 10, date: new Date('2026-04-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 11, date: new Date('2026-05-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 12, date: new Date('2026-06-15T00:00:00Z'), amount: -1500, description: 'Netflix Subscription', category: 'Entertainment', status: 'committed', transactionType: 'debit', accountId: 1 },
+    ]
+    fixtureTxs = [...stale, ...active]
+
+    const asOf = new Date('2026-06-20T00:00:00Z')
+    // A tiny cap simulates "history exceeds `take`": only 3 of the 6 fixture rows
+    // fit. `desc` order must keep the 3 active (newest) rows, not the 3 stale ones.
+    const series = await getRecurringSeries(asOf, undefined, 3)
+
+    expect(series).toHaveLength(1)
+    expect(series[0].description).toBe('Netflix Subscription')
   })
 })

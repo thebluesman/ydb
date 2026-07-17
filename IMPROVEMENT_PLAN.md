@@ -572,6 +572,17 @@ Ordered by value for a single home user:
    > `dev.db` — `tests/sqlGuard.test.ts` and the production build both need real tables and fail
    > identically on unmodified `main` without it), and `npm run build` clean. Smoke-tested
    > `/dashboard` and `/api/recurring` against the running production build.
+   >
+   > **Review fix:** `getRecurringSeries`'s query used `orderBy: { date: 'asc' }` with `take: 2000`
+   > — fetching the *oldest* 2000 matching debits, not the most recent. Harmless when the route was
+   > just a standalone list, but load-bearing now that it feeds "Upcoming this month": any account
+   > with more than 2000 committed/reconciled debits in its history would compute `nextDate` from a
+   > years-stale slice, misreporting bills as overdue (or missing recently-started ones) forever.
+   > Switched to `orderBy: { date: 'desc' }` + a `.reverse()` after the fetch (the gap math in
+   > `detectRecurring` assumes ascending order). Added an optional `take` param (default 2000, same
+   > as before) so `tests/recurring.test.ts` can exercise the cap with a small fixture instead of
+   > needing thousands of rows; new test confirms a stale 2020 series is dropped in favor of a
+   > currently-active one when both compete for a tiny cap.
 6. **Budget UX.** Budgets exist; add per-category month history sparkline in `BudgetWidget` and an
    "over budget" callout. (Skip envelope/rollover mechanics — overkill for this app.)
 7. **Rules retro-apply.** In `VendorRuleManager`, "Apply to existing" button per rule → bulk-update
