@@ -62,7 +62,7 @@ export function SettingsCategoryBridge({
           Patterns
         </h2>
         <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
-          Match raw statement text to a display name and category. Patterns run at import time and take priority over the model's guesses.
+          Match raw statement text to a display name and category. Patterns run at import time and take priority over the model&apos;s guesses.
         </p>
         <VendorRuleManager
           rules={rules}

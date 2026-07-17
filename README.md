@@ -101,6 +101,84 @@ SQLite error) before surfacing the error to you.
 
 > **Note:** The AI chat requires Ollama to be running locally.
 
+## Home server
+
+ydb is designed to run continuously on a home server (LAN-only, no auth — see the "Explicit
+non-goals" in `IMPROVEMENT_PLAN.md`). This section covers the pieces of that setup beyond the
+`npm run build && npm run start` instructions above: running as a systemd service, configuring
+`OLLAMA_URL`, and — most importantly — backing up the database correctly.
+
+### Running as a systemd service
+
+A sample unit is checked in at [`deploy/ydb.service`](deploy/ydb.service):
+
+```bash
+sudo cp deploy/ydb.service /etc/systemd/system/ydb.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ydb
+```
+
+It runs `npm run start` (production `next start`, not `next dev`) out of `WorkingDirectory`, with
+`Restart=on-failure` and `KillMode=mixed` (a plain `SIGTERM` to `npm` doesn't reliably stop the
+`next` child process it spawns — see the comments in the unit file). Build the app once before (or
+after) enabling the service: `npm ci && npx prisma migrate deploy && npm run build`. Adjust `User`,
+`WorkingDirectory`, and the `npm` path (`which npm` on the target box — nvm-managed Node installs
+often aren't at `/usr/bin/npm`) for your setup.
+
+### `OLLAMA_URL`
+
+By default ydb talks to Ollama at `http://localhost:11434`. If Ollama runs on a different host or
+port (e.g. a separate GPU box on the LAN), set the `OLLAMA_URL` environment variable — or the
+`ollamaUrl` Setting from **Settings → Preferences → Local models**, which takes precedence (see
+[Models](#models) below for the full resolution order). For the systemd unit, uncomment the
+`EnvironmentFile` line and put `OLLAMA_URL=http://<host>:11434` in that file, or add an
+`Environment=OLLAMA_URL=...` line directly.
+
+### Backups
+
+`Settings → Backups` creates on-demand snapshots, and `instrumentation.ts` runs one automatic daily
+backup on startup (skipped if a backup already exists from today). Backups are written to the
+`backups/` directory as `ydb-<timestamp>.db` files, with the 14 most recent kept
+(`lib/backup.ts` `MAX_BACKUPS`).
+
+**Back up `dev.db` through the app (or `lib/backup.ts`'s `createBackup()`), not with a naive file
+copy — and if you ever do copy files directly, copy the WAL sidecars too.** Since Phase 0.2, ydb
+runs SQLite in `journal_mode = WAL`. In WAL mode, committed writes are appended to a separate
+`prisma/dev.db-wal` file and only periodically folded back (`checkpoint`ed) into `prisma/dev.db`
+itself; `prisma/dev.db-shm` is the shared-memory index over that WAL file. That means:
+
+- **`cp prisma/dev.db /somewhere/backup.db` alone can silently lose recent transactions** — anything
+  written since the last checkpoint lives only in `dev.db-wal`, which a plain copy of `dev.db`
+  doesn't include. The database file on its own is not a complete, consistent snapshot in WAL mode.
+- If you must copy files by hand instead of using the app, copy all three together —
+  `dev.db`, `dev.db-wal`, and `dev.db-shm` — from a moment when no writer is active, and be aware
+  a plain filesystem copy of a live SQLite database (even all three files) is not guaranteed
+  transactionally consistent if a write lands mid-copy.
+- **`createBackup()` (`lib/backup.ts`) avoids all of this correctly**: it opens the source database
+  read-only and calls better-sqlite3's `Database#backup()`, which uses SQLite's own online backup
+  API — the same mechanism `.backup`/`VACUUM INTO` use — to produce a single self-contained,
+  consistent snapshot file regardless of what's currently in the WAL or being written concurrently.
+  This is why the app-level backup exists instead of a shell `cp` in a cron job: it's the only way
+  to get a correct point-in-time snapshot without stopping the server first.
+- **Restoring** (`restoreBackup()`) is WAL-aware too: it explicitly checkpoints the live database
+  (`PRAGMA wal_checkpoint(TRUNCATE)`) and removes the `-wal`/`-shm` sidecars before copying the
+  snapshot over `dev.db`, so a restored file can't end up shadowed by stale WAL pages left over from
+  before the restore.
+
+If you back up the `backups/` directory itself off-box (recommended — e.g. rsync to another
+machine), that's safe to do with a plain file copy: each file in there is already the
+self-contained, checkpointed snapshot `createBackup()` produced, not a live WAL-mode database.
+
+### Load-testing with the seed script
+
+`npm run seed` (`scripts/seed.ts`) populates the database Phase-0/M1 style: five accounts spanning
+every account type in `lib/accounts.ts` (current, savings, credit card, personal loan, auto loan)
+and ~48k transactions over 3 years of history, including splits, transfers, and reimbursements. It's
+useful for reproducing the dashboard/ledger performance numbers in `IMPROVEMENT_PLAN.md` (§0.5) on
+your own hardware, or just for exercising the app with a realistic amount of data. It only ever
+touches accounts whose name starts with `[seed] `, so it's safe to run against a database that also
+has real accounts — re-running it wipes and regenerates just the seed data.
+
 ## Models
 
 ydb drives Ollama for two distinct jobs, each configurable in **Settings → Preferences → Local

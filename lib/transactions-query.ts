@@ -405,6 +405,21 @@ function scopeSql(alias: string, accountIds: number[], dateLtIso?: string): stri
  * EXISTS subqueries are scoped to the same base filter as the outer query so
  * the result matches the old JS `hiddenTxIds` set exactly.
  *
+ * `INDEXED BY` on both correlated subqueries (Phase 8 seed-script finding):
+ * without a hint, SQLite's planner sometimes picks
+ * `Transaction_accountId_date_idx` for these subqueries — a fine choice on
+ * its own, but disastrous here because it's a *range* scan (`accountId=? AND
+ * date<?`) re-run per outer row instead of the equality lookup on
+ * `parentTransactionId`/`reimbursementTxId` (at most one match, guaranteed by
+ * the `@unique` constraint on reimbursementTxId). Confirmed via
+ * `npm run seed` (~48k rows) + `EXPLAIN QUERY PLAN`: the pre-range net-worth
+ * queries (which add a `dateLtIso` bound here) went from ~52 SECONDS to
+ * ~40ms with these hints — a real, reproducible regression, not a
+ * theoretical one. `parentTransactionId`/`reimbursementTxId` equality is
+ * always by far the most selective predicate available (a transaction has at
+ * most one split parent and one reimbursement settlement), so forcing it is
+ * safe regardless of how many account ids or how wide the date range is.
+ *
  * @param mainAlias alias of the outer row (e.g. "main")
  * @param accountIds accounts in scope
  * @param dateLtIso  optional `date < ISO` upper bound applied to the scope
@@ -414,8 +429,8 @@ export function inclusionSql(mainAlias: string, accountIds: number[], dateLtIso?
   const reimb = scopeSql('r', accountIds, dateLtIso)
   return (
     `${mainAlias}.reimbursementTxId IS NULL` +
-    ` AND NOT EXISTS (SELECT 1 FROM "Transaction" c WHERE c.parentTransactionId = ${mainAlias}.id AND ${child})` +
-    ` AND NOT EXISTS (SELECT 1 FROM "Transaction" r WHERE r.reimbursementTxId = ${mainAlias}.id AND ${reimb})`
+    ` AND NOT EXISTS (SELECT 1 FROM "Transaction" c INDEXED BY "Transaction_parentTransactionId_idx" WHERE c.parentTransactionId = ${mainAlias}.id AND ${child})` +
+    ` AND NOT EXISTS (SELECT 1 FROM "Transaction" r INDEXED BY "Transaction_reimbursementTxId_key" WHERE r.reimbursementTxId = ${mainAlias}.id AND ${reimb})`
   )
 }
 

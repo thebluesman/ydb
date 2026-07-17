@@ -59,7 +59,7 @@ export function ThinkingLoader() {
       x.beginPath()
       for (let i = 0; i <= 480; i++) {
         const p = pt(i / 480, ds)
-        i === 0 ? x.moveTo(p.x * S, p.y * S) : x.lineTo(p.x * S, p.y * S)
+        if (i === 0) { x.moveTo(p.x * S, p.y * S) } else { x.lineTo(p.x * S, p.y * S) }
       }
       const { r, g, b } = particleColor
       x.strokeStyle = `rgba(${r},${g},${b},0.085)`

@@ -1,7 +1,5 @@
 'use client'
 
-import { History } from 'lucide-react'
-
 type ImportRecord = {
   id: number
   filename: string

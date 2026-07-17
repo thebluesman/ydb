@@ -67,12 +67,11 @@ export function CsvImportFlow({ accounts, categories }: { accounts: Account[]; c
   // Load a previously-saved mapping for the selected account, if any, so
   // re-imports of the same bank's export are one click (IMPROVEMENT_PLAN
   // Phase 7 item 1: "store the mapping per account in Settings"). The
-  // synchronous setSavedMapping(false) reset on account change is the same
-  // fetch-on-dependency-change shape as RecurringTransactions.tsx's load()
-  // (an existing, accepted react-hooks/set-state-in-effect instance) — not a
-  // new pattern.
+  // synchronous reset clears the stale "saved" indicator from the previous
+  // account before the fetch for the new account resolves.
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- must clear stale flag from prior account synchronously, before the fetch below resolves
     setSavedMapping(false)
     fetch('/api/settings')
       .then((r) => r.json())
