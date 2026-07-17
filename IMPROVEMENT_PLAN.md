@@ -1153,6 +1153,19 @@ Target: fully usable on a ~390px phone; comfortable on tablet.
 > scroll position correctly through the Preferences/Reconciliation gaps and that clicking a pill lands
 > the target section below the sticky chrome, not under it.
 
+> **Regression fix (post-M6):** `LedgerRow.tsx` had a local `const fmtMoney = (cents) =>
+> fromCents(Math.abs(cents)).toFixed(2)` shadowing the shared `lib/money.ts` `fmtMoney` used at the
+> 3 call sites (`toFixed(2)`) that route ALL amount rendering through it — the exact regression this
+> bullet said to eliminate. It rendered large amounts without a thousands separator or leading space
+> (e.g. `AED123456.78` instead of `AED 123,456.78`). Fixed: deleted the shadow, imported the shared
+> `fmtMoney` from `lib/money.ts`, and updated the main row amount, transfer net amount, and
+> split-leg amount call sites to `fmtMoney(cents, currency, { showPlus: true })` (the shared helper
+> already owns sign/space formatting the local shadow hand-rolled). Verified with `tsc --noEmit`,
+> `npm run lint`, `npm run test:run` (224/230 passing — 6 pre-existing `sqlGuard.test.ts` failures
+> reproduce identically on `main`, unrelated to this fix: they need a `prisma/dev.db` that doesn't
+> exist in a fresh worktree), and a seeded build/start check confirming `+AED 3,392.87` /
+> `−AED 1,210.89` / `−AED 1,234.56` render correctly for a plain row, transfer, and split leg.
+
 ### Phase U6 — Visual polish & performance of the UI itself ✅ (M7b)
 
 - Convert the 9 `.ttf` fonts to `.woff2` and drop unused IBM Plex Mono weights (keep 400/500/600);
