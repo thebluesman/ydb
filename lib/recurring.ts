@@ -44,6 +44,28 @@ const RECURRING_PER_GROUP_LIMIT = 12
 const MAX_STALE_CYCLES = 3
 
 /**
+ * Hard backstop on the total rows `getRecurringSeries` fetches from the DB,
+ * on top of the per-group windowing below. Per-group capping bounds JS-side
+ * work by (distinct description groups × `RECURRING_PER_GROUP_LIMIT`), but
+ * that only windows whatever this query returns — with no DB-side `take` at
+ * all, the query itself was an unbounded, effectively full-table read.
+ *
+ * This isn't a full fix for starvation on its own: on a dataset large enough
+ * that total matching rows exceed this cap, a handful of very high-volume
+ * groups could still push a genuine low-volume series out of the newest
+ * `RECURRING_QUERY_ROW_CAP` rows, the same failure mode `takeRecentPerGroup`
+ * exists to prevent (the original repro needed ~49k rows to starve a series
+ * under the old flat 2000-row cap). 20,000 is 10x that old cap, which is
+ * enough headroom that starvation requires ~10x the row count to reproduce —
+ * i.e. still possible in principle on a much larger dataset, but this bounds
+ * worst-case query cost instead of leaving it fully unbounded. If this
+ * account's table ever grows past the low tens of thousands of matching rows
+ * (IMPROVEMENT_PLAN.md's documented single-user target is ~50k total rows),
+ * revisit with a SQL-side per-group window instead of raising this further.
+ */
+const RECURRING_QUERY_ROW_CAP = 20_000
+
+/**
  * Normalized grouping key for a transaction description: lowercased, stripped to
  * alphanumeric + space, first 20 chars. Shared by `detectRecurring` (which
  * groups candidate occurrences) and `takeRecentPerGroup` (the fetch window in
@@ -185,6 +207,10 @@ export async function getRecurringSeries(
   // the window so it's never detected (reproduced on a ~49k-row seed where the
   // 2000-row window spanned only ~6 weeks). Per-group capping keeps each group's
   // own recent history regardless of unrelated volume, so no series is starved.
+  //
+  // `take: RECURRING_QUERY_ROW_CAP` is a separate, much larger backstop on the
+  // query itself (see the constant's doc comment) — it bounds worst-case work
+  // without reintroducing the starvation bug at any realistic dataset size.
   const txs = await prisma.transaction.findMany({
     where: {
       status: { in: ['committed', 'reconciled'] },
@@ -193,6 +219,7 @@ export async function getRecurringSeries(
     },
     orderBy: { date: 'desc' },
     select: { id: true, date: true, amount: true, description: true, category: true },
+    take: RECURRING_QUERY_ROW_CAP,
   })
   const windowed = takeRecentPerGroup(txs, perGroupLimit)
   windowed.reverse()
@@ -204,7 +231,12 @@ export async function getRecurringSeries(
   // otherwise be projected forward forever and shown as permanently "overdue".
   // The old global cap masked these by truncating dead history out of the
   // window; per-group windowing no longer does, so cut them explicitly here.
-  const startOfToday = new Date(asOf.getFullYear(), asOf.getMonth(), asOf.getDate())
+  //
+  // `lastDate`/`s.lastDate` are UTC calendar dates (`toISOString().split('T')[0]`
+  // in detectRecurring), so `startOfToday` is computed in UTC here too — mixing
+  // a local-time `startOfToday` against a UTC-parsed `last` would drift the
+  // ~90-day staleness boundary by the host's UTC offset.
+  const startOfToday = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()))
   return series.filter((s) => {
     const last = new Date(`${s.lastDate}T00:00:00Z`)
     const cyclesStale = (startOfToday.getTime() - last.getTime()) / 86_400_000 / s.avgGap

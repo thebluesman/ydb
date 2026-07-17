@@ -90,6 +90,15 @@ type PrismaResult = { status: number; output: string }
 /** Injectable so the behaviour can be unit-tested against a throwaway db. */
 export type PrismaRunner = (args: string[]) => PrismaResult
 
+/**
+ * Generous but finite: `migrate deploy`/`db push` on a single-user SQLite db
+ * should finish in well under a minute. `spawnSync` blocks the whole (single-
+ * threaded) Node process for however long the child runs, so a hung or lock-
+ * blocked prisma invocation would otherwise freeze every concurrent request
+ * with no bound at all.
+ */
+const PRISMA_RUNNER_TIMEOUT_MS = 60_000
+
 function defaultPrismaRunner(configPath?: string): PrismaRunner {
   return (args) => {
     const fullArgs = configPath ? [...args, '--config', configPath] : args
@@ -97,6 +106,7 @@ function defaultPrismaRunner(configPath?: string): PrismaRunner {
       cwd: process.cwd(),
       env: process.env,
       encoding: 'utf8',
+      timeout: PRISMA_RUNNER_TIMEOUT_MS,
     })
     return {
       status: res.status ?? 1,
@@ -195,15 +205,28 @@ export async function restoreBackup(
   try {
     schemaMigration = bringSchemaCurrent()
   } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err)
     // Auto-rollback: put the pre-restore db back exactly as it was so the
     // user is never left with a broken schema. The safety backup was taken
-    // from the (healthy, fully-migrated) live db moments ago.
-    removeSidecars(DB_PATH)
-    fs.copyFileSync(path.join(BACKUP_DIR, safetyBackup.filename), DB_PATH)
+    // from the (healthy, fully-migrated) live db moments ago. This copy is
+    // wrapped in its own try/catch so a failure here (e.g. disk full) still
+    // surfaces a clear, actionable message instead of an unrelated raw fs
+    // error preempting the intended rollback-status report.
+    try {
+      removeSidecars(DB_PATH)
+      fs.copyFileSync(path.join(BACKUP_DIR, safetyBackup.filename), DB_PATH)
+    } catch (rollbackErr) {
+      const rollbackCause = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+      throw new Error(
+        `Restore aborted: could not migrate "${filename}" to the current schema (${cause}). ` +
+          `Rollback to the pre-restore database ALSO failed (${rollbackCause}) — dev.db may be ` +
+          `in a broken intermediate state. Manually restore from backups/${safetyBackup.filename}.`,
+      )
+    }
     throw new Error(
       `Restore aborted: could not migrate "${filename}" to the current schema. ` +
         `Rolled back to the pre-restore database (safety backup ${safetyBackup.filename}). ` +
-        `Cause: ${err instanceof Error ? err.message : String(err)}`,
+        `Cause: ${cause}`,
     )
   }
 

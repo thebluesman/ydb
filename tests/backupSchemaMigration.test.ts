@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { bringSchemaCurrent, type PrismaRunner } from '@/lib/backup'
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process')
+  return { ...actual, spawnSync: vi.fn() }
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Regression test for the backup-restore schema reconciliation (Phase 7 item 3).
@@ -55,5 +60,30 @@ describe('bringSchemaCurrent', () => {
       'db push': { status: 1, output: 'push boom' },
     })
     expect(() => bringSchemaCurrent({ runner })).toThrow(/deploy boom[\s\S]*push boom/)
+  })
+})
+
+// Review fix on PR #20: the default runner shells out via `spawnSync` with no
+// timeout, so a hung/lock-blocked `migrate deploy`/`db push` could freeze the
+// whole (single-threaded) process indefinitely. Lock in that a finite timeout
+// is actually passed through when no injected runner is supplied.
+describe('defaultPrismaRunner (no injected runner)', () => {
+  it('calls spawnSync with a finite timeout', async () => {
+    const { spawnSync } = await import('node:child_process')
+    vi.mocked(spawnSync).mockReturnValue({
+      status: 0,
+      stdout: '',
+      stderr: '',
+      pid: 0,
+      output: [],
+      signal: null,
+    } as unknown as ReturnType<typeof spawnSync>)
+
+    bringSchemaCurrent()
+
+    expect(spawnSync).toHaveBeenCalled()
+    const [, , options] = vi.mocked(spawnSync).mock.calls[0]
+    expect(options?.timeout).toBeGreaterThan(0)
+    expect(Number.isFinite(options?.timeout)).toBe(true)
   })
 })
