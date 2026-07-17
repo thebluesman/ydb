@@ -592,6 +592,17 @@ Ordered by value for a single home user:
    dashboard: 1) create account → 2) import statement → 3) set budgets, each linking to the page.
 9. **Keyboard support** in the ledger: `/` focuses search, `e` edits focused row, arrows navigate.
 
+> **M6a status (items 1–4): DONE.** Implemented on `claude/m6a-product-features` (#11), merged
+> before the M8a–d branches above (which is why this note was missing — backfilled after an audit
+> found no open work left). CSV/OFX import: `app/upload/_components/CsvImportFlow.tsx` +
+> `lib/csvImport.ts`, new "CSV" tab in `UploadTabs.tsx` alongside the existing PDF/image flow,
+> feeding the same `ReviewTable`. Reconciliation: `lib/reconciliation.ts` +
+> `app/api/accounts/[id]/reconcile/route.ts` + `ReconciliationManager.tsx` in Settings, backed by
+> migration `20260716204209_add_account_reconciliation`. Backup restore:
+> `app/api/backup/[filename]/restore/route.ts` (`lib/backup.ts`), wired into `BackupManager.tsx`.
+> Net-worth history: `NetWorthWidget.tsx` + a monthly-series query added to
+> `lib/transactions-query.ts`, rendered on the dashboard. Tests added in `tests/csvImport.test.ts`.
+>
 > **M8c status (item 7 — Rules retro-apply): DONE.** Implemented on `claude/m8c-rules-retro-apply`.
 > `POST /api/vendor-rules/[id]/apply` reuses `matchesRule` from `lib/vendor-rule-match.ts` (the
 > Phase 3.2 matcher, not a reimplementation) against uncategorized rows (`category === ''`, the
