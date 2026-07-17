@@ -18,6 +18,77 @@ export type RecurringSeries = {
 type Tx = { id: number; date: Date; amount: number; description: string; category: string }
 
 /**
+ * How many of the most recent occurrences to keep *per description group* when
+ * fetching candidates in `getRecurringSeries`. Roughly a year of a monthly
+ * series — plenty to establish cadence/amount consistency while reflecting
+ * current (not years-old) pricing, and small enough that the total row count is
+ * bounded by (distinct descriptions × this) instead of by raw history depth.
+ */
+const RECURRING_PER_GROUP_LIMIT = 12
+
+/**
+ * A detected series is only "live" — worth projecting a next occurrence for —
+ * if its most recent occurrence is within this many cadence periods of `asOf`.
+ * Cadence here is always ~monthly (see the 25–40 day gate below), so this is
+ * roughly a 3-month grace window: a bill that's missed one or two payments is
+ * still surfaced (and flagged overdue), but one that stopped years ago (e.g. a
+ * cancelled subscription) is dropped instead of being projected forward forever
+ * and shown as permanently "overdue" on the dashboard's Upcoming Bills widget.
+ *
+ * This staleness cut used to happen only as a side effect of the old global row
+ * cap, which truncated years-old history out of the detection window entirely.
+ * Per-group windowing (see `takeRecentPerGroup`) keeps each series' own recent
+ * history regardless of unrelated volume, so a long-dead series is now detected
+ * again — the liveness cut is therefore made deliberately in `getRecurringSeries`.
+ */
+const MAX_STALE_CYCLES = 3
+
+/**
+ * Normalized grouping key for a transaction description: lowercased, stripped to
+ * alphanumeric + space, first 20 chars. Shared by `detectRecurring` (which
+ * groups candidate occurrences) and `takeRecentPerGroup` (the fetch window in
+ * `getRecurringSeries`) so both bucket transactions identically — if the two
+ * drifted, the per-group cap could evict occurrences that detection then wants.
+ */
+function groupKey(description: string): string {
+  return description
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, '')
+    .slice(0, 20)
+    .trim()
+}
+
+/**
+ * Keep only the most recent `perGroupLimit` transactions per normalized
+ * description group. Input must be newest-first; output preserves that order.
+ *
+ * This replaces `getRecurringSeries`'s old *global* row cap. A single flat cap
+ * (`take: 2000`, newest-first) is fetched across all groups at once, so on a
+ * dense dataset a high-volume vendor/account can consume the whole window and
+ * push a genuine low-volume series (e.g. a monthly subscription among thousands
+ * of card purchases) entirely out of it — the series is then never detected.
+ * Capping per group instead bounds total work by (distinct descriptions ×
+ * `perGroupLimit`) while guaranteeing every group keeps its own most-recent
+ * history, so no series is starved by unrelated transaction volume elsewhere.
+ */
+export function takeRecentPerGroup<T extends { description: string }>(
+  txsNewestFirst: T[],
+  perGroupLimit = RECURRING_PER_GROUP_LIMIT,
+): T[] {
+  const counts = new Map<string, number>()
+  const kept: T[] = []
+  for (const t of txsNewestFirst) {
+    const key = groupKey(t.description)
+    if (!key) continue
+    const n = counts.get(key) ?? 0
+    if (n >= perGroupLimit) continue
+    counts.set(key, n + 1)
+    kept.push(t)
+  }
+  return kept
+}
+
+/**
  * Detect recurring transaction series (grouped by normalized description
  * prefix, cadence 25–40 day average gap, amount consistency within ±10% of
  * the median) and project each series' next expected occurrence date/amount.
@@ -29,11 +100,7 @@ export function detectRecurring(txs: Tx[], asOf: Date = new Date()): RecurringSe
   // Group by normalized description prefix (first 20 chars, alphanumeric + space only)
   const groups = new Map<string, Tx[]>()
   for (const t of txs) {
-    const key = t.description
-      .toLowerCase()
-      .replace(/[^a-z0-9 ]/g, '')
-      .slice(0, 20)
-      .trim()
+    const key = groupKey(t.description)
     if (!key) continue
     if (!groups.has(key)) groups.set(key, [])
     groups.get(key)!.push(t)
@@ -105,16 +172,19 @@ export function detectRecurring(txs: Tx[], asOf: Date = new Date()): RecurringSe
 export async function getRecurringSeries(
   asOf: Date = new Date(),
   accountIds?: number[],
-  take = 2000,
+  perGroupLimit = RECURRING_PER_GROUP_LIMIT,
 ): Promise<RecurringSeries[]> {
-  // `take: 2000` needs the *most recent* 2000 rows, not the oldest — a `date: 'asc'`
-  // order here would silently starve the detector of any transaction past the first
-  // 2000 ever recorded on accounts with long history (review fix on PR #18: this was
-  // carried over from the original /api/recurring route, where a stale detection
-  // window was low-stakes, but it became load-bearing once this feeds the dashboard's
-  // "Upcoming this month" widget — a stale window can misreport bills as overdue or
-  // miss recently-started ones). Fetch newest-first, then re-sort ascending since
-  // detectRecurring's gap math assumes chronological order.
+  // Fetch newest-first. detectRecurring's gap math assumes chronological order,
+  // so we re-sort ascending after windowing.
+  //
+  // The window is applied *per description group* (`takeRecentPerGroup`), not as
+  // one global row cap. The old flat `take: 2000` (added on PR #18 to stop the
+  // detector reading a years-stale oldest-first slice) fixed staleness but was
+  // still global: on a dense dataset the newest 2000 rows can all belong to a
+  // few high-volume vendors, pushing a genuine low-volume monthly series out of
+  // the window so it's never detected (reproduced on a ~49k-row seed where the
+  // 2000-row window spanned only ~6 weeks). Per-group capping keeps each group's
+  // own recent history regardless of unrelated volume, so no series is starved.
   const txs = await prisma.transaction.findMany({
     where: {
       status: { in: ['committed', 'reconciled'] },
@@ -123,8 +193,21 @@ export async function getRecurringSeries(
     },
     orderBy: { date: 'desc' },
     select: { id: true, date: true, amount: true, description: true, category: true },
-    take,
   })
-  txs.reverse()
-  return detectRecurring(txs, asOf)
+  const windowed = takeRecentPerGroup(txs, perGroupLimit)
+  windowed.reverse()
+
+  const series = detectRecurring(windowed, asOf)
+
+  // Drop series whose most recent occurrence is more than MAX_STALE_CYCLES
+  // cadence periods before `asOf` — a long-cancelled subscription would
+  // otherwise be projected forward forever and shown as permanently "overdue".
+  // The old global cap masked these by truncating dead history out of the
+  // window; per-group windowing no longer does, so cut them explicitly here.
+  const startOfToday = new Date(asOf.getFullYear(), asOf.getMonth(), asOf.getDate())
+  return series.filter((s) => {
+    const last = new Date(`${s.lastDate}T00:00:00Z`)
+    const cyclesStale = (startOfToday.getTime() - last.getTime()) / 86_400_000 / s.avgGap
+    return cyclesStale <= MAX_STALE_CYCLES
+  })
 }

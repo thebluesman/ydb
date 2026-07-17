@@ -9,8 +9,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ filena
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
   try {
-    const { safetyBackup } = await restoreBackup(filename)
-    return NextResponse.json({ ok: true, needsRestart: true, safetyBackup })
+    const { safetyBackup, schemaMigration } = await restoreBackup(filename)
+    return NextResponse.json({ ok: true, needsRestart: true, safetyBackup, schemaMigration })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }

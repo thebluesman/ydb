@@ -8,7 +8,7 @@ import { ReimburseLinkModal } from './ReimburseLinkModal'
 import { SplitForm } from './SplitForm'
 import { Select, Badge, Button, Modal, CategoryDot, useToast } from '@/app/_components/ui'
 import type { BadgeVariant } from '@/app/_components/ui'
-import { fromCents, toCents } from '@/lib/money'
+import { fromCents, toCents, fmtMoney } from '@/lib/money'
 import { categoryColor } from '@/lib/category-colors'
 import { deleteWithUndo } from './deleteWithUndo'
 
@@ -336,7 +336,6 @@ function LedgerRowInner({
   const netAmount = transaction.reimbursementTx
     ? transaction.amount + transaction.reimbursementTx.amount
     : null
-  const fmtMoney = (cents: number) => fromCents(Math.abs(cents)).toFixed(2)
 
   // ── Shared rule suggestion strip ──────────────────────────────────────────────
   const ruleSuggestionRow = ruleSuggestion ? (
@@ -696,11 +695,11 @@ function LedgerRowInner({
         {/* 4 · Amount */}
         <td className="px-3 py-3 amount whitespace-nowrap" style={{ letterSpacing: '-0.275px' }}>
           <div className="text-sm" style={{ color: amtColor(transaction.amount) }}>
-            {transaction.amount < 0 ? '−' : '+'}{currency}{fmtMoney(transaction.amount)}
+            {fmtMoney(transaction.amount, currency, { showPlus: true })}
           </div>
           {netAmount !== null && (
             <div className="text-[10px] font-normal mt-0.5" style={{ color: 'var(--tx-secondary)', letterSpacing: 0 }}>
-              net {netAmount < 0 ? '−' : '+'}{currency}{fmtMoney(netAmount)}
+              net {fmtMoney(netAmount, currency, { showPlus: true })}
             </div>
           )}
         </td>
@@ -859,7 +858,7 @@ function LedgerRowInner({
             {leg.description}
           </td>
           <td className="px-3 py-2.5 text-sm amount whitespace-nowrap" style={{ color: amtColor(leg.amount), letterSpacing: '-0.275px' }}>
-            {leg.amount < 0 ? '−' : '+'}{currency}{fmtMoney(leg.amount)}
+            {fmtMoney(leg.amount, currency, { showPlus: true })}
           </td>
           <td className="px-3 py-2.5 text-sm" style={{ color: 'var(--tx-faint)' }}>
             {leg.category && (

@@ -1,10 +1,30 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import Database from 'better-sqlite3'
 
 const DB_PATH = path.join(process.cwd(), 'prisma/dev.db')
 const BACKUP_DIR = path.join(process.cwd(), 'backups')
 const MAX_BACKUPS = 14
+
+/**
+ * Locate the prisma CLI. It is not always under `cwd/node_modules` — with
+ * hoisted installs, workspaces, or git worktrees the dependency lives in an
+ * ancestor's `node_modules`. Walk up from cwd (mirroring Node's own module
+ * resolution) and use the first `node_modules/.bin/prisma` that exists,
+ * falling back to the cwd-local path so the error message stays meaningful.
+ */
+function resolvePrismaBin(): string {
+  const local = path.join(process.cwd(), 'node_modules/.bin/prisma')
+  let dir = process.cwd()
+  for (;;) {
+    const candidate = path.join(dir, 'node_modules/.bin/prisma')
+    if (fs.existsSync(candidate)) return candidate
+    const parent = path.dirname(dir)
+    if (parent === dir) return local
+    dir = parent
+  }
+}
 
 export type BackupEntry = {
   filename: string
@@ -55,6 +75,76 @@ function pruneOldBackups() {
   }
 }
 
+function removeSidecars(dbPath: string) {
+  for (const suffix of ['-wal', '-shm']) {
+    const sidecar = `${dbPath}${suffix}`
+    if (fs.existsSync(sidecar)) fs.rmSync(sidecar, { force: true })
+  }
+}
+
+type SchemaMigration = { method: 'migrate-deploy' | 'db-push' }
+
+/** Result of a shelled-out prisma invocation. */
+type PrismaResult = { status: number; output: string }
+
+/** Injectable so the behaviour can be unit-tested against a throwaway db. */
+export type PrismaRunner = (args: string[]) => PrismaResult
+
+function defaultPrismaRunner(configPath?: string): PrismaRunner {
+  return (args) => {
+    const fullArgs = configPath ? [...args, '--config', configPath] : args
+    const res = spawnSync(resolvePrismaBin(), fullArgs, {
+      cwd: process.cwd(),
+      env: process.env,
+      encoding: 'utf8',
+    })
+    return {
+      status: res.status ?? 1,
+      output: `${res.stdout ?? ''}${res.stderr ?? ''}${res.error ? String(res.error) : ''}`,
+    }
+  }
+}
+
+/**
+ * Bring a just-restored database up to the current Prisma schema.
+ *
+ * A restored snapshot can be older than the newest applied migration, which
+ * leaves the live db missing recent columns/tables — the app then 500s (e.g.
+ * P2022 "column does not exist") the moment it touches them. So after swapping
+ * the file in we reconcile its schema:
+ *
+ *   1. `prisma migrate deploy` — the normal, migration-history-preserving path.
+ *      Works for any backup that carries a `_prisma_migrations` table (the
+ *      common case: you restore a recent snapshot). It applies only the
+ *      pending migrations and keeps the history intact.
+ *   2. If that fails (typically P3005 for a pre-baseline snapshot that has no
+ *      `_prisma_migrations` table at all — migrate deploy refuses to touch a
+ *      non-empty db it doesn't recognise) we fall back to `prisma db push`,
+ *      which force-syncs the schema to match `schema.prisma` regardless of
+ *      migration state. Our migrations are additive, so this preserves data.
+ *
+ * Throws if neither path can reconcile the schema, so the caller can roll the
+ * restore back.
+ */
+export function bringSchemaCurrent(opts?: {
+  configPath?: string
+  runner?: PrismaRunner
+}): SchemaMigration {
+  const run = opts?.runner ?? defaultPrismaRunner(opts?.configPath)
+
+  const deploy = run(['migrate', 'deploy'])
+  if (deploy.status === 0) return { method: 'migrate-deploy' }
+
+  const push = run(['db', 'push', '--accept-data-loss'])
+  if (push.status === 0) return { method: 'db-push' }
+
+  throw new Error(
+    `Could not bring the restored database up to the current schema.\n` +
+      `migrate deploy failed:\n${deploy.output}\n` +
+      `db push failed:\n${push.output}`,
+  )
+}
+
 /**
  * Restore the live database from a stored snapshot (IMPROVEMENT_PLAN Phase 7
  * item 3). Steps, in order:
@@ -66,13 +156,21 @@ function pruneOldBackups() {
  *      in -wal) and remove the now-empty -wal/-shm sidecar files so they
  *      can't reference stale pages after the swap.
  *   3. Copy the chosen snapshot over dev.db.
+ *   4. Reconcile the restored file's schema with the current Prisma schema so
+ *      an older snapshot doesn't leave the app 500ing on missing columns.
+ *      On failure we automatically roll back to the safety backup taken in
+ *      step 1 — the whole point of this feature is that a restore can't leave
+ *      you worse off, so we never hand back a half-migrated/broken db and
+ *      make the user notice and recover it by hand.
  *
  * The running process keeps its existing SQLite connections/prepared
  * statements open against the OLD file identity in memory — that's exactly
  * why the caller must prompt for an app restart afterward; this function
  * does not attempt to hot-swap the live Prisma client.
  */
-export async function restoreBackup(filename: string): Promise<{ safetyBackup: BackupEntry }> {
+export async function restoreBackup(
+  filename: string,
+): Promise<{ safetyBackup: BackupEntry; schemaMigration: SchemaMigration }> {
   const srcPath = backupFilePath(filename)
   if (!srcPath) throw new Error('Backup not found')
 
@@ -89,14 +187,27 @@ export async function restoreBackup(filename: string): Promise<{ safetyBackup: B
       // above still protects the pre-restore state.
     }
   }
-  for (const suffix of ['-wal', '-shm']) {
-    const sidecar = `${DB_PATH}${suffix}`
-    if (fs.existsSync(sidecar)) fs.rmSync(sidecar, { force: true })
-  }
+  removeSidecars(DB_PATH)
 
   fs.copyFileSync(srcPath, DB_PATH)
 
-  return { safetyBackup }
+  let schemaMigration: SchemaMigration
+  try {
+    schemaMigration = bringSchemaCurrent()
+  } catch (err) {
+    // Auto-rollback: put the pre-restore db back exactly as it was so the
+    // user is never left with a broken schema. The safety backup was taken
+    // from the (healthy, fully-migrated) live db moments ago.
+    removeSidecars(DB_PATH)
+    fs.copyFileSync(path.join(BACKUP_DIR, safetyBackup.filename), DB_PATH)
+    throw new Error(
+      `Restore aborted: could not migrate "${filename}" to the current schema. ` +
+        `Rolled back to the pre-restore database (safety backup ${safetyBackup.filename}). ` +
+        `Cause: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+
+  return { safetyBackup, schemaMigration }
 }
 
 export function backupFilePath(filename: string): string | null {
