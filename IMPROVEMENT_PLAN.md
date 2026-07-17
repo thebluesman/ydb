@@ -603,6 +603,24 @@ Ordered by value for a single home user:
 > Net-worth history: `NetWorthWidget.tsx` + a monthly-series query added to
 > `lib/transactions-query.ts`, rendered on the dashboard. Tests added in `tests/csvImport.test.ts`.
 >
+> **Follow-up (post-#20 review): DONE.** PR #20's fixes for backup-restore schema reconciliation and
+> the recurring detector's per-group windowing (both above) themselves introduced four smaller
+> issues, flagged non-blocking in review and fixed here: (1) `getRecurringSeries` had dropped its
+> DB-side row cap entirely in favor of only JS-side per-group windowing, turning the query into an
+> unbounded read — added `RECURRING_QUERY_ROW_CAP` (20k) as a backstop, documented as bounding
+> worst-case cost rather than a full starvation fix (that's still `takeRecentPerGroup`'s job; a
+> SQL-side per-group window would be needed if this account's row count ever approaches it).
+> (2) The new staleness-cutoff filter compared a local-time `startOfToday` against a UTC-parsed
+> `lastDate`, drifting the ~90-day cutoff by the host's UTC offset — `startOfToday` is now built via
+> `Date.UTC(asOf.getUTCFullYear(), ...)` to match. (3) `bringSchemaCurrent`'s `spawnSync` call had no
+> timeout, risking an indefinite freeze of the single Node process on a hung `migrate deploy`/
+> `db push` — added a 60s timeout. (4) `restoreBackup`'s auto-rollback copy wasn't itself guarded, so
+> a failure there (e.g. disk full) threw a raw fs error instead of the intended rollback-status
+> message — wrapped in its own try/catch. Tests added/updated in `tests/recurring.test.ts` (row-cap
+> wiring + a TZ-flip test verified to actually diverge under the old code — see its comment for the
+> exact date math) and `tests/backupSchemaMigration.test.ts` (spawnSync timeout wiring, via a mocked
+> `node:child_process`).
+>
 > **M8c status (item 7 — Rules retro-apply): DONE.** Implemented on `claude/m8c-rules-retro-apply`.
 > `POST /api/vendor-rules/[id]/apply` reuses `matchesRule` from `lib/vendor-rule-match.ts` (the
 > Phase 3.2 matcher, not a reimplementation) against uncategorized rows (`category === ''`, the
