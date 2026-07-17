@@ -883,6 +883,43 @@ Target: fully usable on a ~390px phone; comfortable on tablet.
 - Verify: every page reachable from the nav in one click; a new user can go from empty DB →
   imported statement → categorized ledger without reading the guide.
 
+> **M6 gap-fill status: DONE.** Nav/ledger-date-filter/money-formatting/empty-states/first-run
+> landed in `claude/m6b-ia-ux` (#12); this closes the two items M6's checkpoint definition of done
+> listed but that PR didn't cover:
+>
+> 1. **Category color dots — done.** New `lib/category-colors.ts` `categoryColor(name, categories)`
+>    looks up a category's persisted colour, falling back to the same deterministic
+>    `colorForCategory` the auto-create path already uses, so a dot is never missing even for a
+>    category not yet in the `Category` table. New shared `<CategoryDot>` primitive
+>    (`app/_components/ui/CategoryDot.tsx`). Wired into: `LedgerRow.tsx` (read-only cell, split-leg
+>    rows, and the inline-edit category `Select` via a `dot` per option), `LedgerRowCard.tsx` (the
+>    category `Badge`), `LedgerView.tsx` (the hand-rolled Radix category filter), and
+>    `ReviewTable.tsx`'s `CategorySelect` (trigger + dropdown items). `CategoryManager.tsx` already
+>    rendered full-colour pills, so it was left as-is — a stronger treatment than a dot, not a gap.
+>    Native `<select>`/`<datalist>` category inputs (the ledger "Add transaction" form,
+>    `LedgerRowCard`'s inline edit) can't render a coloured swatch inside `<option>` cross-browser,
+>    so those were deliberately left alone.
+> 2. **Settings sub-navigation — done.** New `SettingsSubNav.tsx`, a sticky (`top-14`, below the
+>    global header) pill nav for the 8 sections the checkpoint named. Added the 3 missing anchor ids
+>    it needed (`categories` on `AccountsForm.tsx`'s Categories card, `rules` on
+>    `SettingsCategoryBridge.tsx`'s Patterns card, `danger-zone` wrapping `<DangerZone />` in
+>    `settings/page.tsx`) — `accounts`/`budgets` already existed from #12's own review fix. Active
+>    section tracks scroll position via each target's `getBoundingClientRect().top` on a scroll
+>    listener rather than `IntersectionObserver`: an observer with a narrow top-of-viewport band goes
+>    stale while scrolled through an *untracked* section (Preferences, Reconciliation — neither is
+>    part of the named 8 and has no anchor id), since nothing tracked intersects the band there: the
+>    walk-every-section approach always finds the last one reached, gap or not. Every anchor target
+>    also got `scroll-mt-24` so the anchor-scroll lands below the sticky header + sub-nav instead of
+>    under it.
+>
+> **Verified:** `tsc --noEmit`, `npx eslint app lib` (31 problems — unchanged baseline), and
+> `npm run test:run` (146/146) all clean. Screenshotted with Playwright (installed ad hoc, not added
+> to `package.json` — same pattern PR #10 used for `@axe-core/playwright`) against seeded test data:
+> confirmed the category dot renders in the ledger row, the category filter dropdown, the inline-edit
+> `Select`, and the row-edit `TYPE`/`CATEGORY` selects; confirmed the sub-nav's active pill tracks
+> scroll position correctly through the Preferences/Reconciliation gaps and that clicking a pill lands
+> the target section below the sticky chrome, not under it.
+
 ### Phase U6 — Visual polish & performance of the UI itself ✅ (M7b)
 
 - Convert the 9 `.ttf` fonts to `.woff2` and drop unused IBM Plex Mono weights (keep 400/500/600);
