@@ -45,16 +45,23 @@ const MAX_STALE_CYCLES = 3
 
 /**
  * Hard backstop on the total rows `getRecurringSeries` fetches from the DB,
- * on top of the per-group windowing below. Per-group capping bounds work by
- * (distinct description groups × `RECURRING_PER_GROUP_LIMIT`), which has no
- * DB-side ceiling of its own — an account with an extreme number of distinct
- * descriptions could still force an effectively full-table read. This caps
- * the query itself well above the app's documented single-user target scale
- * (IMPROVEMENT_PLAN.md: ~50k rows for a multi-year home-user dataset), so it
- * only engages for pathological cases and never reintroduces the starvation
- * bug this file exists to fix (the original repro needed only ~49k rows to
- * starve a low-volume series under a flat 2000-row cap; this backstop is 10x
- * that headroom above the target scale itself).
+ * on top of the per-group windowing below. Per-group capping bounds JS-side
+ * work by (distinct description groups × `RECURRING_PER_GROUP_LIMIT`), but
+ * that only windows whatever this query returns — with no DB-side `take` at
+ * all, the query itself was an unbounded, effectively full-table read.
+ *
+ * This isn't a full fix for starvation on its own: on a dataset large enough
+ * that total matching rows exceed this cap, a handful of very high-volume
+ * groups could still push a genuine low-volume series out of the newest
+ * `RECURRING_QUERY_ROW_CAP` rows, the same failure mode `takeRecentPerGroup`
+ * exists to prevent (the original repro needed ~49k rows to starve a series
+ * under the old flat 2000-row cap). 20,000 is 10x that old cap, which is
+ * enough headroom that starvation requires ~10x the row count to reproduce —
+ * i.e. still possible in principle on a much larger dataset, but this bounds
+ * worst-case query cost instead of leaving it fully unbounded. If this
+ * account's table ever grows past the low tens of thousands of matching rows
+ * (IMPROVEMENT_PLAN.md's documented single-user target is ~50k total rows),
+ * revisit with a SQL-side per-group window instead of raising this further.
  */
 const RECURRING_QUERY_ROW_CAP = 20_000
 

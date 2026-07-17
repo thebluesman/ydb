@@ -203,19 +203,26 @@ describe('getRecurringSeries', () => {
 
   it('applies the staleness cutoff consistently regardless of the host timezone', async () => {
     // Review fix on PR #20: the staleness filter used to compare a local-time
-    // `startOfToday` against a UTC-parsed `lastDate`, so the ~90-day
-    // (MAX_STALE_CYCLES=3, ~30-day cadence) cutoff could drift by the host's
-    // UTC offset. Both sides are now computed in UTC, so the same series
-    // should be dropped/kept the same way under any TZ.
+    // `startOfToday` (built via `new Date(asOf.getFullYear(), ...)`, which
+    // depends on process.env.TZ) against a UTC-parsed `lastDate`. Both sides
+    // are now computed in UTC via `Date.UTC(asOf.getUTCFullYear(), ...)`.
+    //
+    // Dates below are picked so `cyclesStale` lands at EXACTLY 3.0 (the
+    // MAX_STALE_CYCLES boundary, kept since the filter is `<=`) under UTC:
+    // avgGap is exactly 31 days (Jan 13 -> Feb 13 -> Mar 16), and asOf is
+    // exactly 93 days (3 * 31) after the last occurrence. Under the OLD
+    // buggy local-time code this is TZ-sensitive: verified numerically that
+    // TZ=UTC still lands on exactly 3.0 (kept), but TZ=Pacific/Kiritimati
+    // (UTC+14) and TZ=Etc/GMT+12 (UTC-12) push it to ~3.01-3.02 (dropped) —
+    // i.e. the old code would disagree with itself across hosts on this
+    // exact series. The fix must land on "kept" identically under all three.
     const dying: FullTx[] = [
-      { id: 1, date: new Date('2026-01-15T00:00:00Z'), amount: -1500, description: 'Gym Membership', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
-      { id: 2, date: new Date('2026-02-14T00:00:00Z'), amount: -1500, description: 'Gym Membership', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 1, date: new Date('2026-01-13T00:00:00Z'), amount: -1500, description: 'Gym Membership', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
+      { id: 2, date: new Date('2026-02-13T00:00:00Z'), amount: -1500, description: 'Gym Membership', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
       { id: 3, date: new Date('2026-03-16T00:00:00Z'), amount: -1500, description: 'Gym Membership', category: 'Health', status: 'committed', transactionType: 'debit', accountId: 1 },
     ]
     fixtureTxs = dying
-    // Last occurrence 2026-03-16, avgGap ~30 days: exactly on the MAX_STALE_CYCLES=3
-    // boundary is ~90 days later (2026-06-14). Pick asOf just past it in UTC.
-    const asOf = new Date('2026-06-15T12:00:00Z')
+    const asOf = new Date('2026-06-17T12:00:00Z')
 
     const originalTz = process.env.TZ
     try {
@@ -228,8 +235,11 @@ describe('getRecurringSeries', () => {
       process.env.TZ = 'Etc/GMT+12' // UTC-12, the largest negative offset in use
       const farBehindResult = await getRecurringSeries(asOf)
 
-      expect(farAheadResult.map((s) => s.description)).toEqual(utcResult.map((s) => s.description))
-      expect(farBehindResult.map((s) => s.description)).toEqual(utcResult.map((s) => s.description))
+      // All three must KEEP the series (not just agree with each other —
+      // agreeing on the wrong answer would pass just as easily).
+      expect(utcResult.map((s) => s.description)).toEqual(['Gym Membership'])
+      expect(farAheadResult.map((s) => s.description)).toEqual(['Gym Membership'])
+      expect(farBehindResult.map((s) => s.description)).toEqual(['Gym Membership'])
     } finally {
       process.env.TZ = originalTz
     }
