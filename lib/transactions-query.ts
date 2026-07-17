@@ -540,3 +540,42 @@ export function preRangeAssetSumSql(assetAccountIds: number[], startIso: string)
     ` WHERE ${scope} AND ${incl}`
   )
 }
+
+// ── Budget month-history sparkline (Phase 7 item 6) ─────────────────────────
+// The sparkline in BudgetWidget needs a trailing window of monthly spend per
+// budgeted category, independent of whatever date range the dashboard filter
+// bar happens to have selected (a budget is a recurring monthly concept, not
+// a range-scoped one). The query itself reuses `categoryTrendSql` verbatim —
+// it already returns per (month, category) debit totals with the same
+// transfer/split-parent/reimbursement exclusion rules as the rest of the
+// dashboard (covered by the oracle test), so no new SQL is needed here. This
+// helper is the pure-JS assembly step: seed every requested month (so gaps
+// render as zero, matching the `monthMap` seeding pattern used elsewhere on
+// the dashboard) and fold the trend rows into a per-category array.
+
+export type BudgetHistoryPoint = { month: string; actual: number }
+
+/**
+ * Builds { category -> [{ month, actual }, …] } for each of `categories`,
+ * across every key in `months` (ascending 'YYYY-MM'), zero-filling months
+ * with no matching trend row.
+ */
+export function buildBudgetHistory(
+  categories: string[],
+  months: string[],
+  trendRows: TrendRow[],
+  monthLabel: (ym: string) => string,
+): Map<string, BudgetHistoryPoint[]> {
+  const byCategory = new Map<string, Map<string, number>>()
+  for (const cat of categories) byCategory.set(cat, new Map(months.map((m) => [m, 0])))
+  for (const r of trendRows) {
+    const catMonths = byCategory.get(r.category)
+    if (!catMonths || !catMonths.has(r.ym)) continue
+    catMonths.set(r.ym, (catMonths.get(r.ym) ?? 0) + toNumber(r.total))
+  }
+  const result = new Map<string, BudgetHistoryPoint[]>()
+  for (const [cat, monthTotals] of byCategory) {
+    result.set(cat, months.map((ym) => ({ month: monthLabel(ym), actual: monthTotals.get(ym) ?? 0 })))
+  }
+  return result
+}

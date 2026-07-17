@@ -7,6 +7,8 @@ import {
   categoryTrendSql,
   preRangeAssetSumSql,
   inclusionSql,
+  buildBudgetHistory,
+  type TrendRow,
 } from '@/lib/transactions-query'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -317,5 +319,65 @@ describe('inclusionSql forces the selective indexes for its correlated subquerie
     const sql = inclusionSql('main', [1, 2], '2024-01-01T00:00:00.000+00:00')
     expect(sql).toContain('INDEXED BY "Transaction_parentTransactionId_idx"')
     expect(sql).toContain('INDEXED BY "Transaction_reimbursementTxId_key"')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildBudgetHistory (Phase 7 item 6 — BudgetWidget month-history sparkline).
+//
+// The underlying query is categoryTrendSql — already validated against the JS
+// oracle above — reused verbatim over a fixed trailing window instead of the
+// dashboard's selected date range. What's actually new here is the pure JS
+// assembly step (lib/transactions-query.ts): seed every requested month to
+// zero, then fold matching trend rows in. This is the same "seed then fill"
+// pattern as monthMap in app/dashboard/page.tsx, tested directly here since
+// it doesn't touch the DB.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('buildBudgetHistory', () => {
+  const label = (ym: string) => ym // identity — label formatting isn't under test here
+
+  it('zero-fills months with no matching trend row, per category', () => {
+    const trendRows: TrendRow[] = [{ ym: '2026-02', category: 'Groceries', total: 5000 }]
+    const result = buildBudgetHistory(['Groceries', 'Dining'], ['2026-01', '2026-02', '2026-03'], trendRows, label)
+    expect(result.get('Groceries')).toEqual([
+      { month: '2026-01', actual: 0 },
+      { month: '2026-02', actual: 5000 },
+      { month: '2026-03', actual: 0 },
+    ])
+    expect(result.get('Dining')).toEqual([
+      { month: '2026-01', actual: 0 },
+      { month: '2026-02', actual: 0 },
+      { month: '2026-03', actual: 0 },
+    ])
+  })
+
+  it('ignores trend rows for categories or months outside the requested set', () => {
+    const trendRows: TrendRow[] = [
+      { ym: '2026-02', category: 'Not A Budget', total: 999 }, // category not requested
+      { ym: '2025-12', category: 'Groceries', total: 111 }, // month not requested
+    ]
+    const result = buildBudgetHistory(['Groceries'], ['2026-01', '2026-02'], trendRows, label)
+    expect(result.get('Groceries')).toEqual([
+      { month: '2026-01', actual: 0 },
+      { month: '2026-02', actual: 0 },
+    ])
+    expect(result.has('Not A Budget')).toBe(false)
+  })
+
+  it('sums multiple rows for the same (month, category) — mirrors SQL GROUP BY semantics', () => {
+    // categoryTrendSql groups by (ym, category) so each cell is already a
+    // single row in practice, but the fold step should still be additive
+    // rather than last-write-wins if that ever changes.
+    const trendRows: TrendRow[] = [
+      { ym: '2026-01', category: 'Groceries', total: 1000 },
+      { ym: '2026-01', category: 'Groceries', total: 500 },
+    ]
+    const result = buildBudgetHistory(['Groceries'], ['2026-01'], trendRows, label)
+    expect(result.get('Groceries')).toEqual([{ month: '2026-01', actual: 1500 }])
+  })
+
+  it('applies the month label formatter to every seeded key', () => {
+    const result = buildBudgetHistory(['Groceries'], ['2026-01'], [], (ym) => `label(${ym})`)
+    expect(result.get('Groceries')).toEqual([{ month: 'label(2026-01)', actual: 0 }])
   })
 })

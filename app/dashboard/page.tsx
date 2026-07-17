@@ -9,11 +9,13 @@ import {
   preRangeAssetSumSql,
   accountMonthlySumSql,
   preRangeSumByAccountSql,
+  buildBudgetHistory,
   type MonthlyRow,
   type CategoryRow,
   type TrendRow,
   type AccountMonthlyRow,
   type AccountSumRow,
+  type BudgetHistoryPoint,
 } from '@/lib/transactions-query'
 
 // Raw SQLite integer aggregates can come back as bigint via the driver; coerce
@@ -64,7 +66,16 @@ export type TopTransaction = {
 }
 
 export type TrendCategory = { name: string; color: string }
-export type BudgetData = { category: string; budget: number; actual: number }
+export type BudgetData = {
+  category: string
+  budget: number
+  actual: number
+  // Unscaled monthly limit + trailing month-by-month spend, for the sparkline
+  // in BudgetWidget. Independent of the dashboard's selected date range (see
+  // the "Budget month-history sparkline" comment in page.tsx).
+  monthlyLimit: number
+  history: BudgetHistoryPoint[]
+}
 
 export default async function DashboardPage({
   searchParams,
@@ -308,10 +319,49 @@ export default async function DashboardPage({
   // the category breakdown above). Budget scales by the number of months
   // covered so a 3-month window compares against 3× the monthly limit.
   const monthsInRange = Math.max(1, monthMap.size)
+
+  // ── Budget month-history sparkline (Phase 7 item 6) ───────────────────────
+  // Deliberately a fixed trailing 6-calendar-month window ending "now" —
+  // NOT the dashboard's selected date range above. A budget's monthlyLimit is
+  // a recurring figure, so the sparkline should always answer "how has this
+  // category trended the last few months," regardless of whatever range the
+  // filter bar happens to be scoped to (which could be a single day). Reuses
+  // categoryTrendSql — the same grouped (month, category) debit query used
+  // for the main trend chart, so the transfer/split/reimbursement exclusion
+  // rules can't drift — via buildBudgetHistory (lib/transactions-query.ts)
+  // for the pure JS month-seeding/fold step.
+  const BUDGET_HISTORY_MONTHS = 6
+  const historyEnd = new Date(now)
+  historyEnd.setHours(23, 59, 59, 999)
+  const historyStart = new Date(now.getFullYear(), now.getMonth() - (BUDGET_HISTORY_MONTHS - 1), 1)
+  const historyMonthKeys: string[] = []
+  {
+    const cur = new Date(historyStart)
+    while (cur <= historyEnd) {
+      historyMonthKeys.push(monthKey(cur))
+      cur.setMonth(cur.getMonth() + 1)
+    }
+  }
+  const budgetCategories = budgets.map((b) => b.category)
+  let budgetHistoryByCategory = new Map<string, BudgetHistoryPoint[]>()
+  if (budgetCategories.length > 0 && accountIds.length > 0) {
+    const historyTrendRows = await prisma.$queryRawUnsafe<TrendRow[]>(
+      categoryTrendSql(accountIds, toDbDate(historyStart), toDbDate(historyEnd)),
+    )
+    budgetHistoryByCategory = buildBudgetHistory(
+      budgetCategories,
+      historyMonthKeys,
+      historyTrendRows,
+      monthLabel,
+    )
+  }
+
   const budgetData: BudgetData[] = budgets.map((b) => ({
     category: b.category,
     budget: b.monthlyLimit * monthsInRange,
     actual: rangeCatMap.get(b.category) ?? 0,
+    monthlyLimit: b.monthlyLimit,
+    history: budgetHistoryByCategory.get(b.category) ?? [],
   }))
 
   // ── Top 10 transactions ──────────────────────────────────────────────────────

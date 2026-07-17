@@ -586,6 +586,23 @@ Ordered by value for a single home user:
 > `where`. New test case in `tests/vendorRuleApply.test.ts` confirms a matching transfer row is
 > skipped while a matching debit row with the same pattern still applies.
 
+> **M8b status (item 6, Budget UX): DONE.** `BudgetWidget.tsx` now renders a small `recharts`
+> sparkline per budgeted category (trailing 6 calendar months, ending "now" — deliberately
+> independent of the dashboard's selected date-range filter, since a budget's monthly limit is a
+> recurring figure rather than a range-scoped one) with a dashed reference line at the category's
+> monthly limit, plus a distinct "Over budget" badge (`--bg-negative`/`--tx-negative`, same chip
+> pattern as the account-type badges elsewhere on the dashboard) next to categories currently over
+> — separate from the existing inline "+X% over" figure, which stays as the magnitude detail.
+> History data reuses `categoryTrendSql` (`lib/transactions-query.ts`) verbatim — the same grouped
+> (month, category) debit query the main trend chart uses, so the transfer/split-parent/
+> reimbursement exclusion rules can't drift — over a fixed 6-month window queried alongside the
+> existing dashboard aggregates in `app/dashboard/page.tsx`. The one new piece of logic, a pure JS
+> "seed every month to zero then fold in trend rows" assembly step, is a new exported
+> `buildBudgetHistory()` in `lib/transactions-query.ts`, unit-tested directly (no DB) in
+> `tests/dashboard.oracle.test.ts` (zero-fill, category/month filtering, additive fold, label
+> formatting). No envelope/rollover mechanics, per the explicit non-goal above. `npm run lint`,
+> `npm run test:run` (215 passed), and `npm run build` all clean.
+
 ### Phase 8 — Testing, tooling, deployment
 
 - **Seed script** `scripts/seed.ts` (accounts + 50k realistic transactions incl. splits, transfers,
