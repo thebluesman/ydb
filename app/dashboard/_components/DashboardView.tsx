@@ -19,7 +19,9 @@ import { CategoryTrendChart } from './CategoryTrendChart'
 import { TopTransactionsPanel } from './TopTransactionsPanel'
 import { BudgetWidget } from './BudgetWidget'
 import { NetWorthWidget } from './NetWorthWidget'
+import { UpcomingBillsWidget } from './UpcomingBillsWidget'
 import type { AccountBalance, CashFlowRow, NetWorthPoint, TopTransaction, TrendCategory, BudgetData } from '../page'
+import type { RecurringSeries } from '@/lib/recurring'
 import { DatePicker } from '@/app/_components/DatePicker'
 import { DateRangePresets } from '@/app/_components/DateRangePresets'
 import { isLiability } from '@/lib/accounts'
@@ -74,6 +76,7 @@ export function DashboardView({
   currentStartDate,
   currentEndDate,
   budgetData,
+  upcomingBills,
   isFreshDatabase,
   hasAccounts,
   hasBudgets,
@@ -93,6 +96,9 @@ export function DashboardView({
   currentStartDate: string
   currentEndDate: string
   budgetData: BudgetData[]
+  /** Recurring series due this calendar month (or overdue from an earlier
+   *  one), sorted by next expected date — Phase 7 item 5. */
+  upcomingBills: RecurringSeries[]
   /** True when the whole DB has no transactions yet (regardless of the
    *  selected range/currency) — drives the first-run onboarding card. */
   isFreshDatabase: boolean
@@ -350,6 +356,19 @@ export function DashboardView({
             Budgets are monthly limits — the amount shown scales with how many months your selected
             period covers (a 3-month range compares spend against 3× the monthly limit).
           </p>
+        </div>
+      )}
+
+      {/* ── Upcoming bills ─────────────────────────────────────────────────── */}
+      {upcomingBills.length > 0 && (
+        <div className="p-6 rounded-[8px]" style={cardStyle}>
+          <p className="text-[11px] font-medium uppercase tracking-[0.048px] mb-1" style={{ color: 'var(--tx-secondary)' }}>
+            Upcoming this month
+          </p>
+          <p className="text-xs mb-5" style={{ color: 'var(--tx-faint)' }}>
+            Detected recurring bills · projected next date/amount
+          </p>
+          <UpcomingBillsWidget bills={upcomingBills} currency={currency} />
         </div>
       )}
 

@@ -550,6 +550,39 @@ Ordered by value for a single home user:
 5. **Recurring → upcoming bills.** `/api/recurring` already detects cadence; project each series'
    next expected date/amount and show "Upcoming this month" on the dashboard with overdue
    highlighting.
+
+   > **M8a status: DONE.** Implemented on `claude/m8a-upcoming-bills`. Detection logic moved out of
+   > `app/api/recurring/route.ts` into `lib/recurring.ts` (`detectRecurring` — pure, testable — plus
+   > `getRecurringSeries` which does the Prisma fetch) so the route and the dashboard share one
+   > implementation instead of drifting. Each series now carries a projected `nextDate`
+   > (`lastDate + avgGap` days), `isOverdue` (`nextDate` before today), and `isDueThisMonth`
+   > (`nextDate` in the current calendar month) — the route's response shape gained these fields but
+   > kept its existing sort. New `UpcomingBillsWidget.tsx`, wired into `DashboardView.tsx` right above
+   > the summary stat cards, lists series that are due this month or overdue from an earlier one,
+   > sorted by `nextDate`; overdue rows get the `--bg-caution` background plus a `Badge
+   > variant="negative"` "Overdue" tag (both existing tokens/primitives, nothing new invented).
+   > `app/dashboard/page.tsx` calls `getRecurringSeries(now, accountIds)` scoped to the
+   > selected-currency account set (a filter added to `getRecurringSeries` for this call site only) so
+   > the widget's amounts match the dashboard's currency label — the bare `/api/recurring` route stays
+   > account-agnostic, matching its pre-existing behavior. New `tests/recurring.test.ts` (8 cases)
+   > covers the next-date projection arithmetic, the overdue/due-this-month boundary (including the
+   > exactly-on-the-projected-date edge case), and the existing cadence/consistency/grouping rules.
+   > Verified: `npm run lint` (3 pre-existing warnings, unrelated files, unchanged), `npm run
+   > test:run` (219/219, including `npx prisma migrate deploy` to restore this worktree's empty
+   > `dev.db` — `tests/sqlGuard.test.ts` and the production build both need real tables and fail
+   > identically on unmodified `main` without it), and `npm run build` clean. Smoke-tested
+   > `/dashboard` and `/api/recurring` against the running production build.
+   >
+   > **Review fix:** `getRecurringSeries`'s query used `orderBy: { date: 'asc' }` with `take: 2000`
+   > — fetching the *oldest* 2000 matching debits, not the most recent. Harmless when the route was
+   > just a standalone list, but load-bearing now that it feeds "Upcoming this month": any account
+   > with more than 2000 committed/reconciled debits in its history would compute `nextDate` from a
+   > years-stale slice, misreporting bills as overdue (or missing recently-started ones) forever.
+   > Switched to `orderBy: { date: 'desc' }` + a `.reverse()` after the fetch (the gap math in
+   > `detectRecurring` assumes ascending order). Added an optional `take` param (default 2000, same
+   > as before) so `tests/recurring.test.ts` can exercise the cap with a small fixture instead of
+   > needing thousands of rows; new test confirms a stale 2020 series is dropped in favor of a
+   > currently-active one when both compete for a tiny cap.
 6. **Budget UX.** Budgets exist; add per-category month history sparkline in `BudgetWidget` and an
    "over budget" callout. (Skip envelope/rollover mechanics — overkill for this app.)
 7. **Rules retro-apply.** In `VendorRuleManager`, "Apply to existing" button per rule → bulk-update
