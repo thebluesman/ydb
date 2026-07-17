@@ -50,7 +50,7 @@ export function Modal({
                 {showClose && (
                   <Dialog.Close asChild>
                     <button aria-label="Close" style={{ color: 'var(--tx-tertiary)' }}>
-                      <X size={15} />
+                      <X size={16} />
                     </button>
                   </Dialog.Close>
                 )}

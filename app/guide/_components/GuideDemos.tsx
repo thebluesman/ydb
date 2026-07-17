@@ -148,7 +148,7 @@ export function ReimbursementDemo({ currency }: { currency: string }) {
           className="flex items-center gap-2.5 px-3 py-2.5 rounded-[8px] text-xs"
           style={{ backgroundColor: 'var(--bg-badge-review)', border: '1px solid var(--border-warm)', color: 'var(--tx-badge-review)' }}
         >
-          <RotateCcw size={13} style={{ flexShrink: 0 }} />
+          <RotateCcw size={14} style={{ flexShrink: 0 }} />
           <span>1 pending reimbursement awaiting settlement — {currency} 500.00 outstanding</span>
           <span className="ml-auto" style={{ color: 'var(--tx-secondary)' }}>Filter</span>
         </div>
@@ -163,8 +163,8 @@ export function ReimbursementDemo({ currency }: { currency: string }) {
         <span className="flex-1 flex items-center gap-1.5 min-w-0" style={{ color: 'var(--tx-primary)' }}>
           <span className="truncate">Dubai Hospital</span>
           {settled
-            ? <CheckCircle2 size={11} style={{ color: '#34d399', flexShrink: 0 }} />
-            : <RotateCcw size={11} style={{ color: 'var(--tx-faint)', flexShrink: 0 }} />}
+            ? <CheckCircle2 size={12} style={{ color: '#34d399', flexShrink: 0 }} />
+            : <RotateCcw size={12} style={{ color: 'var(--tx-faint)', flexShrink: 0 }} />}
         </span>
         <span className="text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0" style={{ background: '#0E7490', color: '#fff' }}>
           Healthcare
@@ -187,7 +187,7 @@ export function ReimbursementDemo({ currency }: { currency: string }) {
         >
           <span className="w-24 shrink-0 font-mono text-[11px]" style={{ color: 'var(--tx-tertiary)' }}>2024-03-24</span>
           <span className="flex-1 flex items-center gap-1.5" style={{ color: 'var(--tx-secondary)' }}>
-            <RotateCcw size={10} style={{ color: '#34d399' }} />
+            <RotateCcw size={12} style={{ color: '#34d399' }} />
             Insurance Refund
           </span>
           <span className="font-mono text-sm" style={{ color: '#34d399', letterSpacing: '-0.275px' }}>

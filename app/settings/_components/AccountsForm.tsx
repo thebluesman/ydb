@@ -320,7 +320,7 @@ export function AccountsForm({
                     }}
                   >
                     <Checkbox.Indicator>
-                      <Check size={11} strokeWidth={3} style={{ color: 'var(--tx-nav-active)' }} />
+                      <Check size={12} strokeWidth={3} style={{ color: 'var(--tx-nav-active)' }} />
                     </Checkbox.Indicator>
                   </Checkbox.Root>
                 </div>

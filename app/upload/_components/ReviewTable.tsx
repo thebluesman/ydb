@@ -598,7 +598,7 @@ const Row = memo(function Row({
           style={{ color: 'var(--tx-tertiary)' }}
           aria-label="Remove row"
         >
-          <X size={15} />
+          <X size={16} />
         </button>
       </div>
 
@@ -628,7 +628,7 @@ const Row = memo(function Row({
                 className="transition-opacity hover:opacity-60"
                 style={{ color: 'var(--tx-tertiary)' }}
               >
-                <X size={11} />
+                <X size={12} />
               </button>
             </div>
           </div>

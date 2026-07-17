@@ -162,7 +162,7 @@ export function CategoryManager({
                   title="Save"
                   aria-label="Save"
                 >
-                  {editSaving ? '…' : <Check size={10} />}
+                  {editSaving ? '…' : <Check size={12} />}
                 </button>
                 <button
                   onClick={cancelEdit}
@@ -171,7 +171,7 @@ export function CategoryManager({
                   title="Cancel"
                   aria-label="Cancel"
                 >
-                  <X size={10} />
+                  <X size={12} />
                 </button>
               </>
             ) : (
@@ -184,7 +184,7 @@ export function CategoryManager({
                   aria-label={`Rename ${cat.name}`}
                   title="Rename"
                 >
-                  <Pencil size={10} />
+                  <Pencil size={12} />
                 </button>
                 <button
                   onClick={() => handleDelete(cat.id)}
@@ -193,7 +193,7 @@ export function CategoryManager({
                   aria-label={`Remove ${cat.name}`}
                   title="Delete"
                 >
-                  <X size={10} />
+                  <X size={12} />
                 </button>
               </>
             )}

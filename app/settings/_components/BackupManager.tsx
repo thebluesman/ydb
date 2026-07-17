@@ -112,7 +112,7 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
           className="btn flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-[6px] transition-opacity disabled:opacity-50"
           style={{ ...inputStyle, padding: '6px 12px', cursor: loading ? 'default' : 'pointer' }}
         >
-          <DatabaseBackup size={13} />
+          <DatabaseBackup size={14} />
           {loading ? 'Backing up…' : 'Back up now'}
         </button>
       </div>
@@ -152,32 +152,32 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
                 <a
                   href={`/api/backup/${encodeURIComponent(b.filename)}`}
                   download={b.filename}
-                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-[5px]"
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)]"
                   style={{
                     color: 'var(--tx-secondary)',
                     border: '1px solid var(--border-warm)',
                     backgroundColor: 'var(--bg-input)',
                   }}
                 >
-                  <Download size={11} />
+                  <Download size={12} />
                   Download
                 </a>
                 <button
                   onClick={() => setRestoreTarget(b.filename)}
-                  className="btn flex items-center gap-1 text-xs px-2 py-1 rounded-[5px]"
+                  className="btn flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)]"
                   style={{
                     color: 'var(--tx-secondary)',
                     border: '1px solid var(--border-warm)',
                     backgroundColor: 'var(--bg-input)',
                   }}
                 >
-                  <RotateCcw size={11} />
+                  <RotateCcw size={12} />
                   Restore
                 </button>
                 <button
                   onClick={() => handleDelete(b.filename)}
                   disabled={deleting === b.filename}
-                  className="btn flex items-center gap-1 text-xs px-2 py-1 rounded-[5px] disabled:opacity-50"
+                  className="btn flex items-center gap-1 text-xs px-2 py-1 rounded-[var(--radius-sm)] disabled:opacity-50"
                   style={{
                     color: 'var(--color-error, #e53e3e)',
                     border: '1px solid var(--border-warm)',
@@ -185,7 +185,7 @@ export function BackupManager({ initialBackups }: { initialBackups: BackupEntry[
                     cursor: deleting === b.filename ? 'default' : 'pointer',
                   }}
                 >
-                  <Trash2 size={11} />
+                  <Trash2 size={12} />
                   {deleting === b.filename ? '…' : 'Delete'}
                 </button>
               </div>

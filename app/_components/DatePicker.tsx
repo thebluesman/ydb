@@ -155,12 +155,12 @@ export function DatePicker({ value, onChange, className, style, size = 'md' }: P
           }}
         >
           <CalendarDays
-            size={isSm ? 11 : 13}
+            size={isSm ? 12 : 14}
             style={{ color: 'var(--tx-tertiary)', flexShrink: 0 }}
           />
           <span style={{ flex: 1 }}>{value ? formatDisplay(value) : 'Pick a date'}</span>
           <ChevronDown
-            size={10}
+            size={12}
             style={{
               color: 'var(--tx-tertiary)',
               flexShrink: 0,
@@ -200,12 +200,12 @@ export function DatePicker({ value, onChange, className, style, size = 'md' }: P
               DayButton: CustomDayButton,
               PreviousMonthButton: ({ onClick, disabled }) => (
                 <NavBtn onClick={onClick} disabled={disabled}>
-                  <ChevronLeft size={13} />
+                  <ChevronLeft size={14} />
                 </NavBtn>
               ),
               NextMonthButton: ({ onClick, disabled }) => (
                 <NavBtn onClick={onClick} disabled={disabled}>
-                  <ChevronRight size={13} />
+                  <ChevronRight size={14} />
                 </NavBtn>
               ),
             }}

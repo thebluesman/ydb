@@ -292,7 +292,7 @@ export function ChatPane({
                   color: 'var(--tx-error)',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                    <AlertCircle size={15} strokeWidth={2} style={{ flexShrink: 0, marginTop: '1px' }} />
+                    <AlertCircle size={16} strokeWidth={2} style={{ flexShrink: 0, marginTop: '1px' }} />
                     <span>{msg.text}</span>
                   </div>
                   {msg.errorDetail && (

@@ -365,8 +365,8 @@ export function VendorRuleManager({
                     className="btn flex items-center gap-1.5 flex-1 min-w-0 text-left"
                   >
                     {isCollapsed
-                      ? <ChevronRight size={13} style={{ color: 'var(--tx-tertiary)', flexShrink: 0 }} />
-                      : <ChevronDown size={13} style={{ color: 'var(--tx-tertiary)', flexShrink: 0 }} />}
+                      ? <ChevronRight size={14} style={{ color: 'var(--tx-tertiary)', flexShrink: 0 }} />
+                      : <ChevronDown size={14} style={{ color: 'var(--tx-tertiary)', flexShrink: 0 }} />}
                     <span className="text-sm font-medium truncate" style={{ color: 'var(--tx-primary)' }}>
                       {vendorName}
                     </span>
@@ -481,7 +481,7 @@ export function VendorRuleManager({
                           style={{ color: testingRuleId === rule.id ? 'var(--tx-secondary)' : 'var(--tx-tertiary)' }}
                           title="Test this rule against your transactions"
                         >
-                          <FlaskConical size={13} />
+                          <FlaskConical size={14} />
                         </button>
                         <button
                           onClick={() => handleDelete(rule.id)}

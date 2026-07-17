@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
-import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X, SlidersHorizontal } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Download, ChevronDown, AlertCircle, RotateCcw, Plus, X, SlidersHorizontal, Rows3, Rows2 } from 'lucide-react'
 import * as RSelect from '@radix-ui/react-select'
 import { LedgerRow } from './LedgerRow'
 import { LedgerRowCard } from './LedgerRowCard'
@@ -97,6 +97,18 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
   const [dateStart, setDateStart] = useState(urlStartDate)
   const [dateEnd, setDateEnd] = useState(urlEndDate)
   const [showSuggestModal, setShowSuggestModal] = useState(false)
+  // Table density (comfortable/compact) — persisted so the choice sticks
+  // across visits, same pattern as the theme toggle.
+  const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable')
+  useEffect(() => {
+    const stored = localStorage.getItem('ledgerDensity')
+    if (stored === 'compact' || stored === 'comfortable') setDensity(stored)
+  }, [])
+  const toggleDensity = () => {
+    const next = density === 'compact' ? 'comfortable' : 'compact'
+    setDensity(next)
+    localStorage.setItem('ledgerDensity', next)
+  }
 
   // Add transaction form
   const [showAddForm, setShowAddForm]       = useState(false)
@@ -532,7 +544,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                     </RSelect.Item>
                     {categories.length === 0 && (
                       <div className="flex items-center gap-1.5 px-3 py-1.5">
-                        <AlertCircle size={11} strokeWidth={1.5} style={{ color: 'var(--tx-tertiary)' }} />
+                        <AlertCircle size={12} strokeWidth={1.5} style={{ color: 'var(--tx-tertiary)' }} />
                         <span className="text-[11px]" style={{ color: 'var(--tx-tertiary)' }}>No custom categories yet</span>
                       </div>
                     )}
@@ -560,9 +572,18 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
           </div>
 
           <button
+            onClick={toggleDensity}
+            className="btn hidden md:flex items-center gap-1.5 text-sm transition-colors duration-150 ml-auto"
+            style={{ color: 'var(--tx-secondary)' }}
+            title={density === 'compact' ? 'Switch to comfortable row spacing' : 'Switch to compact row spacing'}
+          >
+            {density === 'compact' ? <Rows3 size={14} /> : <Rows2 size={14} />}
+            {density === 'compact' ? 'Comfortable' : 'Compact'}
+          </button>
+          <button
             onClick={handleExport}
             disabled={total === 0}
-            className="btn flex items-center gap-1.5 text-sm transition-colors duration-150 disabled:opacity-30 ml-auto"
+            className="btn flex items-center gap-1.5 text-sm transition-colors duration-150 disabled:opacity-30 md:ml-0 ml-auto"
             style={{ color: 'var(--tx-secondary)' }}
             title="Export filtered view as CSV"
           >
@@ -600,7 +621,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
                 aria-label={`Remove filter: ${chip.label}`}
               >
                 {chip.label}
-                <X size={11} />
+                <X size={12} />
               </button>
             ))}
           </div>
@@ -613,7 +634,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium" style={{ color: 'var(--tx-primary)' }}>New transaction</span>
             <button onClick={() => { setShowAddForm(false); setAddError('') }} style={{ color: 'var(--tx-tertiary)' }}>
-              <X size={15} />
+              <X size={16} />
             </button>
           </div>
           <div className="flex flex-wrap gap-3 items-end">
@@ -762,7 +783,7 @@ export function LedgerView({ initialRows, initialTotal, initialStats, accounts, 
         ) : (
           <>
             <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className={`w-full text-sm ${density === 'compact' ? 'ledger-table-compact' : ''}`}>
                 <thead style={{ backgroundColor: 'var(--bg-table-head)' }}>
                   <tr>
                     <th className="px-3 py-3 w-10">
