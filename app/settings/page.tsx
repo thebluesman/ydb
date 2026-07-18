@@ -67,7 +67,7 @@ export default async function SettingsPage() {
           initialCategories={categories}
           rules={vendorRules}
           currency={settings.find((s) => s.key === 'baseCurrency')?.value ?? 'GBP'}
-          preferencesSlot={<PreferencesForm initialSettings={settings} />}
+          preferencesSlot={<PreferencesForm key="preferences" initialSettings={settings} />}
         />
 
         {/* Budgets card */}
