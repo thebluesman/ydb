@@ -50,6 +50,10 @@ export type YnabTransaction = {
   account_name: string
   payee_name: string | null
   category_name: string | null
+  /** YNAB's stable category id — used (not `category_name`) in the ADR-0005
+   *  change-detection fingerprint, since it's immune to a category being
+   *  renamed without its assignment actually changing. */
+  category_id: string | null
   transfer_account_id: string | null
   /** The reciprocal leg's own `id` when this row is one side of a transfer
    *  (credit card/loan payments included — YNAB models those as transfers
@@ -95,12 +99,56 @@ export function getYnabCredentials(): YnabCredentials {
  * but rounding keeps a hypothetical sub-cent amount from producing a
  * fractional "cent" and poisoning the integer-cents invariant.
  *
+ * `Math.round` breaks ties towards +Infinity, not away from zero, so a
+ * hypothetical exact-halfway negative amount rounds asymmetrically with its
+ * positive counterpart (-1_005 milliunits → -100 cents, not -101, while
+ * +1_005 → +101). Harmless in practice — real YNAB amounts are always
+ * multiples of 10 milliunits, so this branch is never actually reached — but
+ * documented here since it'd be a real bug the day that assumption breaks.
+ *
  * Lives here rather than in lib/money.ts because milliunits are a YNAB
  * concept; lib/money.ts owns the cents↔major-unit boundary only.
  */
 export function milliunitsToCents(milliunits: number): number {
   if (!Number.isFinite(milliunits)) return 0
   return Math.round(milliunits / 10)
+}
+
+/** Bumped only if the fingerprinted field set changes. A stored snapshot
+ *  whose version tag doesn't match the current one is treated as absent
+ *  (ADR-0005) — that makes a future field-set change degrade gracefully to
+ *  "no detection for pre-upgrade rows" rather than flagging the whole ledger
+ *  as changed on the next pull. */
+export const YNAB_FINGERPRINT_VERSION = 'v2'
+
+/**
+ * A frozen, versioned snapshot of a YNAB transaction's own fields (ADR-0005)
+ * — never anything YDB derives or maps (no converted cents, no YDB account
+ * id, no `category_name` — see the `category_id` field comment). Stored once
+ * at import time on `Transaction.ynabFingerprint` and never touched again;
+ * recomputed from each freshly-pulled YNAB row and compared by string
+ * equality to detect a YNAB-side edit without a local YDB edit ever being
+ * mistaken for one.
+ *
+ * `memo` is included (v2) because `describeYnabTransaction` falls back to it
+ * whenever `payee_name` is null — for those rows, `memo` is exactly what YDB
+ * would import as `description`, so a memo-only edit is a real content
+ * change the v1 fingerprint silently missed.
+ *
+ * `JSON.stringify` over an array (not a template literal with a delimiter)
+ * so a `|` or other separator inside a real field value — a memo, a payee
+ * name — can't collide with the encoding.
+ */
+export function computeYnabFingerprint(t: YnabTransaction): string {
+  return `${YNAB_FINGERPRINT_VERSION}|${JSON.stringify([
+    t.date,
+    t.amount,
+    t.account_id,
+    t.category_id,
+    t.payee_name,
+    t.memo,
+    t.transfer_account_id,
+  ])}`
 }
 
 /** Shared fetch wrapper: auth header, timeout, and token-free error messages. */
@@ -194,7 +242,12 @@ export async function fetchYnabAccounts(): Promise<YnabAccount[]> {
 export async function fetchYnabTransactions(serverKnowledge?: string | null): Promise<{
   transactions: YnabTransaction[]
   serverKnowledge: string
-  skippedDeleted: number
+  /** Tombstones (`deleted: true`) from a delta response. Returned rather than
+   *  just counted so lib/ynabImport.ts can check them against the ledger and
+   *  report the ones that match an already-imported row (ADR-0004) — a
+   *  tombstone for a transaction never imported carries no useful identity to
+   *  report and is silently ignored downstream. */
+  deletedTransactions: YnabTransaction[]
 }> {
   const creds = getYnabCredentials()
   const cursor = serverKnowledge?.trim()
@@ -207,10 +260,11 @@ export async function fetchYnabTransactions(serverKnowledge?: string | null): Pr
 
   const all = Array.isArray(data.transactions) ? data.transactions : []
   const notDeleted = all.filter((t) => !t.deleted)
+  const deleted = all.filter((t) => t.deleted)
 
   return {
     transactions: notDeleted,
     serverKnowledge: String(data.server_knowledge ?? ''),
-    skippedDeleted: all.length - notDeleted.length,
+    deletedTransactions: deleted,
   }
 }

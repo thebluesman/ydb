@@ -15,6 +15,8 @@ type Phase = 'idle' | 'mapping' | 'importing' | 'done'
 type YnabAccount = { id: string; name: string; type: string; closed: boolean }
 type YdbAccount = { id: number; name: string; accountType: string; currency: string }
 
+type ChangeReportItem = { ynabId: string; date: string; description: string; amount: number; accountName: string }
+
 type Summary = {
   count: number
   transfersCount: number
@@ -24,7 +26,10 @@ type Summary = {
   skippedAlreadyImported: number
   skippedTransfersIncomplete: number
   skippedTransfersCrossCurrency: number
-  skippedDeleted: number
+  skippedTransfersSameAccount: number
+  changedInYnab: ChangeReportItem[]
+  deletedInYnab: ChangeReportItem[]
+  orphanedTransferLegs: ChangeReportItem[]
   skippedUnmappedAccounts: string[]
 }
 
@@ -52,6 +57,36 @@ const YNAB_TYPE_LABELS: Record<string, string> = {
 
 function typeLabel(type: string): string {
   return YNAB_TYPE_LABELS[type] ?? type
+}
+
+// ADR-0004: report, expandable to the itemised list, rather than a bare
+// count — the point is to give Shyam enough identity per row to go find and
+// reconcile it in the ledger by hand.
+function ChangeReportBlock({ title, items }: { title: string; items: ChangeReportItem[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div
+      className="rounded-[6px] px-3 py-2.5 text-xs space-y-1.5"
+      style={{ backgroundColor: 'var(--bg-caution)', color: 'var(--tx-caution)' }}
+    >
+      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full text-left flex items-center justify-between gap-2">
+        <span>{title}</span>
+        <span>{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open && (
+        <ul className="space-y-1 pt-1" style={{ borderTop: '1px solid currentColor' }}>
+          {items.map((item) => (
+            <li key={item.ynabId} className="flex items-center justify-between gap-2">
+              <span className="truncate">
+                {item.date} · {item.description} · {item.accountName}
+              </span>
+              <span className="flex-shrink-0">{(item.amount / 100).toFixed(2)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 export function YnabImportManager() {
@@ -371,8 +406,11 @@ export function YnabImportManager() {
                   share a currency
                 </li>
               )}
-              {summary.skippedDeleted > 0 && (
-                <li>{summary.skippedDeleted} deleted in YNAB (skipped)</li>
+              {summary.skippedTransfersSameAccount > 0 && (
+                <li>
+                  {summary.skippedTransfersSameAccount} transfer(s) skipped — both sides map to the same
+                  YDB account
+                </li>
               )}
               {summary.skippedUnmappedAccounts.length > 0 && (
                 <li>
@@ -382,9 +420,31 @@ export function YnabImportManager() {
               )}
             </ul>
 
+            {/* ADR-0004: YNAB-side edits/deletions are detected and reported,
+                never applied — these need Shyam to reconcile by hand. */}
+            {summary.changedInYnab.length > 0 && (
+              <ChangeReportBlock
+                title={`${summary.changedInYnab.length} transaction${summary.changedInYnab.length === 1 ? '' : 's'} changed in YNAB and were not updated in YDB — resolve manually`}
+                items={summary.changedInYnab}
+              />
+            )}
+            {summary.deletedInYnab.length > 0 && (
+              <ChangeReportBlock
+                title={`${summary.deletedInYnab.length} transaction${summary.deletedInYnab.length === 1 ? '' : 's'} deleted in YNAB, still present in YDB — resolve manually`}
+                items={summary.deletedInYnab}
+              />
+            )}
+            {summary.orphanedTransferLegs.length > 0 && (
+              <ChangeReportBlock
+                title={`${summary.orphanedTransferLegs.length} transfer leg${summary.orphanedTransferLegs.length === 1 ? '' : 's'} missing its counterpart in YDB — resolve manually`}
+                items={summary.orphanedTransferLegs}
+              />
+            )}
+
             <p className="text-xs" style={{ color: 'var(--tx-faint)' }}>
               Imported transactions are committed straight to the ledger. Re-running an import never
-              duplicates rows.
+              duplicates rows. If a new transaction arrives in YNAB between this preview and
+              confirming, it will be picked up too — the numbers above may not match exactly.
             </p>
 
             <div className="flex justify-end gap-2">

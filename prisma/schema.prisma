@@ -67,6 +67,13 @@ model Transaction {
   // NULLs as distinct, so @unique coexists with them. @unique already creates
   // the index, so no separate @@index is needed.
   ynabId                           String?       @unique
+  // Frozen snapshot of the YNAB-native fields at import time (ADR-0005).
+  // Written once, in the same create that sets ynabId; no other write path
+  // (PATCH, transfer linking, split, reimbursement, reconcile) may touch it.
+  // Compared against a freshly-pulled YNAB row to detect a YNAB-side edit
+  // without a local ledger edit ever being mistaken for one. Not indexed —
+  // only ever read via the ynabId lookup.
+  ynabFingerprint                  String?
   createdAt                        DateTime      @default(now())
   updatedAt                        DateTime      @updatedAt
 

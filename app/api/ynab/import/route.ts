@@ -60,12 +60,15 @@ export async function POST(request: Request) {
   ]
   for (let i = 0; i < rowsToValidate.length; i++) {
     const row = rowsToValidate[i]
-    const invalid = await validateTransactionWrite({
-      transactionType: row.transactionType,
-      amount: row.amount,
-      accountId: row.accountId,
-      transferCounterpartAccountId: row.transferCounterpartAccountId ?? null,
-    })
+    const invalid = await validateTransactionWrite(
+      {
+        transactionType: row.transactionType,
+        amount: row.amount,
+        accountId: row.accountId,
+        transferCounterpartAccountId: row.transferCounterpartAccountId ?? null,
+      },
+      { accountCurrencies: plan.currencyById ?? undefined },
+    )
     if (invalid) {
       return NextResponse.json(
         {
@@ -92,6 +95,13 @@ export async function POST(request: Request) {
     // One transaction around the whole commit so the delta cursor can never
     // advance past rows that failed to insert. If any step throws, the cursor
     // stays where it was and the next run re-pulls the same window.
+    //
+    // Explicit timeout: the default 5s is sized for interactive writes, not a
+    // first full-history pull (ADR-0003's reset-then-import) which can be
+    // thousands of rows plus hundreds of transfer pairs (each written as two
+    // sequential creates, not a createMany). A silent rollback with no signal
+    // that a retry will fail identically is worse than a generous ceiling
+    // (finding 5, docs/ynab-import-fix-plan.md).
     const imported = await prisma.$transaction(async (tx) => {
       // Re-check for already-imported rows inside the write transaction. SQLite
       // serialises writers, so nothing can be inserted between this read and
@@ -124,6 +134,7 @@ export async function POST(request: Request) {
           rawSource: 'ynab',
           createdVia: 'import',
           ynabId: r.ynabId,
+          ynabFingerprint: r.ynabFingerprint,
         })),
       })
 
@@ -154,6 +165,7 @@ export async function POST(request: Request) {
             rawSource: 'ynab',
             createdVia: 'import',
             ynabId: side1.ynabId,
+            ynabFingerprint: side1.ynabFingerprint,
             transferCounterpartAccountId: side1.transferCounterpartAccountId,
           },
         })
@@ -170,6 +182,7 @@ export async function POST(request: Request) {
             rawSource: 'ynab',
             createdVia: 'import',
             ynabId: side2.ynabId,
+            ynabFingerprint: side2.ynabFingerprint,
             transferCounterpartAccountId: side2.transferCounterpartAccountId,
             linkedTransferId: created1.id,
           },
@@ -190,12 +203,32 @@ export async function POST(request: Request) {
         })
       }
 
-      // Persist the cursor and the mapping the user just confirmed.
-      await tx.setting.upsert({
-        where: { key: YNAB_SERVER_KNOWLEDGE_KEY },
-        update: { value: plan.serverKnowledge },
-        create: { key: YNAB_SERVER_KNOWLEDGE_KEY, value: plan.serverKnowledge },
-      })
+      // Persist the cursor — but only when nothing was deliberately skipped or
+      // left unresolved. `fetchYnabTransactions` only returns rows changed
+      // since the cursor, so advancing it past a skip (unmapped account,
+      // incomplete/cross-currency/same-account transfer) would make that row
+      // permanently unreachable on future pulls. Same reasoning covers
+      // ADR-0004's changed/deleted report: it must stay reachable on the next
+      // pull until Shyam reconciles it by hand, not disappear after one
+      // unread confirm-modal viewing. Leaving the cursor where it was means
+      // the next run re-fetches the same window — harmless, since the dedupe
+      // layers above make re-planning idempotent (finding 1,
+      // docs/ynab-import-fix-plan.md).
+      const hadSkips =
+        plan.skippedUnmappedAccounts.length > 0 ||
+        plan.skippedTransfersIncomplete > 0 ||
+        plan.skippedTransfersCrossCurrency > 0 ||
+        plan.skippedTransfersSameAccount > 0 ||
+        plan.changedInYnab.length > 0 ||
+        plan.deletedInYnab.length > 0 ||
+        plan.orphanedTransferLegs.length > 0
+      if (!hadSkips) {
+        await tx.setting.upsert({
+          where: { key: YNAB_SERVER_KNOWLEDGE_KEY },
+          update: { value: plan.serverKnowledge },
+          create: { key: YNAB_SERVER_KNOWLEDGE_KEY, value: plan.serverKnowledge },
+        })
+      }
       const mapJson = JSON.stringify(accountMap)
       await tx.setting.upsert({
         where: { key: YNAB_ACCOUNT_MAP_KEY },
@@ -208,11 +241,12 @@ export async function POST(request: Request) {
         accounts: countsByAccount.size,
         transfers: transfersWritten,
       }
-    })
+    }, { timeout: 60_000 })
 
     // `planned` is what the plan intended to write; `imported` is what the DB
-    // actually accepted. They differ only if skipDuplicates caught something,
-    // which is worth showing rather than hiding.
+    // actually accepted. They differ only if the in-transaction
+    // filterAlreadyImported recheck caught a race (see lib/ynabImport.ts) —
+    // worth showing rather than hiding.
     const { count: planned, ...summary } = summarisePlan(plan)
     return NextResponse.json({
       imported: imported.count,

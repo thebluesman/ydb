@@ -23,7 +23,14 @@ export type ValidationError = { error: string; field?: string }
 
 export async function validateTransactionWrite(
   t: TxForValidation,
-  opts: { allowOneSidedTransfer?: boolean } = {},
+  opts: {
+    allowOneSidedTransfer?: boolean
+    /** Pre-fetched `accountId -> currency`, so a caller that already looked
+     *  these up (e.g. planYnabImport's per-transfer cross-currency check)
+     *  doesn't pay for a second DB round-trip per leg. Falls back to a DB
+     *  lookup for any account not present in the map. */
+    accountCurrencies?: Map<number, string>
+  } = {},
 ): Promise<ValidationError | null> {
   if (t.transactionType === 'debit' && t.amount > 0) {
     return { error: 'debit amount must be zero or negative', field: 'amount' }
@@ -48,26 +55,28 @@ export async function validateTransactionWrite(
         field: 'transferCounterpartAccountId',
       }
     }
-    const [src, dst] = await Promise.all([
-      prisma.account.findUnique({
-        where: { id: t.accountId },
-        select: { currency: true },
-      }),
-      prisma.account.findUnique({
-        where: { id: t.transferCounterpartAccountId },
-        select: { currency: true },
-      }),
+    const cached = opts.accountCurrencies
+    const currencyOf = (id: number) =>
+      cached?.has(id)
+        ? Promise.resolve(cached.get(id))
+        : prisma.account.findUnique({ where: { id }, select: { currency: true } }).then((a) => a?.currency)
+    // Parallel, same as before opts.accountCurrencies was added — a cache
+    // miss on both sides must not regress a manual/bulk transfer write back
+    // to two sequential round-trips.
+    const [srcCurrency, dstCurrency] = await Promise.all([
+      currencyOf(t.accountId),
+      currencyOf(t.transferCounterpartAccountId),
     ])
-    if (!src) return { error: 'source account not found', field: 'accountId' }
-    if (!dst) {
+    if (!srcCurrency) return { error: 'source account not found', field: 'accountId' }
+    if (!dstCurrency) {
       return {
         error: 'transfer counterpart account not found',
         field: 'transferCounterpartAccountId',
       }
     }
-    if (src.currency !== dst.currency) {
+    if (srcCurrency !== dstCurrency) {
       return {
-        error: `cross-currency transfers not supported (${src.currency} → ${dst.currency})`,
+        error: `cross-currency transfers not supported (${srcCurrency} → ${dstCurrency})`,
         field: 'transferCounterpartAccountId',
       }
     }
