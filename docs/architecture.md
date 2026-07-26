@@ -19,7 +19,7 @@ breaking API changes from training-data Next.js.
 | LAN-only, no auth/multi-user | `IMPROVEMENT_PLAN.md` §4 |
 | WAL mode, `synchronous = NORMAL`, `busy_timeout = 5000`, FK on | `IMPROVEMENT_PLAN.md` Phase 0 |
 
-## Integration boundary (new as of ADR-0001/0002)
+## Integration boundary (ADR-0001 through ADR-0005)
 
 YDB is otherwise a closed, LAN-only app with no standing external dependencies. The YNAB migration
 integration is the one exception, and it's deliberately kept narrow:
