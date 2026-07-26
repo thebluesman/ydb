@@ -24,15 +24,20 @@ Shyam only (YDB is single-user, LAN-only — see `docs/architecture.md`).
 
 ## Success criteria
 
-- Phase 1: Shyam can, from Settings, pull all YNAB transactions since the last import into YDB with
-  correct accounts/categories/amounts, without duplicates, in a few clicks.
-- Phase 2 (later, gated — ADR-0002): the same pull runs automatically with no manual trigger, once
-  Phase 1 has proven trustworthy.
-- Ultimate exit criterion (not this project's deliverable, but the reason it exists): Shyam cancels
-  YNAB because YDB fully covers his day-to-day budgeting workflow.
+- **Phase 1: met, shipped 2026-07-26 (commit `39a5189`).** From Settings, Shyam can pull all YNAB
+  transactions since the last import into YDB with correct accounts/categories/amounts, without
+  duplicates, in a few clicks. Code-reviewed and QA-verified, including two correctness bugs QA found
+  post-implementation (a half-deleted-transfer miscount and an ADR-0004 false-positive flaw, the
+  latter resolved by ADR-0005). See `docs/ynab-import-fix-plan.md` for what shipped and what got
+  fixed.
+- **Phase 2 (later, gated — ADR-0002): not started.** The same pull runs automatically with no manual
+  trigger, once Phase 1 has proven trustworthy over real daily use — Shyam's explicit call, not a
+  timer or a date.
+- **Ultimate exit criterion (not this project's deliverable, but the reason it exists): not met.**
+  Shyam cancels YNAB because YDB fully covers his day-to-day budgeting workflow.
 
 ## Non-goals
 
-Carried from `IMPROVEMENT_PLAN.md` §4 except where ADR-0001 explicitly amends them: no auth/
-multi-user, no bank-credential-linking integrations (Plaid etc.), no SQLite/Prisma migration, no
+Carried from `docs/archive/IMPROVEMENT_PLAN.md` §4 except where ADR-0001 explicitly amends them: no
+auth/multi-user, no bank-credential-linking integrations (Plaid etc.), no SQLite/Prisma migration, no
 visual redesign, no weakening of the money-in-cents or read-only-SQL invariants.

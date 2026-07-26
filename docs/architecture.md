@@ -13,11 +13,11 @@ breaking API changes from training-data Next.js.
 
 | Invariant | Source |
 |---|---|
-| Money stored as integer cents, never floats | `lib/accounts.ts`, `IMPROVEMENT_PLAN.md` §4 |
+| Money stored as integer cents, never floats | `lib/accounts.ts`, `docs/archive/IMPROVEMENT_PLAN.md` §4 |
 | Asset/liability sign rules (`computeBalance`) | `lib/accounts.ts` |
 | Read-only SQL guard on the chat/query path | `lib/prisma.ts` |
-| LAN-only, no auth/multi-user | `IMPROVEMENT_PLAN.md` §4 |
-| WAL mode, `synchronous = NORMAL`, `busy_timeout = 5000`, FK on | `IMPROVEMENT_PLAN.md` Phase 0 |
+| LAN-only, no auth/multi-user | `docs/archive/IMPROVEMENT_PLAN.md` §4 |
+| WAL mode, `synchronous = NORMAL`, `busy_timeout = 5000`, FK on | `docs/archive/IMPROVEMENT_PLAN.md` Phase 0 |
 
 ## Integration boundary (ADR-0001 through ADR-0005)
 
