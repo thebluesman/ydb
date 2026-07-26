@@ -4,6 +4,7 @@ import { SettingsCategoryBridge } from './_components/SettingsCategoryBridge'
 import { BudgetManager } from './_components/BudgetManager'
 import { RecurringTransactions } from './_components/RecurringTransactions'
 import { ImportHistory } from './_components/ImportHistory'
+import { YnabImportManager } from './_components/YnabImportManager'
 import { DangerZone } from './_components/DangerZone'
 import { BackupManager } from './_components/BackupManager'
 import { ReconciliationManager } from './_components/ReconciliationManager'
@@ -121,6 +122,22 @@ export default async function SettingsPage() {
               lastReconciledBalance: a.lastReconciledBalance,
             }))}
           />
+        </div>
+
+        {/* YNAB import card */}
+        <div
+          id="ynab"
+          className="p-6 rounded-[8px] scroll-mt-24"
+          style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-warm)' }}
+        >
+          <h2 className="text-[22px] font-semibold mb-1" style={{ letterSpacing: '-0.11px', color: 'var(--tx-primary)' }}>
+            Import from YNAB
+          </h2>
+          <p className="text-xs mb-4" style={{ color: 'var(--tx-secondary)' }}>
+            Pull transactions from your YNAB budget into YDB. One-way — YDB never writes back to YNAB.
+            Map each YNAB account to a YDB account, preview what would come across, then confirm.
+          </p>
+          <YnabImportManager />
         </div>
 
         {/* Import history card */}

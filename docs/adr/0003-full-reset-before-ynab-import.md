@@ -16,7 +16,11 @@ is the trusted source of truth for the migration period.
 Before Phase 1 import work begins moving real data, **fully reset YDB's ledger data**: Accounts,
 Transactions, ImportRecords, Categories, VendorRules, and Budgets. Recreate accounts fresh to mirror
 YNAB's account list 1:1 (same names, type mapping: `checking`→`current`, `savings`→`savings`,
-`creditCard`→`credit`, `personalLoan`→`personal_loan`, `autoLoan`→`auto_loan`, `cash`→`cash`).
+`creditCard`→`credit`, `personalLoan`→`personal_loan`, `autoLoan`→`auto_loan`, `cash`→`cash`), each
+with **`openingBalance: 0`**. YNAB models each account's starting balance as an ordinary transaction
+(`payee_name: "Starting Balance"`), not account metadata; the Phase 1 importer intentionally imports
+those rows as regular transactions rather than filtering them out, so a nonzero `openingBalance` here
+would double-count that money. Zero is the only opening balance value compatible with the importer.
 Categories/VendorRules/Budgets get rebuilt against however YNAB actually categorizes things, rather
 than carrying over YDB's old scheme.
 

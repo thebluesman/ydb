@@ -8,6 +8,7 @@ const SECTIONS = [
   { id: 'rules', label: 'Rules' },
   { id: 'budgets', label: 'Budgets' },
   { id: 'recurring', label: 'Recurring' },
+  { id: 'ynab', label: 'YNAB' },
   { id: 'imports', label: 'Imports' },
   { id: 'backups', label: 'Backups' },
   { id: 'danger-zone', label: 'Danger Zone' },
