@@ -40,8 +40,12 @@ integration is the one exception, and it's deliberately kept narrow:
 Prior open items from the M1–M7 rework are tracked in `FOLLOWUPS.md` (transaction accuracy /
 reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
 
+## Decisions since initial scoping
+
+- **YNAB token storage: `.env` var, not Settings-stored.** Decided 2026-07-26. Matches how other
+  local secrets are handled in this app; avoids building encrypted-at-rest token storage + a Settings
+  UI for what's meant to be a temporary migration tool.
+
 ## Open questions
 
 - Account/category mapping UI for Phase 1 — not yet designed.
-- Whether the YNAB token lives in `.env` or a Settings-stored value — TBD when `@backend-engineer`
-  scopes the Phase 1 ticket.
