@@ -1,3 +1,7 @@
+> **Archived 2026-07-26.** All milestones (M1–M7) are complete and merged — this doc is a historical
+> record of the UI/reliability rework, not a live plan. Current work is tracked in `AGENTS.md` +
+> `docs/` (architecture, ADRs, PRD, journal). See `docs/journal/2026-07.md` for the switchover note.
+
 # ydb — Code & Product Review + Improvement Plan
 
 **Audience:** an implementing agent/developer picking this up cold. Every task lists the files to touch,
