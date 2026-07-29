@@ -2,6 +2,12 @@ export const runtime = 'nodejs'
 
 import { prisma, executeReadonlyQuery } from '@/lib/prisma'
 import { getLlmConfig } from '@/lib/llm-config'
+import {
+  buildKnowledgeBlock,
+  buildNarrationSystemPrompt,
+  loadKnowledgeSnippets,
+  NARRATION_KNOWLEDGE_TIER,
+} from '@/lib/chatKnowledge'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -93,6 +99,24 @@ const HISTORY_CHAR_CAP = 2000
 // Ollama can hang indefinitely on a stuck model; bound every call and forward
 // the client's abort so navigating away cancels generation server-side too.
 const OLLAMA_TIMEOUT_MS = 120_000
+
+// Ollama silently truncates an over-length prompt from the FRONT — exactly
+// where the injected knowledge block sits — so the context window has to be
+// resolved rather than inherited.
+//
+// Measured on Ollama 0.30.6 / qwen2.5:32b (2026-07-29), via prompt_eval_count:
+//   knowledge block alone (12 active P0 snippets)           922 tokens
+//   typical prompt (one aggregate row): without 126, with  1,061
+//   worst case (8 × 2,000-char history + 20 wide rows):
+//                                     without 7,751, with  8,686
+// The worst case was NOT truncated at this install's default — it evaluated
+// all 8,686 tokens. But that default is a server-level setting
+// (OLLAMA_CONTEXT_LENGTH / per-model auto-sizing) that this app neither owns
+// nor can see, and a silent truncation would eat the knowledge block first and
+// leave no error behind. So we pin it. 16384 clears the measured worst case
+// with roughly 2× headroom for the generated response, and fits inside the
+// recommended chat models' native context (qwen2.5:32b is 32k).
+const NARRATION_NUM_CTX = 16_384
 function ollamaSignal(clientSignal: AbortSignal | undefined): AbortSignal {
   const timeout = AbortSignal.timeout(OLLAMA_TIMEOUT_MS)
   return clientSignal ? AbortSignal.any([clientSignal, timeout]) : timeout
@@ -221,6 +245,11 @@ export async function POST(request: Request) {
       `${dbTruncated ? ' (capped by the server)' : ''}; only the first ${Math.min(NARRATION_ROW_CAP, rows.length)} are shown above.`
     : ''
 
+  // Knowledge injection (ADR-0007): narration prompt only, never the SQL
+  // prompt. Read fresh off disk each turn; the loader never throws, so a
+  // missing or unreadable docs/knowledge/ just means no block.
+  const knowledgeBlock = buildKnowledgeBlock(loadKnowledgeSnippets(NARRATION_KNOWLEDGE_TIER))
+
   // Phase 2: narration (streaming)
   let narrateRes: Response
   try {
@@ -229,9 +258,10 @@ export async function POST(request: Request) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: chatModel,
-        system: `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. Monetary values in the data may already be dollars (from SUM(amount)/100.0) or raw cents (from raw amount columns) — infer from context and always present them in ${baseCurrency} without any other currency symbols or conversions.`,
+        system: buildNarrationSystemPrompt(baseCurrency, knowledgeBlock),
         prompt: `${priorContext}User: ${question}\n\nData:\n${JSON.stringify(narrationRows, null, 2)}${truncationNote}`,
         stream: true,
+        options: { num_ctx: NARRATION_NUM_CTX },
       }),
       signal: ollamaSignal(request.signal),
     })
