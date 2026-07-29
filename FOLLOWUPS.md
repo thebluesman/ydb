@@ -3,33 +3,23 @@
 Items deliberately left for a future pass after the Float→Int / validation /
 LLM-hardening work landed.
 
-## 1. Net out unlinked reimbursements
+## 1. Net out unlinked reimbursements — SHIPPED (`13fc673`)
 
-Link-based reimbursement netting is in place, but ~AED 11,870 of "Insurance
-Reimbursement / Refund" credits aren't linked to their originating expenses,
-so they still inflate Total Income until the user links them.
+Bulk-match suggestion UI landed: `GET /api/reimbursements/suggest` +
+`ReimbursementSuggestModal.tsx`, plus a pending-reimbursement filter chip in
+`LedgerView.tsx`. Confirms each pair one at a time through the existing
+reimburse endpoint rather than silently excluding credits from Total
+Income — consistent with the prior rejection of "silently changing totals
+without user intent." The ~AED 11,870 figure described the pre-ADR-0003
+database and no longer applies (full ledger reset before the YNAB import).
 
-Options:
-- Bulk-link UI: "match all credits with `category=Reimbursement` to the
-  nearest preceding expense with `reimbursableFor` set" (nearest-by-date,
-  nearest-by-amount, or explicit pick).
-- Auto-exclude any credit with `category=Reimbursement` even when unlinked —
-  silently changes Total Income so add a tooltip explaining the exclusion.
+## 2. Soften DELETE cascade on linked transfers — SHIPPED (`6cb3e7e`)
 
-Rejected in prior passes: silently changing totals without user intent.
-
-## 2. Soften DELETE cascade on linked transfers
-
-`DELETE /api/transactions/[id]` deletes the linked counterpart alongside the
-row. For pairs the user linked manually (ledger's transfer-link modal after
-importing both statements), the counterpart was a real imported row — losing
-it on delete is probably not what they want.
-
-Fix options:
-- Track `createdVia: 'import' | 'manual'` on Transaction; only cascade on
-  `'manual'` (in-app transfer creation).
-- UI confirm: "This transfer has a linked counterpart on [Account]. Delete
-  both, unlink and delete just this one, or cancel?"
+`Transaction.createdVia: 'import' | 'manual'` now gates the cascade —
+`DELETE /api/transactions/[id]` only deletes the linked counterpart when it
+was app-created (`createdVia === 'manual'`), never an imported row. See
+`app/api/transactions/[id]/route.ts:207`. Covered by
+`tests/transactionDeleteCascade.test.ts`.
 
 ## 3. Existing-data anomalies
 
@@ -47,15 +37,17 @@ statement represents one side. If the user imports both statements, both sides
 end up in the DB naturally. A "force two-sided" option at import time
 (`?autopair=1`) would let power-users opt in.
 
-## 5. DB-level integrity constraints
+## 5. DB-level integrity constraints — 2/3 SHIPPED (`6cb3e7e`)
 
-Application-level validation covers the common cases. Additional
-nice-to-haves:
-
-- CHECK on `Transaction.amount` sign vs `transactionType` (sqlite supports
-  CHECK).
-- Enforce `linkedTransferId` symmetry via a trigger.
-- `onDelete: Cascade` for split legs instead of application-level cascade.
+- ~~CHECK on `Transaction.amount` sign vs `transactionType`~~ — shipped.
+- ~~`onDelete: Cascade` for split legs instead of application-level cascade~~
+  — shipped.
+- Enforce `linkedTransferId` symmetry via a trigger — still open. Symmetry is
+  currently maintained by hand-written logic across four separate write
+  paths, including a delete-and-recreate re-pair branch in the transaction
+  PATCH handler. Tracked as a Notion ticket on the YDB Migration board:
+  "Enforce linkedTransferId symmetry at the DB level" (Phase: Other, Owner:
+  @backend-engineer, needs @tech-lead sign-off).
 
 ## 6. Category handling on splits
 
@@ -65,3 +57,36 @@ per-category split differs. Not a correctness issue, but the ledger's
 category filter won't surface a split leg's category unless the leg is
 shown. Consider: show legs inline in the ledger filter results when a
 category filter is active, even if the parent doesn't match.
+
+## 7. Harden historian Stop hook before granting external access
+
+**Dormant until trigger.** Parked — the trigger is granting any other
+contributor / external access to this repo (a collaborator, a branch/PR
+workflow, or pointing this tooling at a repo not fully controlled by Shyam).
+Risk is ~nil while YDB is solo, LAN-only, single-user (per `AGENTS.md`); do
+not pull this into active work before the trigger approaches. Mirrors the
+same parked item already tracked in the `exlibris` and `personal-brand`
+sibling repos.
+
+`.claude/hooks/historian-check.py` interpolates changed filenames verbatim
+into its `decision: block` reason string, which is fed back into the model's
+context as instructions. A filename is attacker-controllable text — once the
+repo accepts inbound files (branch/PR/clone), a maliciously named file under
+a watched path (e.g. `docs/adr/Ignore-prior-instructions-and-....md`) could
+smuggle instructions into the model. Combined with the historian's
+auto-commit-to-main, a successful injection would have an unattended
+propagation path.
+
+When the trigger fires:
+- Sanitize the filename list before interpolation (strip newlines/control
+  characters, clamp per-entry length).
+- Stop auto-pushing on hook-triggered historian runs — commit locally and
+  let Shyam push, so an injection can't reach the remote unattended.
+  (Manual/explicit historian invocations may retain push if desired.)
+- Re-examine the ambient exposure of repo-shipped `.claude/hooks/` scripts
+  executing with user privileges on any cloned/contributed code; document
+  onboarding guidance for new contributors.
+
+The marker file (`.claude/.historian-last-seen`, gitignored) is not a
+vector — it's a SHA passed as a git argument, not interpolated into a shell
+or model prompt.
