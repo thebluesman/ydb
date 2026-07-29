@@ -35,7 +35,7 @@ async function generateSql(
         system: SQL_SYSTEM_PROMPT,
         prompt,
         stream: false,
-        options: { temperature: 0 },
+        options: { temperature: 0, num_ctx: SQL_NUM_CTX },
       }),
       signal,
     })
@@ -133,6 +133,58 @@ const OLLAMA_TIMEOUT_MS = 120_000
 // picker's model set changes, or a smaller-context model becomes common, this
 // assumption needs revisiting.
 const NARRATION_NUM_CTX = 16_384
+
+// Same reasoning for the SQL-generation call (generateSql), which until now set
+// no num_ctx at all and inherited whatever the server/model default happened to
+// be. Truncation is arguably worse here than in narration: the front of this
+// prompt is SQL_SYSTEM_PROMPT — the schema, the reserved-word rule, the
+// integer-cents rule — so a silent front-truncation doesn't degrade phrasing,
+// it produces confidently wrong SQL against a half-known schema.
+//
+// Measured on Ollama 0.30.6 (2026-07-29) via prompt_eval_count, with
+// num_predict 1. qwen2.5:32b and qwen2.5-coder:14b share a tokenizer and
+// returned identical counts on every case below:
+//   SQL_SYSTEM_PROMPT alone                                   791 tokens
+//   typical (no history, one-line question)                   800
+//   worst history (8 × 2,000-char prose turns)              4,007
+//   worst history + repair round-trip (failed SQL + error)  4,130  ← today's max
+// Filler-character history tokenizes cheaper (2,978 for the same case), so the
+// prose figure is the real ceiling; HISTORY_MESSAGE_CAP × HISTORY_CHAR_CAP is
+// what bounds it.
+//
+// Ticket 2 (ADR-0008) injects the stored category/account-name vocabulary into
+// this same prompt, so the value is sized for that now rather than bumped
+// again next ticket. Measured with the real dev-DB vocabulary (46 distinct
+// Transaction.category values — emoji-prefixed, so unusually token-expensive —
+// and 10 Account.name values) rendered as a closed list with its
+// only-use-a-literal-from-this-list rule:
+//   vocabulary block alone                                    423 tokens
+//   worst case above + vocabulary block                     4,539
+// And with the block scaled up to model ADR-0008's "cap it, escalate rather
+// than truncate" requirement, so the cap can be set generously:
+//   150 categories / 30 accounts → block 1,434, worst case  5,550
+//   300 categories / 50 accounts → block 2,863, worst case  6,979
+//
+// 16384 clears even the 300-category projection with >2× headroom over today's
+// actual worst case, and leaves ample room for the generated SQL (a few hundred
+// tokens at most; LIMIT 200 caps the query, not the response text).
+//
+// Why the same value as NARRATION_NUM_CTX rather than a tighter 8192: Ollama
+// keys its loaded runner on the request options, so a chat turn that asks for
+// 8192 then 16384 unloads and reloads the model between the two calls.
+// Measured on this install: repeating a num_ctx costs 0.15s load_duration,
+// changing it costs ~5s — twice per turn, for no benefit. They are kept as two
+// named constants because they bound two different prompts and will drift
+// apart if either grows; if they do diverge, the reload cost is the trade to
+// price in.
+//
+// Same model caveat as NARRATION_NUM_CTX: validated only against the two
+// recommended chat models (qwen2.5:32b, qwen2.5-coder:14b, both ≥32k native
+// context) per ROLE_META in lib/llm-models.ts. A fixed value is preferred over
+// querying each model's context window because a loud Ollama error on an
+// unsupported num_ctx is a safe failure mode; silent truncation is not.
+const SQL_NUM_CTX = 16_384
+
 function ollamaSignal(clientSignal: AbortSignal | undefined): AbortSignal {
   const timeout = AbortSignal.timeout(OLLAMA_TIMEOUT_MS)
   return clientSignal ? AbortSignal.any([clientSignal, timeout]) : timeout

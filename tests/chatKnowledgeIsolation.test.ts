@@ -62,12 +62,14 @@ describe('POST /api/chat — knowledge injection stays out of SQL generation (AD
       const block = buildKnowledgeBlock(loadKnowledgeSnippets('P0'))
       expect(block.length).toBeGreaterThan(0) // sanity: there is real content that could leak
 
-      // SQL-generation call: no knowledge content, no num_ctx override.
+      // SQL-generation call: no knowledge content, and its own pinned context
+      // window (SQL_NUM_CTX) so an over-length prompt errors loudly instead of
+      // being silently truncated from the front.
       expect(sqlCall.body.stream).toBe(false)
       expect(sqlCall.body.system).not.toContain(KNOWLEDGE_PRECEDENCE_LINE)
       expect(sqlCall.body.system).not.toContain(block)
       expect(sqlCall.body.prompt).not.toContain(block)
-      expect(sqlCall.body.options?.num_ctx).toBeUndefined()
+      expect(sqlCall.body.options?.num_ctx).toBe(16_384)
 
       // Narration call: carries the knowledge block and the pinned context window.
       expect(narrationCall.body.stream).toBe(true)
