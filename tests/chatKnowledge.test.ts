@@ -36,9 +36,14 @@ describe('loadKnowledgeSnippets — real docs/knowledge/', () => {
     expect(x1.body).not.toContain('ticket-1 outline')
   })
 
-  it('injects no currency-formatted figures, so the open cents-vs-dollars bug stays attributable', () => {
+  it('injects no digits at all, so no currency-formatted figure — in any form — can reach the prompt', () => {
+    // Broader than a currency-symbol pattern on purpose: catches "500 AED",
+    // "1,200 dirhams", and bare numbers too, not just "AED 500". The
+    // cents-vs-dollars bug this guards against is about the open
+    // [chat-bug] ticket staying attributable to one change, so the P0 set is
+    // required to spell numbers out in prose rather than use digits.
     for (const s of loadKnowledgeSnippets('P0')) {
-      expect(s.body).not.toMatch(/(AED|USD|\$|€|£)\s?\d/)
+      expect(s.body).not.toMatch(/\d/)
     }
   })
 
@@ -90,6 +95,32 @@ describe('loadKnowledgeSnippets — degradation', () => {
       const snippets = loadKnowledgeSnippets('P0', dir)
       expect(snippets.map((s) => s.id)).toEqual(['A1'])
       expect(snippets[0].body).toBe('Good body.')
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('orders by id, not by filename or discovery order, and forces X1 last regardless of filename', () => {
+    // Filenames deliberately sort in a different order than the ids they
+    // declare, and includes a C9/C10 pair — a plain lexicographic id sort
+    // would put "C10" before "C9". This fixture fails if compareIds's
+    // letter/number parse (or the X1-forced-last rule) is disabled, unlike
+    // EXPECTED_P0_ORDER above, whose real filenames happen to already sort
+    // correctly under a plain alphabetical sort and so pass even with
+    // ordering logic gutted.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ydb-knowledge-order-'))
+    try {
+      const write = (file: string, id: string, priority: string) =>
+        fs.writeFileSync(
+          path.join(dir, file),
+          `---\nid: ${id}\ntitle: "${id}"\npriority: ${priority}\nstatus: active\n---\n\nBody ${id}.\n`,
+        )
+      write('a-second-file.md', 'C9', 'P0')
+      write('b-fourth-file.md', 'A2', 'P0')
+      write('m-third-file.md', 'X1', 'P2') // wrong tier on purpose — exempt via ALWAYS_INJECT_IDS
+      write('z-first-file.md', 'C10', 'P0')
+
+      expect(loadKnowledgeSnippets('P0', dir).map((s) => s.id)).toEqual(['A2', 'C9', 'C10', 'X1'])
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

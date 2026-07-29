@@ -36,9 +36,11 @@ export type KnowledgeSnippet = {
 }
 
 function parseFrontMatter(raw: string): { fields: Record<string, string>; rest: string } | null {
-  const lines = raw.split('\n')
+  // Normalize CRLF up front so a file saved on Windows doesn't leave stray
+  // \r characters embedded in field values or the injected body.
+  const lines = raw.replace(/\r\n/g, '\n').split('\n')
   if (lines[0]?.trim() !== '---') return null
-  const closing = lines.indexOf('---', 1)
+  const closing = lines.findIndex((l, i) => i >= 1 && l.trim() === '---')
   if (closing === -1) return null
 
   const fields: Record<string, string> = {}
