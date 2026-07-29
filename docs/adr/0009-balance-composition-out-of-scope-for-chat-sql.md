@@ -1,7 +1,11 @@
 # ADR-0009: Balance composition is out of scope for chat-generated SQL
 
-Status: Accepted
+Status: Superseded by ADR-0010
 Date: 2026-07-29
+
+> Superseded 2026-07-29, same day. The scope call here was right; the Context misdiagnosed the repro
+> and the enforcement mechanism followed the misdiagnosis. The cited query never referenced
+> `openingBalance`. See ADR-0010. Kept unedited below as the record of what was decided.
 
 ## Context
 

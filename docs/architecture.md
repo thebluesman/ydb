@@ -64,14 +64,27 @@ Knowledge snippets (`docs/knowledge/`) are injected into the narration system pr
 That directory is application input at code trust level — git-tracked, PR-reviewed, never a target for
 ingested or scraped content.
 
-The guard is a safety boundary, not a correctness one. Manual testing on 2026-07-29 found two ways the
-SQL step produces a well-formed, safely-executed, wrong answer: a guessed category literal matching
-nothing (ADR-0008) and `openingBalance` combined across asset and liability accounts without the
-`lib/accounts.ts` sign rule (ADR-0009). Both are fixed on the generation side — real category values
-injected into the SQL prompt, and `openingBalance` declared off-limits with balance questions declined
-until a `computeBalance`-backed path exists. The scope check for ADR-0009 lives in
-`app/api/chat/route.ts`, deliberately not in `lib/prisma.ts`, so the guard stays input-agnostic and
-single-purpose.
+The guard is a safety boundary, not a correctness one. Manual testing on 2026-07-29 found three ways
+the SQL step produces a well-formed, safely-executed, wrong answer, and all three are fixed on the
+generation side, in `app/api/chat/route.ts` and deliberately not in `lib/prisma.ts`, so the guard stays
+input-agnostic and single-purpose:
+
+- **A guessed category literal matching nothing** (ADR-0008) — real `Transaction.category` values are
+  injected into the SQL prompt as a closed list.
+- **A transaction sum served as an account balance** (ADR-0010, superseding ADR-0009) — `SUM(amount)`
+  over a liability account is net flow, not `computeBalance`'s `openingBalance − Σ amount`. Balance and
+  net-worth questions are declined until a `computeBalance`-backed path exists, enforced by rejecting
+  both `openingBalance` references and balance-claiming result aliases.
+- **A `UNION` collapsing two aggregate labels into one** (ADR-0011) — SQLite names a compound result
+  set after its first branch, so an income sum reached narration labeled as expenses. `UNION` is
+  rejected; multi-metric answers use multiple aliased columns in one row.
+
+The last two share a root cause worth stating plainly: narration receives `JSON.stringify(rows)` and
+nothing else, so the column alias — written by the model at inference time — is the only thing carrying
+meaning, and it is a claim rather than a description. Both fixes police that claim.
+
+These diagnoses came from `ChatMessage.sql`, which persists every generated query. It is the first
+place to look when a chat answer is wrong; ADR-0009 was written without it and misdiagnosed the bug.
 
 ## Known follow-ups outside this scope
 
@@ -97,10 +110,13 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   (ADR-0007), so an out-of-scope question still generates and executes a `SELECT` before the model
   declines. Read-only and local, so it costs latency rather than safety. Revisit only if a cheap
   pre-SQL scope check turns out to be worth the extra round-trip.
-- **No code-computed balance path for chat.** ADR-0009 declines balance and net-worth questions rather
-  than letting generated SQL compose `openingBalance` across account types. Answering them properly
-  means computing balances in code via `computeBalance` and handing the result to narration as data.
-  Unowned and unscoped.
+- **No code-computed balance path for chat.** ADR-0010 declines balance and net-worth questions rather
+  than letting generated SQL assert a balance it cannot compute. Answering them properly means
+  computing balances in code via `computeBalance` and handing the result to narration as data. Unowned
+  and unscoped, and it is the standing answer whenever ADR-0010's alias check needs an exception.
+- **ADR-0010's alias check has a known false negative.** A balance passed off under a neutral alias
+  like `total` is not caught, because the check reads the model's own labeling. Closing it properly
+  needs either the `computeBalance` path above or an eval harness; neither exists.
 - **Account names have the same grounding gap as categories.** ADR-0008 covers `Transaction.category`
   only. Whether a guessed account-name literal fails the same silent way has not been tested.
 - **`num_ctx` is never set anywhere in the app.** Both chat calls and the extraction call run at
