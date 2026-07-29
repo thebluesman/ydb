@@ -17,7 +17,16 @@
  * refusal rather than a confident $0 — diagnosable, but still wrong SQL.
  *
  * The model is never trusted to know the date; the server computes it.
+ *
+ * It is also rebuilt per request for a second reason (ADR-0008): it carries the
+ * stored `Transaction.category` vocabulary as a closed list, so the model stops
+ * guessing filter literals. Both SQL passes in a turn — the first attempt and
+ * the repair round-trip — are handed the string this function returns, so the
+ * grounding and the date travel together and neither pass can lose one.
  */
+
+import { NO_MATCH_SENTINEL, buildCategoryVocabularyBlock } from '@/lib/chatCategoryVocabulary'
+import { descriptionSimilarity } from '@/lib/textSimilarity'
 
 /** Zero-padded UTC calendar date, `YYYY-MM-DD`. */
 export function isoDate(now: Date): string {
@@ -45,12 +54,78 @@ export function mostRecentMonthYm(now: Date, month: number): string {
   return `${resolvedYear}-${String(month).padStart(2, '0')}`
 }
 
-export function buildSqlSystemPrompt(now: Date = new Date()): string {
+/**
+ * A category literal for a worked example, drawn from the real vocabulary.
+ *
+ * The examples used to filter on the bare literals 'Groceries' and 'Travel',
+ * which is precisely the guess ADR-0008 exists to stop — and an example that
+ * contradicts the closed-list rule is the worst place to leave one, because
+ * few-shot shape beats prose instruction. So when a vocabulary is present, the
+ * examples demonstrate values from it.
+ *
+ * `preferred` is matched by similarity purely to keep the example readable
+ * ("groceries" → '🛒 Groceries'); the answer is the *stored* string either way,
+ * and when nothing resembles it the example falls back to the first stored
+ * value and rewords the question to match. Similarity never picks a filter at
+ * request time — only which example to print.
+ */
+function exampleCategory(categories: string[], preferred: string, exclude?: string): { word: string; literal: string } {
+  if (categories.length === 0) return { word: preferred.toLowerCase(), literal: preferred }
+
+  const pool = categories.filter((c) => c !== exclude)
+  if (pool.length === 0) return { word: categories[0], literal: categories[0] }
+
+  const best = pool
+    .map((c) => ({ c, score: descriptionSimilarity(preferred, c) }))
+    .sort((a, b) => b.score - a.score)[0]
+
+  if (best.score >= 0.34) return { word: preferred.toLowerCase(), literal: best.c }
+  return { word: pool[0], literal: pool[0] }
+}
+
+/**
+ * A word for the "no corresponding category" worked example, guaranteed not to
+ * collide with anything actually stored.
+ *
+ * Picks the first candidate that is not a substring (case-insensitive) of any
+ * stored category name, so the example can never accidentally look like a
+ * real match on some ledger. This only selects which word illustrates the
+ * example; it plays no part in judging real questions.
+ */
+function noMatchExampleWord(categories: string[]): string {
+  const candidates = ['Sports', 'Skydiving', 'Astrology', 'Beekeeping']
+  const lower = categories.map((c) => c.toLowerCase())
+  return candidates.find((w) => !lower.some((c) => c.includes(w.toLowerCase()))) ?? candidates[0]
+}
+
+export function buildSqlSystemPrompt(now: Date = new Date(), categories: string[] = []): string {
   const today = isoDate(now)
   // The worked example is computed from `now` for the same reason the prompt
   // is: a hardcoded literal here would teach the model a stale year the moment
   // the calendar moved past it.
   const june = mostRecentMonthYm(now, 6)
+
+  const vocabularyBlock = buildCategoryVocabularyBlock(categories)
+  // Empty vocabulary (a ledger with nothing categorised) renders no block and
+  // no vocabulary rule — the prompt is then byte-for-byte what it was before
+  // ADR-0008, rather than carrying an empty list the model has to interpret.
+  const vocabularySection = vocabularyBlock ? `\n\n${vocabularyBlock}` : ''
+  const groceries = exampleCategory(categories, 'Groceries')
+  const travel = exampleCategory(categories, 'Travel', groceries.literal)
+  const noMatchWord = noMatchExampleWord(categories)
+
+  // Only shown when there's a vocabulary to be grounded against — with none,
+  // there's no closed list for a category to fail to correspond to, and
+  // ADR-0008's whole vocabulary section (including this rule) is absent.
+  const noMatchExample = categories.length > 0
+    ? `
+
+Q: What was spent on ${noMatchWord} in July?
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${NO_MATCH_SENTINEL}' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '${mostRecentMonthYm(now, 7)}' AND status IN ('committed','reconciled')
+-- No listed category corresponds to "${noMatchWord}". Do NOT substitute 'Uncategorized' or any other real
+-- stored category as a guess -- that answers a different question. Use the sentinel literal above instead;
+-- it will correctly match nothing and be refused, rather than silently returning someone else's total.`
+    : ''
 
   return `You are a SQLite query generator. Output ONLY a single raw SQL SELECT statement (or WITH ... SELECT) -- no markdown, no explanation, no code fences, no backticks.
 
@@ -64,7 +139,7 @@ Schema (readable tables only):
   Category(id, name, color)
 
 Tables you MUST NOT query (access is blocked at the driver level): Setting, ChatSession, ChatMessage, Budget, VendorRule.
-Avoid selecting from sqlite_master or any pragma_* function.
+Avoid selecting from sqlite_master or any pragma_* function.${vocabularySection}
 
 Rules:
 - SQLite dialect only: use strftime('%Y-%m', date) for month grouping, NOT DATE_TRUNC.
@@ -89,15 +164,15 @@ Examples:
 Q: How many transactions do I have?
 A: SELECT COUNT(*) AS total FROM "Transaction" WHERE status IN ('committed','reconciled')
 
-Q: How much did I spend on groceries last month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = 'Groceries' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
+Q: How much did I spend on ${groceries.word} last month?
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${groceries.literal.replace(/'/g, "''")}' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
 
-Q: What was spent on Travel in June?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = 'Travel' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '${june}' AND status IN ('committed','reconciled')
+Q: What was spent on ${travel.word} in June?
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${travel.literal.replace(/'/g, "''")}' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '${june}' AND status IN ('committed','reconciled')
 
 Q: What are my top 5 spending categories this year?
 A: SELECT category, SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND parentTransactionId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total ASC LIMIT 5
 
 Q: What is my total income this month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')`
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')${noMatchExample}`
 }
