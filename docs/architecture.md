@@ -86,6 +86,39 @@ meaning, and it is a claim rather than a description. Both fixes police that cla
 These diagnoses came from `ChatMessage.sql`, which persists every generated query. It is the first
 place to look when a chat answer is wrong; ADR-0009 was written without it and misdiagnosed the bug.
 
+### Direction: from single-shot to a bounded agentic loop (ADR-0012 → 0014)
+
+The three bugs above share an architectural cause, not just a code cause: the pipeline produces one
+query, trusts whatever comes back, and narrates it. It cannot inspect its own intermediate result. The
+target architecture is a bounded ReAct-style loop over Ollama's tool-calling endpoint, with
+`run_sql` — backed by `executeReadonlyQuery` and nothing else — as the only execution tool (ADR-0012).
+Tool-calling is available on this install today; `qwen2.5:32b` advertises it and returns well-formed
+calls in ~7s.
+
+The guard survives this unchanged and becomes more load-bearing: it is input-agnostic, so N calls per
+turn are as safe as one, but the loop must never open a second execution path, and the 500-row cap
+needs a cumulative per-turn row budget beside it. ADR-0008/0010/0011 stay as defense-in-depth — a loop
+cannot recover a label SQLite already destroyed (ADR-0011), nor independently check a claim the model
+makes about its own output (ADR-0010).
+
+Sequencing is three gated phases (ADR-0013): **A** — a verification pass between execution and
+narration, which fits today's architecture and generates the eval data the chat path has never had;
+**B** — the single-tool loop, where ADR-0007 gets superseded because a loop has one message thread
+rather than separate SQL and narration prompts; **C** — code-computed tools (`get_balances` over
+`computeBalance`), which is what finally closes the balance gap ADR-0010 declines. Only Phase A is
+unblocked; B and C are dormant in the ADR-0002 sense.
+
+Across all phases, declining is a normal outcome: a `no-answer` stream type with an explicit reason
+(`out-of-scope`, `no-data`, `unsupported-shape`, `budget-exhausted`), distinct from an HTTP error
+(ADR-0014). Exhaustion is counted by the route, not self-reported by the model.
+
+**The honest constraint.** ADR-0006 caps this, and it bites on loop control rather than SQL syntax.
+Probed 2026-07-29: handed back a `null` result, `qwen2.5:32b` noticed and retried, but retried by
+adding a date filter instead of questioning the category literal that caused the null — it narrowed the
+wrong axis. So the loop's value is that the model gets to *look*, not that it reasons its way out.
+Chat's realistic ceiling here is reliable and willing to say "I don't know", not Claude/GPT-4 fluency
+on open-ended financial reasoning.
+
 ## Known follow-ups outside this scope
 
 Prior open items from the M1–M7 rework are tracked in `FOLLOWUPS.md` (transaction accuracy /
@@ -101,24 +134,38 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
 
 - None outstanding for Phase 1. The Phase 1→2 gate itself (ADR-0002) is the next thing that needs a
   decision, and it needs real usage data before it can be answered.
-- **No eval harness exists for the chat/SQL path.** ADR-0006 rejects hosted inference partly on the
-  grounds that local-model quality has never been measured, so any future argument to revisit it
-  needs a harness first. Unowned and unscheduled — worth a ticket if the "Chat knowledge" initiative
-  goes anywhere. ADR-0007 now leans on the same gap: with no harness there is no way to justify a
-  conditional/retrieval layer over the flat P0 injection, so the harness gates that too.
+- **No eval harness exists for the chat/SQL path — now the single most blocking gap.** ADR-0006 rejects
+  hosted inference partly on the grounds that local-model quality has never been measured, so any
+  future argument to revisit it needs a harness first. ADR-0007 leans on the same gap: no harness means
+  no way to justify a retrieval layer over the flat P0 injection. ADR-0013 adds two more — it gates
+  Phase B on Phase A's verdict data, and it is why `qwen3.6:latest` (installed, reports `thinking` and
+  `tools`, 262k context) has not been tried as the chat model despite being free to evaluate. Four
+  decisions now wait on this. Still unowned; ADR-0013's Phase A produces it as a side effect, which is
+  the current best argument for doing Phase A first.
 - **Refusal happens after the query runs.** The boundary snippet `X1` lives in the narration prompt
   (ADR-0007), so an out-of-scope question still generates and executes a `SELECT` before the model
   declines. Read-only and local, so it costs latency rather than safety. Revisit only if a cheap
   pre-SQL scope check turns out to be worth the extra round-trip.
 - **No code-computed balance path for chat.** ADR-0010 declines balance and net-worth questions rather
   than letting generated SQL assert a balance it cannot compute. Answering them properly means
-  computing balances in code via `computeBalance` and handing the result to narration as data. Unowned
-  and unscoped, and it is the standing answer whenever ADR-0010's alias check needs an exception.
+  computing balances in code via `computeBalance` and handing the result to the model as data. Now
+  scoped, but not unblocked: it is ADR-0013's Phase C (`get_balances` as a tool). Until then it remains
+  the standing answer whenever ADR-0010's alias check needs an exception.
 - **ADR-0010's alias check has a known false negative.** A balance passed off under a neutral alias
   like `total` is not caught, because the check reads the model's own labeling. Closing it properly
   needs either the `computeBalance` path above or an eval harness; neither exists.
 - **Account names have the same grounding gap as categories.** ADR-0008 covers `Transaction.category`
   only. Whether a guessed account-name literal fails the same silent way has not been tested.
+- **ADR-0007's injection point has no answer under a loop.** A tool-calling loop has one message thread,
+  so "the narration prompt" stops existing as a distinct site. The `X1` boundary snippet probably wants
+  to move earlier — which would close the "refusal happens after the query runs" question above for
+  free — while the interpretive snippets probably still should not shape SQL. Deliberately undecided
+  until Phase B, when the loop's actual message structure is known. It needs a superseding ADR then,
+  not an edit to ADR-0007.
+- **The cumulative per-turn row budget (ADR-0012) has no number.** Four queries at the existing 500-row
+  cap is 2,000 rows of context, which the single-shot path could never produce. `NARRATION_ROW_CAP` is
+  20 today; what the equivalent whole-turn ceiling should be is unmeasured and depends on Phase B's
+  real prompt sizes.
 - **`num_ctx` is never set anywhere in the app.** Both chat calls and the extraction call run at
   Ollama's resolved default, and the narration prompt is only loosely bounded. Ticket 4 has to resolve
   this for narration; the extraction path (`app/api/ollama/route.ts`) has the same latent issue and
