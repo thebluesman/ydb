@@ -45,6 +45,7 @@ and Shyam explicitly declares the trigger met (his call, not a timer).
 | App posture | LAN-only, no auth/multi-user | `docs/architecture.md` |
 | YNAB integration scope | One-way pull only, YDB never writes to YNAB | `docs/adr/0001-ynab-integration-scope.md` |
 | YNAB rollout sequencing | Manual import (Phase 1) before automatic sync (Phase 2) | `docs/adr/0002-manual-import-before-auto-sync.md` |
+| LLM inference scope | Local only (Ollama), no hosted/third-party LLM API in the chat path | `docs/adr/0006-local-only-llm-inference.md` |
 
 ## Team (subagents)
 
