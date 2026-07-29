@@ -63,6 +63,8 @@ and Shyam explicitly declares the trigger met (his call, not a timer).
 - Architecture: `docs/architecture.md`
 - ADRs: `docs/adr/`
 - Project journal: `docs/journal/` — owned by `@historian`
+- Chat knowledge snippets: `docs/knowledge/` — **runtime prompt input, not documentation**; read
+  `docs/knowledge/README.md` before editing anything in there
 - Archived rework plan: `docs/archive/IMPROVEMENT_PLAN.md`
 - Prior open follow-ups (unrelated to migration): `FOLLOWUPS.md`
 - Design conventions: `Design Guide.md`

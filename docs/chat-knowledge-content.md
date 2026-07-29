@@ -1,8 +1,20 @@
 # Chat knowledge — snippet content
 
 Owned by `@product-manager`. Deliverable for chat-knowledge ticket 2, written against
-`docs/chat-knowledge-content-outline.md` (ticket 1). This file holds the **actual snippet text**.
-Ticket 3 decides where the snippets live; ticket 4 wires them into `app/api/chat/route.ts`.
+`docs/chat-knowledge-content-outline.md` (ticket 1).
+
+> **Superseded for snippet text (ticket 3, 2026-07-29).** The snippets now live one-per-file in
+> `docs/knowledge/`, which is canonical and is what the chat pipeline reads. **Edit snippet text there,
+> not here.** The bodies below are kept as the frozen ticket-2 record so this file's reasoning stays
+> readable on its own; if they ever disagree with `docs/knowledge/`, `docs/knowledge/` wins. The parts
+> of this file that remain live are the length decision, the UAE corrections, and the ticket-4 handoff.
+> See `docs/knowledge/README.md` for the naming and front-matter convention.
+
+**Count correction (ticket 3).** This file was written describing "22 snippets, 13 P0". The actual set
+is **25 snippets: 12 P0, 10 P1, 3 P2**. The P1 and P2 lists were right; the P0 list (A1–A4, C1–C3,
+D1–D3, E1, X1) has always been 12 rows, and the total was undercounted. Word totals are unaffected —
+~737 words for P0, still the ~950–1,000 tokens the budget was set against. `docs/knowledge/` carries the
+corrected figures.
 
 Snippet IDs match the outline's row IDs exactly, so the two documents can be diffed against each
 other. Section order follows the outline. Within each section, snippets are listed in outline order,
@@ -30,8 +42,9 @@ recorded because it is a direct input to ticket 4's prompt budget:
 - 40 words is a floor, not just a style note. Below that the snippets stop carrying the "why" and
   degrade into slogans, which paraphrase badly through a 32B model.
 
-Measured against the drafts below: all 22 snippets land between 41 and 74 words. P0 set (13 snippets)
-totals ~730 words.
+Measured against the drafts below: all 25 snippets land between 49 and 74 words. P0 set (12 snippets)
+totals 737 words. (Counts recomputed mechanically in ticket 3 and recorded per-file in
+`docs/knowledge/`; they run a few words above the hand counts printed under each draft below.)
 
 Ticket 4 should treat this as a starting budget, not a fixed one. If real measurement shows headroom,
 the cheapest way to spend it is adding P1 snippets, not lengthening existing ones.
@@ -344,7 +357,7 @@ what the assistant will say rather than how well it says it.
 
 ## Handoff to ticket 4
 
-- **P0 set (13):** A1–A4, C1–C3, D1–D3, E1, X1. ~730 words, roughly 950–1,000 tokens. Enough to wire
+- **P0 set (12):** A1–A4, C1–C3, D1–D3, E1, X1. 737 words, roughly 950–1,000 tokens. Enough to wire
   up and evaluate on its own.
 - **P1 set (10):** A5, B1–B3, C4–C6, E2, E3, F1. Drafted and ready. Per the outline, if the budget
   forces cuts among P1, E2 and E3 survive ahead of the B and F rows.
