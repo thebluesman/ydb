@@ -116,6 +116,16 @@ const OLLAMA_TIMEOUT_MS = 120_000
 // leave no error behind. So we pin it. 16384 clears the measured worst case
 // with roughly 2× headroom for the generated response, and fits inside the
 // recommended chat models' native context (qwen2.5:32b is 32k).
+//
+// This value is validated against the two recommended chat models only
+// (qwen2.5:32b and qwen2.5-coder:14b, both ≥32k native context) — see
+// ROLE_META in lib/llm-models.ts. The Advanced picker there allows any
+// installed model, including smaller-context ones; a fixed 16384 was chosen
+// over dynamically querying each model's context window because a loud
+// Ollama error on an unsupported num_ctx is a safe failure mode, and this app
+// has exactly one operator who chooses the model deliberately. If the
+// picker's model set changes, or a smaller-context model becomes common, this
+// assumption needs revisiting.
 const NARRATION_NUM_CTX = 16_384
 function ollamaSignal(clientSignal: AbortSignal | undefined): AbortSignal {
   const timeout = AbortSignal.timeout(OLLAMA_TIMEOUT_MS)
