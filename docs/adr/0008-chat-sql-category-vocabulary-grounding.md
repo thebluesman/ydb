@@ -78,3 +78,34 @@ are not involved.
 **Implementation is a separate ticket.** This ADR is a decision record and deliberately contains no
 code. `@backend-engineer` owns the build; `@qa` should cover the unmatched-category path explicitly,
 since the regression it guards against looks like a correct answer.
+
+## Addendum (2026-07-29): real-category substitution
+
+Live testing of PR #29 before merge, on this ADR's own implementation, found a variant the guard as
+first shipped did not catch. Asked "What was spent on Sports in July" (not a stored category), the
+model answered a confident 7,372.68 AED, generated against `category = 'Uncategorized'` — a real,
+grounded value. The guard checks groundedness (is the literal in the stored list), not correctness
+(does it correspond to what the user actually named), and `'Uncategorized'` passes groundedness. Same
+silent-wrong-answer class this ADR exists to kill, one level deeper: the model substituted a genuine
+value instead of inventing a fake one.
+
+Root cause was a contradiction the original prompt left the model to resolve unaided: "a literal MUST
+be copied exactly from the list" versus "don't substitute a near-miss", with no legal move defined for
+"nothing in the list corresponds at all". `'Uncategorized'` reads, to a model, as the safe way out of
+that bind — real, and plausible-sounding as a home for spending it can't otherwise classify.
+
+The fix stays prompt-level and does not touch the guard's decision logic: a reserved,
+vocabulary-external sentinel (`NO_MATCH_SENTINEL`, `__no_matching_category__` in
+`lib/chatCategoryVocabulary.ts`) is now the prescribed literal for "nothing corresponds", backed by a
+worked few-shot example and an explicit prohibition on substituting a catch-all bucket. The existing
+groundedness check already rejects the sentinel — it is not a real stored value — so no new detection
+logic was added. Deliberately not pursued: scoring lexical similarity between the question and the
+literal in the accept/reject path itself, which would be this ADR's rejected fuzzy-matching failure
+mode relocated from "picking an answer" to "vetoing one", with the same false-positive risk (a
+legitimately reworded question with no shared substring, refused for the wrong reason).
+
+Verified against live Ollama (qwen2.5:32b) with the real dev-DB vocabulary (46 categories, including a
+genuine `Uncategorized`): pre-fix, the Sports question generated `category = 'Uncategorized'`;
+post-fix, the identical question against the identical vocabulary generated the sentinel and was
+correctly refused. Two further live checks — an unmatched case ("Golf lessons") and two genuine
+matches ("Groceries", "Travel") — confirmed the fix doesn't touch the passing path.
