@@ -51,6 +51,40 @@ import { descriptionSimilarity } from '@/lib/textSimilarity'
  */
 export const CATEGORY_VOCABULARY_CAP = 200
 
+/**
+ * The literal the model is told to emit when no stored category corresponds to
+ * the one the user named.
+ *
+ * Follow-up fix, live-tested on PR #29 before merge (2026-07-29): "What was
+ * spent on Sports in July" — not a real category — came back as a confident
+ * 7,372.68 AED, generated against `category = 'Uncategorized'`. The original
+ * ADR-0008 guard checks groundedness (is the literal a real stored value), not
+ * correctness (does it correspond to the noun the user actually named), and
+ * `'Uncategorized'` is real, so it passed. That is the same silent-wrongness
+ * class ADR-0008 was written to kill; the only difference is the model
+ * substituted a genuine value instead of inventing a fake one.
+ *
+ * Root cause was a contradiction the old prompt left the model to resolve on
+ * its own: "a literal MUST be copied exactly from the list" versus "don't
+ * substitute a near-miss" — for a category with no correspondence at all,
+ * every literal it could legally emit is a violation of the first rule,
+ * because none of them is the thing the user asked about. `'Uncategorized'`
+ * reads, to a model, as the "safe" way out of that bind: it is real, and
+ * unclassified spending is a plausible-sounding home for a category it
+ * doesn't recognise.
+ *
+ * The fix removes the bind rather than trying to out-argue it: this sentinel
+ * is a legal, exact-copy-rule-satisfying literal reserved for exactly the
+ * "nothing corresponds" case. It is deliberately not a real category, so it
+ * can never coincidentally match a stored value, and the existing
+ * groundedness check (`unknownCategoryLiterals`) already rejects it with no
+ * new detection logic — the model gets an escape hatch, the guard doesn't
+ * need fuzzy matching to close the loophole. That keeps ADR-0008's "grounding
+ * beats normalising" stance intact: this is still deterministic string
+ * comparison, not a heuristic judgment about what the model "really meant".
+ */
+export const NO_MATCH_SENTINEL = '__no_matching_category__'
+
 /** Thrown when the stored vocabulary exceeds CATEGORY_VOCABULARY_CAP. */
 export class CategoryVocabularyTooLarge extends Error {
   constructor(readonly count: number) {
@@ -128,8 +162,8 @@ ${list}
 
 - A category filter literal MUST be copied exactly from the list above, character for character, including any emoji, capitalisation, punctuation and spacing.
 - Do NOT invent, translate, singularise, re-case or tidy a category name. 'Travel' is not the same value as '✈️ Travel'.
-- Map the user's wording onto the closest listed value: a question about "groceries" means whichever listed value names groceries.
-- If nothing in the list plausibly corresponds to the category the user named, do NOT substitute a near-miss and do NOT filter on a guessed literal — the server checks every category literal against this list and will reject the query.`
+- Map the user's wording onto the closest listed value ONLY when that listed value genuinely names the same category: a question about "groceries" means whichever listed value names groceries.
+- If NOTHING in the list genuinely corresponds to the category the user named, that is not the same situation as a spelling or emoji mismatch. Do NOT paper over it by picking a different, unrelated real category as a stand-in -- and this includes catch-all buckets like 'Uncategorized', 'Other' or 'Miscellaneous' if one is listed above: those are not a substitute for a category you cannot find, they are their own distinct category, and using one means "spending filed as uncategorized", not "spending on whatever the user asked about". In that case, filter on the exact literal ${NO_MATCH_SENTINEL} instead (yes, literally that string, uncapitalised, with the underscores) -- the server recognises it as "no corresponding category" and will refuse the turn correctly. Never silently substitute a real-but-wrong category to avoid using this literal.`
 }
 
 // ── Detection ───────────────────────────────────────────────────────────────
@@ -257,13 +291,22 @@ export function closestCategories(literal: string, categories: string[], limit =
  * question the ledger cannot answer; "you spent nothing" is not.
  */
 export function unknownCategoryMessage(unknown: string[], categories: string[]): string {
-  const named = unknown.map((u) => `"${u}"`).join(' and ')
-  const suggestions = [...new Set(unknown.flatMap((u) => closestCategories(u, categories)))]
+  // The sentinel is an internal signal, not something the user typed — never
+  // quote it back at them. If every unknown literal is the sentinel, this is
+  // the model correctly declaring "nothing here corresponds", so the message
+  // stays generic rather than naming a made-up string. A mix (sentinel plus a
+  // genuine guessed literal) still names the real guesses.
+  const namedLiterals = unknown.filter((u) => u !== NO_MATCH_SENTINEL)
+  const sawSentinel = namedLiterals.length < unknown.length
 
-  const head =
-    unknown.length === 1
-      ? `I don't have a category matching ${named}, so I didn't run the query — an unmatched category returns an empty total, which is not the same as spending nothing.`
-      : `I don't have categories matching ${named}, so I didn't run the query — unmatched categories return an empty total, which is not the same as spending nothing.`
+  const named = namedLiterals.map((u) => `"${u}"`).join(' and ')
+  const suggestions = [...new Set(namedLiterals.flatMap((u) => closestCategories(u, categories)))]
+
+  const head = namedLiterals.length === 0
+    ? `I don't have a category matching what you asked about, so I didn't run the query — an unmatched category returns an empty total, which is not the same as spending nothing.`
+    : namedLiterals.length === 1
+      ? `I don't have a category matching ${named}${sawSentinel ? ' (or others you named)' : ''}, so I didn't run the query — an unmatched category returns an empty total, which is not the same as spending nothing.`
+      : `I don't have categories matching ${named}${sawSentinel ? ' (or others you named)' : ''}, so I didn't run the query — unmatched categories return an empty total, which is not the same as spending nothing.`
 
   const closest = suggestions.length > 0
     ? ` The closest stored ${suggestions.length === 1 ? 'category is' : 'categories are'}: ${suggestions.map((s) => `"${s}"`).join(', ')}.`

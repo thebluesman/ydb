@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   CATEGORY_VOCABULARY_CAP,
   CategoryVocabularyTooLarge,
+  NO_MATCH_SENTINEL,
   buildCategoryVocabularyBlock,
   closestCategories,
   extractCategoryPredicates,
@@ -193,6 +194,26 @@ describe('unknownCategoryMessage', () => {
     expect(msg).toContain('40 categories in total')
     expect(msg).not.toContain('Category 39')
   })
+
+  // The sentinel is a server-internal signal for "the model found nothing
+  // corresponding" — never something the user typed — so it must never be
+  // quoted back at them the way a genuine guessed literal is.
+  it('never quotes the no-match sentinel back at the user', () => {
+    const msg = unknownCategoryMessage([NO_MATCH_SENTINEL], VOCAB)
+    expect(msg).not.toContain(NO_MATCH_SENTINEL)
+    expect(msg).toContain("I don't have a category matching what you asked about")
+  })
+
+  it('offers no bogus suggestions for a bare sentinel', () => {
+    const msg = unknownCategoryMessage([NO_MATCH_SENTINEL], VOCAB)
+    expect(msg).not.toMatch(/closest stored/)
+  })
+
+  it('still names a genuine guessed literal alongside a sentinel', () => {
+    const msg = unknownCategoryMessage(['Travel', NO_MATCH_SENTINEL], VOCAB)
+    expect(msg).toContain('"Travel"')
+    expect(msg).not.toContain(NO_MATCH_SENTINEL)
+  })
 })
 
 // ADR-0008 § "Both passes must carry the list": the repair round-trip re-sends
@@ -215,8 +236,30 @@ describe('buildSqlSystemPrompt with a category vocabulary', () => {
     expect(prompt).not.toContain(`category = 'Travel'`)
   })
 
-  it('leaves every example query grounded in the vocabulary', () => {
-    expect(unknownCategoryLiterals(prompt, VOCAB)).toEqual([])
+  it('leaves every example query grounded in the vocabulary, except the deliberate no-match example', () => {
+    // The no-match worked example (below) is the one deliberate exception: it
+    // exists specifically to show the model the sentinel literal, which by
+    // design is never in the vocabulary.
+    expect(unknownCategoryLiterals(prompt, VOCAB)).toEqual([NO_MATCH_SENTINEL])
+  })
+
+  // Regression test for the live PR #29 bug (2026-07-29): asked about "Sports"
+  // (not a real category), the model answered confidently against
+  // `category = 'Uncategorized'` — a real, grounded value that nonetheless had
+  // nothing to do with the question. The old prompt only told the model not to
+  // guess a near-miss; it said nothing about not substituting a *different*
+  // real category. This is the fix's own worked example.
+  it('demonstrates the no-match sentinel instead of a plausible-looking substitute category', () => {
+    expect(prompt).toContain(NO_MATCH_SENTINEL)
+    expect(prompt).toMatch(/Do NOT substitute 'Uncategorized'/)
+    expect(prompt).not.toMatch(/category = 'Uncategorized'/)
+  })
+
+  it('states the catch-all-substitution rule in the vocabulary block itself', () => {
+    const block = buildCategoryVocabularyBlock(VOCAB)
+    expect(block).toContain(NO_MATCH_SENTINEL)
+    expect(block).toMatch(/Uncategorized/)
+    expect(block).toMatch(/not a substitute/)
   })
 
   it('keeps the date grounding from the previous ticket', () => {
@@ -233,12 +276,12 @@ describe('buildSqlSystemPrompt with a category vocabulary', () => {
   it('uses a stored value even when nothing resembles the example word', () => {
     const odd = ['🐈 Pet supplies', '🎸 Music']
     const p = buildSqlSystemPrompt(JUL_29_2026, odd)
-    expect(unknownCategoryLiterals(p, odd)).toEqual([])
+    expect(unknownCategoryLiterals(p, odd)).toEqual([NO_MATCH_SENTINEL])
   })
 
   it('handles a single-category ledger without emitting an unlisted literal', () => {
     const one = ['🛒 Groceries']
     const p = buildSqlSystemPrompt(JUL_29_2026, one)
-    expect(unknownCategoryLiterals(p, one)).toEqual([])
+    expect(unknownCategoryLiterals(p, one)).toEqual([NO_MATCH_SENTINEL])
   })
 })

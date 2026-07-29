@@ -25,7 +25,7 @@
  * grounding and the date travel together and neither pass can lose one.
  */
 
-import { buildCategoryVocabularyBlock } from '@/lib/chatCategoryVocabulary'
+import { NO_MATCH_SENTINEL, buildCategoryVocabularyBlock } from '@/lib/chatCategoryVocabulary'
 import { descriptionSimilarity } from '@/lib/textSimilarity'
 
 /** Zero-padded UTC calendar date, `YYYY-MM-DD`. */
@@ -83,6 +83,21 @@ function exampleCategory(categories: string[], preferred: string, exclude?: stri
   return { word: pool[0], literal: pool[0] }
 }
 
+/**
+ * A word for the "no corresponding category" worked example, guaranteed not to
+ * collide with anything actually stored.
+ *
+ * Picks the first candidate that is not a substring (case-insensitive) of any
+ * stored category name, so the example can never accidentally look like a
+ * real match on some ledger. This only selects which word illustrates the
+ * example; it plays no part in judging real questions.
+ */
+function noMatchExampleWord(categories: string[]): string {
+  const candidates = ['Sports', 'Skydiving', 'Astrology', 'Beekeeping']
+  const lower = categories.map((c) => c.toLowerCase())
+  return candidates.find((w) => !lower.some((c) => c.includes(w.toLowerCase()))) ?? candidates[0]
+}
+
 export function buildSqlSystemPrompt(now: Date = new Date(), categories: string[] = []): string {
   const today = isoDate(now)
   // The worked example is computed from `now` for the same reason the prompt
@@ -97,6 +112,20 @@ export function buildSqlSystemPrompt(now: Date = new Date(), categories: string[
   const vocabularySection = vocabularyBlock ? `\n\n${vocabularyBlock}` : ''
   const groceries = exampleCategory(categories, 'Groceries')
   const travel = exampleCategory(categories, 'Travel', groceries.literal)
+  const noMatchWord = noMatchExampleWord(categories)
+
+  // Only shown when there's a vocabulary to be grounded against — with none,
+  // there's no closed list for a category to fail to correspond to, and
+  // ADR-0008's whole vocabulary section (including this rule) is absent.
+  const noMatchExample = categories.length > 0
+    ? `
+
+Q: What was spent on ${noMatchWord} in July?
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${NO_MATCH_SENTINEL}' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '${mostRecentMonthYm(now, 7)}' AND status IN ('committed','reconciled')
+-- No listed category corresponds to "${noMatchWord}". Do NOT substitute 'Uncategorized' or any other real
+-- stored category as a guess -- that answers a different question. Use the sentinel literal above instead;
+-- it will correctly match nothing and be refused, rather than silently returning someone else's total.`
+    : ''
 
   return `You are a SQLite query generator. Output ONLY a single raw SQL SELECT statement (or WITH ... SELECT) -- no markdown, no explanation, no code fences, no backticks.
 
@@ -145,5 +174,5 @@ Q: What are my top 5 spending categories this year?
 A: SELECT category, SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND parentTransactionId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total ASC LIMIT 5
 
 Q: What is my total income this month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')`
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')${noMatchExample}`
 }

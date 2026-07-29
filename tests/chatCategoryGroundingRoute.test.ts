@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CATEGORY_VOCABULARY_CAP } from '@/lib/chatCategoryVocabulary'
+import { CATEGORY_VOCABULARY_CAP, NO_MATCH_SENTINEL } from '@/lib/chatCategoryVocabulary'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Route-level coverage of ADR-0008 in POST /api/chat: the vocabulary reaches
@@ -12,6 +12,10 @@ import { CATEGORY_VOCABULARY_CAP } from '@/lib/chatCategoryVocabulary'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CATEGORIES = ['✈️ Travel', '🛒 Groceries', '🏠 Rent']
+
+// PR #29's live bug had a real, distinct catch-all bucket in the vocabulary —
+// that's the whole reason the substitution was invisible to the old guard.
+const CATEGORIES_WITH_CATCHALL = ['✈️ Travel', '🛒 Groceries', '🏠 Rent', 'Uncategorized']
 
 /** What the fake ledger has stored; overridden by the cap test. */
 let storedCategories: string[] = CATEGORIES
@@ -194,5 +198,90 @@ describe('POST /api/chat — category vocabulary grounding (ADR-0008)', () => {
     sqlReplies = [sql]
     await ask('How many transactions do I have?')
     expect(queryCalls).toEqual([sql])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Follow-up fix, live-tested on PR #29 before merge (2026-07-29): "What was
+// spent on Sports in July" — not a real category — was answered as a
+// confident 7,372.68 AED, generated against `category = 'Uncategorized'`.
+// 'Uncategorized' is a real, grounded value, so the ADR-0008 guard (which only
+// checks groundedness, not correctness) let it straight through. Same
+// silent-wrong-answer class ADR-0008 exists to kill; this time the model
+// substituted a genuine value instead of inventing a fake one.
+//
+// IMPORTANT about what this test suite can and can't prove: a hardcoded
+// `category = 'Uncategorized'` SQL reply, fed through this route's guard, WILL
+// run — 'Uncategorized' is a real, grounded value, and the guard is
+// deliberately groundedness-only (ADR-0008's "grounding beats normalising").
+// Adding a guard-level check for "does this real literal actually relate to
+// the question" would mean scoring lexical similarity between the user's
+// words and the category name in the decision path itself — exactly the
+// fuzzy-matching failure mode ADR-0008 rejected, just moved from "picking an
+// answer" to "vetoing one", and it would false-refuse legitimately-reworded
+// questions (e.g. "eating out" -> "🍽️ Dining out") that don't share a
+// substring with the stored name.
+//
+// So the fix here is at the prompt layer: give the model an explicit,
+// vocabulary-external sentinel literal for "nothing corresponds" (see
+// NO_MATCH_SENTINEL in lib/chatCategoryVocabulary.ts), removing the
+// contradiction that pushed the model toward 'Uncategorized' as a "safe"
+// grounded-looking way out. That was verified against live Ollama
+// (qwen2.5:32b) with the real dev-DB vocabulary (46 categories, including a
+// real 'Uncategorized' entry): pre-fix, "What was spent on Sports in July"
+// generated `category = 'Uncategorized'`; post-fix, the identical question
+// against the identical vocabulary generated
+// `category = '__no_matching_category__'`, which the existing groundedness
+// guard already rejects with zero new detection logic. The route-level test
+// below covers the half that's actually mechanizable without live Ollama: if
+// the model follows the new prompt and emits the sentinel, it is refused
+// correctly and the sentinel is never shown to the user.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('POST /api/chat — real-category substitution (PR #29 live bug)', () => {
+  it('refuses when the model follows the new prompt rule and emits the no-match sentinel', async () => {
+    storedCategories = CATEGORIES_WITH_CATCHALL
+    sqlReplies = [
+      `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${NO_MATCH_SENTINEL}' AND strftime('%Y-%m', date) = '2026-07' AND status IN ('committed','reconciled') LIMIT 200`,
+    ]
+
+    const res = await ask('What was spent on Sports in July')
+
+    expect(queryCalls).toEqual([])
+    const [frame] = await frames(res)
+    expect(frame.type).toBe('no-answer')
+    expect(frame.reason).toBe('out-of-scope')
+    // The sentinel is a server-internal signal, never something to show the user.
+    expect(String(frame.message)).not.toContain(NO_MATCH_SENTINEL)
+  })
+
+  it('sibling case: a made-up category lexically close to a real one is still refused, not silently corrected', async () => {
+    storedCategories = CATEGORIES_WITH_CATCHALL
+    // "Grocery" (singular, no emoji) is close to the stored '🛒 Groceries' but
+    // is not an exact copy — the closed-list rule requires exact copy, so this
+    // must be refused rather than treated as "close enough".
+    sqlReplies = [`SELECT SUM(amount)/100.0 AS total FROM "Transaction" WHERE category = 'Grocery'`]
+
+    const res = await ask('What did I spend on Grocery this month?')
+
+    expect(queryCalls).toEqual([])
+    const [frame] = await frames(res)
+    expect(frame.type).toBe('no-answer')
+    expect(frame.reason).toBe('out-of-scope')
+    expect(String(frame.message)).toContain('"Grocery"')
+    expect(String(frame.message)).toContain('🛒 Groceries') // closest stored name still offered
+  })
+
+  it('sibling case: a made-up category with no lexical relationship to anything stored is refused with no bogus suggestion', async () => {
+    storedCategories = CATEGORIES_WITH_CATCHALL
+    sqlReplies = [`SELECT SUM(amount)/100.0 AS total FROM "Transaction" WHERE category = 'Astrology'`]
+
+    const res = await ask('What did I spend on Astrology this year?')
+
+    expect(queryCalls).toEqual([])
+    const [frame] = await frames(res)
+    expect(frame.type).toBe('no-answer')
+    expect(frame.reason).toBe('out-of-scope')
+    expect(String(frame.message)).toContain('"Astrology"')
+    expect(String(frame.message)).not.toMatch(/closest stored/) // nothing plausible to suggest
   })
 })
