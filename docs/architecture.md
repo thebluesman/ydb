@@ -60,6 +60,31 @@ anything added to the SQL side cannot weaken it either; it would only degrade ge
 surfacing as more 422s. Keep both properties true: one guard function, no second execution path, and
 no route that feeds narration output back into SQL.
 
+### Chat wire format
+
+`POST /api/chat` answers with NDJSON on a 200 — one JSON object per line, three frame types:
+
+| Frame | Shape | Meaning |
+|---|---|---|
+| `sql` | `{ type: 'sql', sql }` | The query that ran. Always first when narration follows. |
+| `token` | `{ type: 'token', response }` | A narration chunk. |
+| `no-answer` | `{ type: 'no-answer', reason, message, sql? }` | A refusal (ADR-0014). |
+
+`no-answer` reasons are `out-of-scope`, `no-data`, `unsupported-shape`, `budget-exhausted`
+(`lib/chatNonAnswer.ts` is the single definition; adding one is a line there plus a headline). Its
+`message` is written by the route, never by the model — a decline the model phrases is a decline the
+model can talk itself out of. Its `sql` is the same field the `sql` frame carries, not a second
+SQL-bearing key. A `no-answer` arrives alone: nothing narrates after it.
+
+HTTP errors (`{ type: 'error', message, sql? }` on 400/422/503) are now reserved for transport and
+unexpected faults — an unreachable Ollama, a SQLite failure that survived the repair round-trip. A
+refusal is never one. Two reasons are wired live today: `no-data` (a clean run matching nothing, or an
+all-`NULL` aggregate row — the confident-zero bug) and `unsupported-shape` (generation returned a
+non-`SELECT`). ADR-0008/0010/0011 add their own triggers to the same frame.
+
+Refusals persist to `ChatMessage.nonAnswerReason`, so they survive reload and appear in the session
+history regression fixtures are built from. Genuine errors stay transient.
+
 Knowledge snippets (`docs/knowledge/`) are injected into the narration system prompt only (ADR-0007).
 That directory is application input at code trust level — git-tracked, PR-reviewed, never a target for
 ingested or scraped content.

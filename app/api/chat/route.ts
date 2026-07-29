@@ -8,6 +8,12 @@ import {
   loadKnowledgeSnippets,
   NARRATION_KNOWLEDGE_TIER,
 } from '@/lib/chatKnowledge'
+import {
+  isNoDataResult,
+  noDataMessage,
+  nonAnswerFrame,
+  nonAnswerResponse,
+} from '@/lib/chatNonAnswer'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -180,11 +186,17 @@ export async function POST(request: Request) {
   // Accept both SELECT ... and WITH ... SELECT. The read-only driver is the
   // actual safety boundary; the guard is a cheap rejection of obvious
   // non-reads before we hit the DB.
+  //
+  // A non-SELECT here is a refusal, not a crash: the pipeline worked and
+  // couldn't produce a query it would stand behind (ADR-0014). Tickets 2-4
+  // add their rejections alongside this one, same frame, different reason.
   if (!/^\s*(SELECT|WITH)\b/i.test(sql)) {
-    return new Response(
-      JSON.stringify({ type: 'error', message: 'Model did not return a SELECT or WITH statement. Try rephrasing your question.' }),
-      { status: 422, headers: { 'Content-Type': 'application/json' } }
-    )
+    return nonAnswerResponse(nonAnswerFrame(
+      'unsupported-shape',
+      "I couldn't turn that into a single query I trust. The model returned something that isn't a " +
+        'SELECT, so nothing was run. Rephrasing the question — one figure at a time — usually fixes it.',
+      sql,
+    ))
   }
 
   // Execute the SQL on a read-only connection to prevent mutations. On a SQLite
@@ -235,6 +247,16 @@ export async function POST(request: Request) {
         { status: 422, headers: { 'Content-Type': 'application/json' } }
       )
     }
+  }
+
+  // A clean run that matched nothing is a non-answer, and it never reaches
+  // narration (ADR-0014). Narrating `[{"total": null}]` is what produced "you
+  // spent nothing on groceries last month" — a wrong answer wearing a
+  // confident sentence. This is the cheapest of the four reasons and the only
+  // one wired live here; ADR-0008 will reuse it with the real category
+  // vocabulary attached.
+  if (isNoDataResult(rows)) {
+    return nonAnswerResponse(nonAnswerFrame('no-data', noDataMessage(question), sql))
   }
 
   // Build conversation context for narration

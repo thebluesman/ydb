@@ -1,8 +1,13 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { MessageCircle, SendHorizonal, AlertCircle, Square, Copy, Check } from 'lucide-react'
+import { MessageCircle, SendHorizonal, AlertCircle, Info, Square, Copy, Check } from 'lucide-react'
 import { ThinkingLoader } from '@/app/_components/ThinkingLoader'
+import {
+  isNonAnswerReason,
+  NON_ANSWER_HEADLINE,
+  type NonAnswerReason,
+} from '@/lib/chatNonAnswer'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -12,6 +17,10 @@ export type Message = {
   /** Raw technical detail (SQLite error etc.) shown in a collapsible section
    *  under a friendly error headline. */
   errorDetail?: string
+  /** ADR-0014: set when the route declined to answer. A refusal is a normal
+   *  response, not an error — `text` holds the route-written explanation and
+   *  is rendered as the headline, never collapsed. */
+  nonAnswer?: NonAnswerReason
 }
 
 export function ChatPane({
@@ -77,6 +86,7 @@ export function ChatPane({
 
     let accumulatedText = ''
     let accumulatedSql: string | undefined
+    let accumulatedNonAnswer: NonAnswerReason | undefined
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -134,6 +144,25 @@ export function ChatPane({
                 next[next.length - 1] = { ...last, text: last.text + (event.response ?? '') }
                 return next
               })
+            } else if (event.type === 'no-answer' && isNonAnswerReason(event.reason)) {
+              // ADR-0014. Nothing narrates after this frame, so the route's
+              // message replaces the (empty) streamed text outright.
+              accumulatedText = String(event.message ?? '')
+              accumulatedNonAnswer = event.reason
+              if (event.sql) accumulatedSql = event.sql
+              updateMessages((prev) => {
+                const next = [...prev]
+                const last = next[next.length - 1]
+                next[next.length - 1] = {
+                  ...last,
+                  text: accumulatedText,
+                  sql: event.sql ?? last.sql,
+                  nonAnswer: event.reason,
+                  error: false,
+                  errorDetail: undefined,
+                }
+                return next
+              })
             } else if (event.type === 'error') {
               updateMessages((prev) => {
                 const next = [...prev]
@@ -164,7 +193,12 @@ export function ChatPane({
           await fetch(`/api/chat-sessions/${sid}/messages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: 'assistant', text: accumulatedText, sql: accumulatedSql }),
+            body: JSON.stringify({
+              role: 'assistant',
+              text: accumulatedText,
+              sql: accumulatedSql,
+              nonAnswerReason: accumulatedNonAnswer,
+            }),
           })
           // Auto-title from first user message
           if (history.length === 0) {
@@ -311,6 +345,32 @@ export function ChatPane({
                     </details>
                   )}
                 </div>
+              ) : msg.nonAnswer ? (
+                /* ADR-0014: a refusal is a successful response. Own presentation —
+                   not the red error card, not a plain answer bubble — with the
+                   route's explanation as the visible headline rather than a
+                   collapsed technical detail. */
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: '16px 16px 16px 4px',
+                  backgroundColor: 'var(--bg-card-alt)',
+                  border: '1px dashed var(--border-warm-strong)',
+                  fontSize: '14px',
+                  lineHeight: 1.6,
+                  color: 'var(--tx-primary)',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px',
+                    fontSize: '12px', fontWeight: 600, textTransform: 'uppercase',
+                    letterSpacing: '0.04em', color: 'var(--tx-secondary)',
+                  }}>
+                    <Info size={14} strokeWidth={2} style={{ flexShrink: 0 }} />
+                    {NON_ANSWER_HEADLINE[msg.nonAnswer]}
+                  </div>
+                  {msg.text}
+                </div>
               ) : (
                 <div style={{
                   padding: '10px 14px',
@@ -347,7 +407,9 @@ export function ChatPane({
               )}
 
               {msg.role === 'assistant' && msg.sql && (
-                <details style={{ marginTop: '6px' }}>
+                /* A non-answer shows its work by default (ADR-0014) — the
+                   attempted query is the whole point of the response. */
+                <details open={msg.nonAnswer !== undefined} style={{ marginTop: '6px' }}>
                   <summary style={{
                     cursor: 'pointer',
                     fontSize: '12px',

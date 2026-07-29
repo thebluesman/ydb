@@ -101,6 +101,10 @@ model ChatMessage {
   role      String      // "user" | "assistant"
   text      String
   sql       String?
+  // ADR-0014 non-answer reason ('no-data', 'unsupported-shape', ...). NULL for
+  // ordinary answers. Persisted so a refusal survives reload and shows up in
+  // the session history @qa builds regression fixtures from.
+  nonAnswerReason String?
   createdAt DateTime    @default(now())
 }
 
