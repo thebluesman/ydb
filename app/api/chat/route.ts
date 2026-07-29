@@ -14,6 +14,7 @@ import {
   nonAnswerFrame,
   nonAnswerResponse,
 } from '@/lib/chatNonAnswer'
+import { buildSqlSystemPrompt } from '@/lib/chatSqlPrompt'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -22,8 +23,12 @@ class OllamaUnavailable extends Error {}
 // Generate a SQL statement from a prompt via Ollama (non-streaming, temp 0).
 // Cleans markdown fences and quotes bare Transaction references. Shared by the
 // initial generation and the one-shot repair retry.
+// `system` is passed in rather than read off a module const because it now
+// carries the current date (lib/chatSqlPrompt.ts) — it has to be built per
+// request, and the repair round-trip must reuse the same one the first attempt
+// saw or the model gets shown two different "today"s in one turn.
 async function generateSql(
-  ollamaUrl: string, model: string, prompt: string, signal: AbortSignal,
+  ollamaUrl: string, model: string, system: string, prompt: string, signal: AbortSignal,
 ): Promise<string> {
   let res: Response
   try {
@@ -32,7 +37,7 @@ async function generateSql(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        system: SQL_SYSTEM_PROMPT,
+        system,
         prompt,
         stream: false,
         options: { temperature: 0, num_ctx: SQL_NUM_CTX },
@@ -51,44 +56,6 @@ async function generateSql(
   sql = sql.replace(/\bJOIN\s+Transaction\b/gi, 'JOIN "Transaction"')
   return sql
 }
-
-const SQL_SYSTEM_PROMPT = `You are a SQLite query generator. Output ONLY a single raw SQL SELECT statement (or WITH ... SELECT) -- no markdown, no explanation, no code fences, no backticks.
-
-Schema (readable tables only):
-  Account(id, name, accountType, currency, isActive, openingBalance, openingBalanceDate, creditLimit, createdAt, updatedAt)
-  Transaction(id, date, amount, description, originalDescription, transactionType, category, accountId, status, notes,
-              linkedTransferId, parentTransactionId, reimbursableFor, reimbursementTxId, transferCounterpartAccountId,
-              rawSource, createdAt, updatedAt)
-  Category(id, name, color)
-
-Tables you MUST NOT query (access is blocked at the driver level): Setting, ChatSession, ChatMessage, Budget, VendorRule.
-Avoid selecting from sqlite_master or any pragma_* function.
-
-Rules:
-- SQLite dialect only: use strftime('%Y-%m', date) for month grouping, NOT DATE_TRUNC.
-- CRITICAL: "Transaction" is a reserved word in SQLite. Always wrap it in double quotes: "Transaction".
-- Transaction.date is an ISO datetime string (e.g. '2024-03-15 00:00:00.000').
-- Transaction.amount is an INTEGER number of cents. For user-facing sums, divide by 100.0.
-- Transaction.transactionType: 'credit' | 'debit' | 'transfer'.
-- Amount sign: negative = debit/out, positive = credit/in. Use transactionType for filtering by type.
-- status values: 'review', 'committed', 'reconciled'. For financial queries prefer WHERE status IN ('committed','reconciled') unless the user asks otherwise.
-- Split legs: when parentTransactionId IS NOT NULL the row is a leg; the parent is a placeholder that sums the legs. When aggregating spend, exclude parents (WHERE parentTransactionId IS NULL) OR include the legs instead, NOT both.
-- Matched reimbursement pairs (reimbursementTxId IS NOT NULL on the expense side) net to zero. To compute true net spend, exclude the expense side AND the credit that appears as a reimbursement target. Example guard on the expense side: AND reimbursementTxId IS NULL. To also skip the paired credit: AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id).
-- Always include LIMIT 200 at most.
-- For joins use "Transaction".accountId = Account.id.
-
-Examples:
-Q: How many transactions do I have?
-A: SELECT COUNT(*) AS total FROM "Transaction" WHERE status IN ('committed','reconciled')
-
-Q: How much did I spend on groceries last month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = 'Groceries' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
-
-Q: What are my top 5 spending categories this year?
-A: SELECT category, SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND parentTransactionId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total ASC LIMIT 5
-
-Q: What is my total income this month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')`
 
 type HistoryMessage = { role: 'user' | 'assistant'; text: string }
 
@@ -137,14 +104,14 @@ const NARRATION_NUM_CTX = 16_384
 // Same reasoning for the SQL-generation call (generateSql), which until now set
 // no num_ctx at all and inherited whatever the server/model default happened to
 // be. Truncation is arguably worse here than in narration: the front of this
-// prompt is SQL_SYSTEM_PROMPT — the schema, the reserved-word rule, the
+// prompt is buildSqlSystemPrompt() — the schema, the reserved-word rule, the
 // integer-cents rule — so a silent front-truncation doesn't degrade phrasing,
 // it produces confidently wrong SQL against a half-known schema.
 //
 // Measured on Ollama 0.30.6 (2026-07-29) via prompt_eval_count, with
 // num_predict 1. qwen2.5:32b and qwen2.5-coder:14b share a tokenizer and
 // returned identical counts on every case below:
-//   SQL_SYSTEM_PROMPT alone                                   791 tokens
+//   SQL system prompt alone                                   791 tokens
 //   typical (no history, one-line question)                   800
 //   worst history (8 × 2,000-char prose turns)              4,007
 //   worst history + repair round-trip (failed SQL + error)  4,130  ← today's max
@@ -215,6 +182,10 @@ export async function POST(request: Request) {
 
   const trimmedHistory = trimHistory(history)
 
+  // Resolved once per request and reused by the repair round-trip, so both
+  // calls in a turn agree on what "today" is even across a midnight boundary.
+  const sqlSystemPrompt = buildSqlSystemPrompt()
+
   // Build SQL prompt with prior conversation context so follow-up references resolve correctly
   const sqlPrompt = trimmedHistory.length > 0
     ? trimmedHistory
@@ -226,7 +197,7 @@ export async function POST(request: Request) {
   // determinism, not creativity.
   let sql: string
   try {
-    sql = await generateSql(ollamaUrl, chatModel, sqlPrompt, signal)
+    sql = await generateSql(ollamaUrl, chatModel, sqlSystemPrompt, sqlPrompt, signal)
   } catch (e) {
     const message = e instanceof OllamaUnavailable ? e.message : `Could not connect to Ollama at ${ollamaUrl}`
     return new Response(
@@ -271,7 +242,7 @@ export async function POST(request: Request) {
 
     let repaired: string
     try {
-      repaired = await generateSql(ollamaUrl, chatModel, repairPrompt, signal)
+      repaired = await generateSql(ollamaUrl, chatModel, sqlSystemPrompt, repairPrompt, signal)
     } catch {
       // Repair round-trip couldn't reach the model — surface the original error.
       return new Response(
