@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { PanelLeft } from 'lucide-react'
 import { ChatSidebar, MobileChatDrawer } from './_components/ChatSidebar'
 import { ChatPane, type Message } from './_components/ChatPane'
+import { isNonAnswerReason } from '@/lib/chatNonAnswer'
 
 type ChatSession = {
   id: number
@@ -21,13 +22,16 @@ export default function ChatPage() {
   const loadSession = (id: number) => {
     fetch(`/api/chat-sessions/${id}`)
       .then((r) => r.json())
-      .then((session: { id: number; title: string; updatedAt: string; messages: Array<{ role: string; text: string; sql?: string }> }) => {
+      .then((session: { id: number; title: string; updatedAt: string; messages: Array<{ role: string; text: string; sql?: string; nonAnswerReason?: string | null }> }) => {
         setActiveSessionId(session.id)
         setActiveMessages(
           session.messages.map((m) => ({
             role: m.role as 'user' | 'assistant',
             text: m.text,
             sql: m.sql,
+            // ADR-0014: a persisted refusal renders as a refusal after reload,
+            // not as an ordinary answer that happens to say "I couldn't".
+            nonAnswer: isNonAnswerReason(m.nonAnswerReason) ? m.nonAnswerReason : undefined,
           }))
         )
       })
