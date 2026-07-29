@@ -33,3 +33,4 @@ Date: YYYY-MM-DD
 - [0003 — Full reset before YNAB import](0003-full-reset-before-ynab-import.md) — wipe YDB ledger data and recreate accounts 1:1 from YNAB with `openingBalance: 0`
 - [0004 — YNAB edits and deletions are detected and reported, never applied](0004-ynab-mutations-detect-and-report.md) — Phase 1 surfaces divergence for manual resolution; no update/delete propagation (detection mechanism superseded by 0005)
 - [0005 — YNAB change detection compares against an immutable snapshot](0005-ynab-change-detection-immutable-snapshot.md) — frozen `ynabFingerprint` column of YNAB-native values, so local edits can never register as YNAB-side changes
+- [0006 — All LLM inference stays local](0006-local-only-llm-inference.md) — self-hosted Ollama only, no hosted inference API; rules out a hosted fallback for complex chat queries

@@ -17,12 +17,15 @@ breaking API changes from training-data Next.js.
 | Asset/liability sign rules (`computeBalance`) | `lib/accounts.ts` |
 | Read-only SQL guard on the chat/query path | `lib/prisma.ts` |
 | LAN-only, no auth/multi-user | `docs/archive/IMPROVEMENT_PLAN.md` §4 |
+| All LLM inference is self-hosted (Ollama); no ledger data, query result, or user question goes to a hosted inference API | `docs/adr/0006-local-only-llm-inference.md`, `lib/llm-config.ts` |
 | WAL mode, `synchronous = NORMAL`, `busy_timeout = 5000`, FK on | `docs/archive/IMPROVEMENT_PLAN.md` Phase 0 |
 
 ## Integration boundary (ADR-0001 through ADR-0005)
 
-YDB is otherwise a closed, LAN-only app with no standing external dependencies. The YNAB migration
-integration is the one exception, and it's deliberately kept narrow:
+YDB is otherwise a closed, LAN-only app with no standing external dependencies. The LLM path is part
+of why that holds — chat and extraction both call a self-hosted Ollama, so no ledger data or user
+question leaves the LAN (ADR-0006). The YNAB migration integration is the one exception, and it's
+deliberately kept narrow:
 
 - **Outbound-only.** YDB calls out to `api.youneedabudget.com`; nothing calls into YDB. No webhook
   receiver, no public endpoint, no inbound network surface added.
@@ -58,3 +61,7 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
 
 - None outstanding for Phase 1. The Phase 1→2 gate itself (ADR-0002) is the next thing that needs a
   decision, and it needs real usage data before it can be answered.
+- **No eval harness exists for the chat/SQL path.** ADR-0006 rejects hosted inference partly on the
+  grounds that local-model quality has never been measured, so any future argument to revisit it
+  needs a harness first. Unowned and unscheduled — worth a ticket if the "Chat knowledge" initiative
+  goes anywhere.
