@@ -34,3 +34,4 @@ Date: YYYY-MM-DD
 - [0004 — YNAB edits and deletions are detected and reported, never applied](0004-ynab-mutations-detect-and-report.md) — Phase 1 surfaces divergence for manual resolution; no update/delete propagation (detection mechanism superseded by 0005)
 - [0005 — YNAB change detection compares against an immutable snapshot](0005-ynab-change-detection-immutable-snapshot.md) — frozen `ynabFingerprint` column of YNAB-native values, so local edits can never register as YNAB-side changes
 - [0006 — All LLM inference stays local](0006-local-only-llm-inference.md) — self-hosted Ollama only, no hosted inference API; rules out a hosted fallback for complex chat queries
+- [0007 — Chat knowledge is injected into the narration prompt only](0007-chat-knowledge-injected-into-narration-only.md) — `docs/knowledge/` P0 snippets go in the narration system prompt, never the SQL prompt; read-only guard verified unaffected
