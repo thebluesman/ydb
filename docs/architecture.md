@@ -64,6 +64,15 @@ Knowledge snippets (`docs/knowledge/`) are injected into the narration system pr
 That directory is application input at code trust level — git-tracked, PR-reviewed, never a target for
 ingested or scraped content.
 
+The guard is a safety boundary, not a correctness one. Manual testing on 2026-07-29 found two ways the
+SQL step produces a well-formed, safely-executed, wrong answer: a guessed category literal matching
+nothing (ADR-0008) and `openingBalance` combined across asset and liability accounts without the
+`lib/accounts.ts` sign rule (ADR-0009). Both are fixed on the generation side — real category values
+injected into the SQL prompt, and `openingBalance` declared off-limits with balance questions declined
+until a `computeBalance`-backed path exists. The scope check for ADR-0009 lives in
+`app/api/chat/route.ts`, deliberately not in `lib/prisma.ts`, so the guard stays input-agnostic and
+single-purpose.
+
 ## Known follow-ups outside this scope
 
 Prior open items from the M1–M7 rework are tracked in `FOLLOWUPS.md` (transaction accuracy /
@@ -88,6 +97,12 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   (ADR-0007), so an out-of-scope question still generates and executes a `SELECT` before the model
   declines. Read-only and local, so it costs latency rather than safety. Revisit only if a cheap
   pre-SQL scope check turns out to be worth the extra round-trip.
+- **No code-computed balance path for chat.** ADR-0009 declines balance and net-worth questions rather
+  than letting generated SQL compose `openingBalance` across account types. Answering them properly
+  means computing balances in code via `computeBalance` and handing the result to narration as data.
+  Unowned and unscoped.
+- **Account names have the same grounding gap as categories.** ADR-0008 covers `Transaction.category`
+  only. Whether a guessed account-name literal fails the same silent way has not been tested.
 - **`num_ctx` is never set anywhere in the app.** Both chat calls and the extraction call run at
   Ollama's resolved default, and the narration prompt is only loosely bounded. Ticket 4 has to resolve
   this for narration; the extraction path (`app/api/ollama/route.ts`) has the same latent issue and

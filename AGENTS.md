@@ -47,6 +47,8 @@ and Shyam explicitly declares the trigger met (his call, not a timer).
 | YNAB rollout sequencing | Manual import (Phase 1) before automatic sync (Phase 2) | `docs/adr/0002-manual-import-before-auto-sync.md` |
 | LLM inference scope | Local only (Ollama), no hosted/third-party LLM API in the chat path | `docs/adr/0006-local-only-llm-inference.md` |
 | Chat knowledge injection point | Narration prompt only, never the SQL-generation prompt | `docs/adr/0007-chat-knowledge-injected-into-narration-only.md` |
+| Chat SQL category filters | Grounded in stored `Transaction.category` values; unmatched category fails loudly | `docs/adr/0008-chat-sql-category-vocabulary-grounding.md` |
+| Chat SQL and account balances | `openingBalance` off-limits to generated SQL; balance/net-worth questions declined, not guessed | `docs/adr/0009-balance-composition-out-of-scope-for-chat-sql.md` |
 
 ## Team (subagents)
 
