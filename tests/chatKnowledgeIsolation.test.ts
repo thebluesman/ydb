@@ -14,6 +14,10 @@ vi.mock('@/lib/prisma', () => ({
       findFirst: async () => ({ value: 'AED' }),
       findMany: async () => [],
     },
+    // The route reads the stored category vocabulary per turn (ADR-0008).
+    // Empty here: this test is about what does and doesn't reach each prompt,
+    // and an empty vocabulary leaves the SQL prompt exactly as it was.
+    transaction: { findMany: async () => [] },
   },
   executeReadonlyQuery: () => ({ rows: [{ total: 42 }], truncated: false }),
 }))

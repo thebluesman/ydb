@@ -15,6 +15,12 @@ import {
   nonAnswerResponse,
 } from '@/lib/chatNonAnswer'
 import { buildSqlSystemPrompt } from '@/lib/chatSqlPrompt'
+import {
+  CategoryVocabularyTooLarge,
+  loadCategoryVocabulary,
+  unknownCategoryLiterals,
+  unknownCategoryMessage,
+} from '@/lib/chatCategoryVocabulary'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -119,9 +125,12 @@ const NARRATION_NUM_CTX = 16_384
 // prose figure is the real ceiling; HISTORY_MESSAGE_CAP × HISTORY_CHAR_CAP is
 // what bounds it.
 //
-// Ticket 2 (ADR-0008) injects the stored category/account-name vocabulary into
-// this same prompt, so the value is sized for that now rather than bumped
-// again next ticket. Measured with the real dev-DB vocabulary (46 distinct
+// Ticket 2 (ADR-0008) injects the stored category vocabulary into this same
+// prompt, so the value is sized for that now rather than bumped again next
+// ticket. (As shipped it is categories only — account-name grounding is
+// explicitly out of ADR-0008's scope — so the figures below, measured with
+// both, are an over-estimate of what the block actually costs today.)
+// Measured with the real dev-DB vocabulary (46 distinct
 // Transaction.category values — emoji-prefixed, so unusually token-expensive —
 // and 10 Account.name values) rendered as a closed list with its
 // only-use-a-literal-from-this-list rule:
@@ -177,14 +186,41 @@ export async function POST(request: Request) {
   const baseCurrencySetting = await prisma.setting.findFirst({ where: { key: 'baseCurrency' } })
   const baseCurrency = baseCurrencySetting?.value ?? 'USD'
 
+  // ADR-0008: the stored category vocabulary, read fresh per turn (no cache —
+  // a category added five minutes ago is precisely the one being asked about).
+  // Over the cap this throws rather than handing the model a partial list, and
+  // a partial list is the original bug wearing the fix's clothes, so it is an
+  // operator-facing error and not a non-answer.
+  let categories: string[]
+  try {
+    categories = await loadCategoryVocabulary(prisma)
+  } catch (e) {
+    if (e instanceof CategoryVocabularyTooLarge) {
+      console.error(`[chat] ${e.message}`)
+      return new Response(
+        JSON.stringify({
+          type: 'error',
+          message:
+            `Chat is disabled until the category list is reviewed: this ledger has ${e.count} distinct ` +
+            `categories, more than the query generator can be grounded on safely. ` +
+            `Answering without the full list risks silently wrong totals.`,
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+    throw e
+  }
+
   const { ollamaUrl, chatModel } = await getLlmConfig()
   const signal = ollamaSignal(request.signal)
 
   const trimmedHistory = trimHistory(history)
 
   // Resolved once per request and reused by the repair round-trip, so both
-  // calls in a turn agree on what "today" is even across a midnight boundary.
-  const sqlSystemPrompt = buildSqlSystemPrompt()
+  // calls in a turn agree on what "today" is even across a midnight boundary —
+  // and, since ADR-0008, so both see the same category vocabulary. A repair
+  // pass that lost the grounding could reintroduce a guessed literal.
+  const sqlSystemPrompt = buildSqlSystemPrompt(new Date(), categories)
 
   // Build SQL prompt with prior conversation context so follow-up references resolve correctly
   const sqlPrompt = trimmedHistory.length > 0
@@ -218,6 +254,26 @@ export async function POST(request: Request) {
       'unsupported-shape',
       "I couldn't turn that into a single query I trust. The model returned something that isn't a " +
         'SELECT, so nothing was run. Rephrasing the question — one figure at a time — usually fixes it.',
+      sql,
+    ))
+  }
+
+  // ADR-0008's load-bearing half. The prompt hands the model the closed list;
+  // this checks it used it. A literal outside the vocabulary would run cleanly,
+  // match nothing, and — because an empty result is not a SQLite error — skip
+  // the repair round-trip entirely and land on a null aggregate. Refusing here,
+  // before execution, is the difference between "I don't have a category
+  // matching Travel" and "you spent nothing on travel".
+  //
+  // Reason is `out-of-scope` rather than a new enum member: ADR-0014 fixes the
+  // reason set at four, and this is its "not answerable from the ledger,
+  // ideally declared before a query runs" case. The message carries the
+  // specifics.
+  const unknownFirst = unknownCategoryLiterals(sql, categories)
+  if (unknownFirst.length > 0) {
+    return nonAnswerResponse(nonAnswerFrame(
+      'out-of-scope',
+      unknownCategoryMessage(unknownFirst, categories),
       sql,
     ))
   }
@@ -258,6 +314,18 @@ export async function POST(request: Request) {
       )
     }
 
+    // The repair pass gets the same check as the first: it saw the same
+    // vocabulary block, and a fix for a syntax error is exactly the moment a
+    // model is most likely to reword a category literal on its way past.
+    const unknownRepaired = unknownCategoryLiterals(repaired, categories)
+    if (unknownRepaired.length > 0) {
+      return nonAnswerResponse(nonAnswerFrame(
+        'out-of-scope',
+        unknownCategoryMessage(unknownRepaired, categories),
+        repaired,
+      ))
+    }
+
     try {
       const result = executeReadonlyQuery(repaired)
       rows = result.rows
@@ -275,9 +343,9 @@ export async function POST(request: Request) {
   // A clean run that matched nothing is a non-answer, and it never reaches
   // narration (ADR-0014). Narrating `[{"total": null}]` is what produced "you
   // spent nothing on groceries last month" — a wrong answer wearing a
-  // confident sentence. This is the cheapest of the four reasons and the only
-  // one wired live here; ADR-0008 will reuse it with the real category
-  // vocabulary attached.
+  // confident sentence. It stays the backstop for a grounded query that
+  // genuinely matches nothing; ADR-0008's vocabulary check above catches the
+  // narrower case of a category literal that could never have matched.
   if (isNoDataResult(rows)) {
     return nonAnswerResponse(nonAnswerFrame('no-data', noDataMessage(question), sql))
   }
