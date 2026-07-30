@@ -93,4 +93,33 @@ describe('buildSqlSystemPrompt', () => {
   it('defaults to the real current date when called with no argument', () => {
     expect(buildSqlSystemPrompt()).toContain(`Today's date is ${isoDate(new Date())}`)
   })
+
+  // ADR-0011. The prompt rule is the fix; the route check is the backstop. If
+  // rejections stay common in practice, this few-shot is what to change.
+  describe('compound-SELECT rule (ADR-0011)', () => {
+    it('states the ban explicitly', () => {
+      expect(prompt).toContain('NEVER use UNION or UNION ALL')
+    })
+
+    it('explains why, in terms of the label collapse', () => {
+      expect(prompt).toMatch(/FIRST branch only/)
+      expect(prompt).toMatch(/both rows labelled total_expenses/i)
+    })
+
+    it('tells the model the server rejects it rather than running it', () => {
+      expect(prompt).toMatch(/rejects any query containing UNION/i)
+    })
+
+    it('carries a multi-figure few-shot using conditional aggregates in one row', () => {
+      expect(prompt).toContain('AS total_expenses, SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income')
+    })
+
+    it('never demonstrates the banned shape in an example', () => {
+      // Few-shot shape beats prose instruction, so a UNION must never appear on
+      // an `A:` answer line — only in the prohibition and its commentary.
+      const answerLines = prompt.split('\n').filter((l) => l.startsWith('A: '))
+      expect(answerLines).not.toHaveLength(0)
+      expect(answerLines.filter((l) => /\bUNION\b/i.test(l))).toEqual([])
+    })
+  })
 })
