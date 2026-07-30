@@ -21,6 +21,8 @@ import {
   unknownCategoryLiterals,
   unknownCategoryMessage,
 } from '@/lib/chatCategoryVocabulary'
+import { balanceIntentMatch, balanceIntentMessage } from '@/lib/chatBalanceIntent'
+import { balanceScopeMessage, balanceScopeViolation } from '@/lib/chatBalanceScope'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -229,6 +231,23 @@ export async function POST(request: Request) {
         .join('\n') + `\nUser: ${question}`
     : question
 
+  // ADR-0015. Balance scope is enforced on the question, before a token is
+  // spent. ADR-0010's alias check below was evaded without anyone trying to:
+  // "What's the balance on my car loan?" produced a bare `SUM(amount) AS net`,
+  // and narration answered "The balance on your car loan is AED 7034.04" —
+  // because narration frames its answer around the question, not around the
+  // column name. The question is the cause, so the question is what gets
+  // checked; the alias and `openingBalance` checks stay on as a second net for
+  // balance arithmetic on a question that named no stock noun.
+  //
+  // Current turn only, never `trimmedHistory`: a balance question earlier in
+  // the conversation must not poison a later, legitimate flow question. No
+  // `sql` on the frame — nothing was generated, so there is no work to show.
+  const balanceIntent = balanceIntentMatch(question)
+  if (balanceIntent) {
+    return nonAnswerResponse(nonAnswerFrame('out-of-scope', balanceIntentMessage(balanceIntent)))
+  }
+
   // Phase 1: generate SQL (non-streaming). temperature 0 — SQL generation wants
   // determinism, not creativity.
   let sql: string
@@ -278,6 +297,22 @@ export async function POST(request: Request) {
     ))
   }
 
+  // ADR-0010. Balance, net worth and amount-outstanding are out of scope, and
+  // the enforcement is on the output label rather than the input column:
+  // narration sees only `JSON.stringify(rows)`, so the alias the model wrote is
+  // the only thing telling it what a number means. Session 10's
+  // `SUM("Transaction".amount) AS total_balance` over one month on a liability
+  // account touched no `openingBalance` and got narrated as the debt owed —
+  // ADR-0009's column check would have missed it entirely.
+  //
+  // Short-circuits rather than feeding the repair round-trip: repair exists for
+  // SQLite errors, and retrying here just buys a second attempt at the same
+  // out-of-scope query.
+  const scopeFirst = balanceScopeViolation(sql)
+  if (scopeFirst) {
+    return nonAnswerResponse(nonAnswerFrame('out-of-scope', balanceScopeMessage(scopeFirst), sql))
+  }
+
   // Execute the SQL on a read-only connection to prevent mutations. On a SQLite
   // error, give the model exactly ONE repair round-trip (feed it the failed SQL
   // and the error) before surfacing the failure — models frequently mis-name a
@@ -322,6 +357,18 @@ export async function POST(request: Request) {
       return nonAnswerResponse(nonAnswerFrame(
         'out-of-scope',
         unknownCategoryMessage(unknownRepaired, categories),
+        repaired,
+      ))
+    }
+
+    // Same for the scope check (ADR-0010): a repair pass is free to relabel a
+    // column on its way past a syntax fix, so the second attempt is checked as
+    // independently as the first.
+    const scopeRepaired = balanceScopeViolation(repaired)
+    if (scopeRepaired) {
+      return nonAnswerResponse(nonAnswerFrame(
+        'out-of-scope',
+        balanceScopeMessage(scopeRepaired),
         repaired,
       ))
     }

@@ -167,18 +167,24 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   `tools`, 262k context) has not been tried as the chat model despite being free to evaluate. Four
   decisions now wait on this. Still unowned; ADR-0013's Phase A produces it as a side effect, which is
   the current best argument for doing Phase A first.
-- **Refusal happens after the query runs.** The boundary snippet `X1` lives in the narration prompt
-  (ADR-0007), so an out-of-scope question still generates and executes a `SELECT` before the model
-  declines. Read-only and local, so it costs latency rather than safety. Revisit only if a cheap
-  pre-SQL scope check turns out to be worth the extra round-trip.
-- **No code-computed balance path for chat.** ADR-0010 declines balance and net-worth questions rather
-  than letting generated SQL assert a balance it cannot compute. Answering them properly means
-  computing balances in code via `computeBalance` and handing the result to the model as data. Now
-  scoped, but not unblocked: it is ADR-0013's Phase C (`get_balances` as a tool). Until then it remains
-  the standing answer whenever ADR-0010's alias check needs an exception.
-- **ADR-0010's alias check has a known false negative.** A balance passed off under a neutral alias
-  like `total` is not caught, because the check reads the model's own labeling. Closing it properly
-  needs either the `computeBalance` path above or an eval harness; neither exists.
+- **Refusal happens after the query runs — except for balance questions.** The boundary snippet `X1`
+  lives in the narration prompt (ADR-0007), so a generally out-of-scope question still generates and
+  executes a `SELECT` before the model declines. Read-only and local, so it costs latency rather than
+  safety. ADR-0015 answered this for the one class where post-hoc refusal was producing wrong numbers
+  (balance / net worth); whether the rest of `X1`'s boundary moves pre-generation the same way is still
+  open, and ADR-0007's loop question below probably subsumes it.
+- **No code-computed balance path for chat, and it is now the priority.** ADR-0010 and ADR-0015 decline
+  balance and net-worth questions rather than letting generated SQL assert a balance it cannot compute.
+  Answering them properly means computing balances in code via `computeBalance` and handing the result
+  to the model as data — ADR-0013's Phase C (`get_balances` as a tool). Three successive mechanisms for
+  one scope decision (input column, output label, question wording) have each been falsified by a live
+  session, because nothing in the pipeline represents stock-versus-flow. ADR-0015 is the last cheap
+  proxy; a fourth heuristic is not the answer if it needs an exception.
+- **Nothing verifies that a returned figure means what narration says it means.** ADR-0015 refuses
+  questions that ask for a stock, and ADR-0010's alias check refuses SQL that claims to return one, but
+  a balance computed under a neutral alias in answer to a question that named no stock noun still
+  reaches narration unchallenged. Closing it needs the `computeBalance` path above or an eval harness;
+  neither exists.
 - **Account names have the same grounding gap as categories.** ADR-0008 covers `Transaction.category`
   only. Whether a guessed account-name literal fails the same silent way has not been tested.
 - **ADR-0007's injection point has no answer under a loop.** A tool-calling loop has one message thread,
