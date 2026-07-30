@@ -14,12 +14,29 @@
  * NON_ANSWER_HEADLINE; nothing else on either side switches on the set.
  */
 
+/**
+ * The four reasons. `out-of-scope` and `unsupported-shape` are the two that get
+ * confused, so the discriminator is stated on each rather than left to
+ * precedent: **what failed, the question or the artifact.** A new guard picks its
+ * reason by answering that, not by matching whichever guard it was written next
+ * to.
+ */
 export const NON_ANSWER_REASONS = [
-  /** Not answerable from the ledger, or declined by policy (ADR-0010). */
+  /**
+   * The *question* can't be honestly answered from this ledger. No rewrite of
+   * the SQL would help — either the ledger doesn't hold the answer or policy
+   * forbids giving it. Balance, net worth and amount-outstanding; a category the
+   * ledger doesn't have. The user's move is to ask something else.
+   */
   'out-of-scope',
   /** The query ran and matched nothing. Explicitly NOT narrated as zero. */
   'no-data',
-  /** The result can't be trusted to mean what it claims (ADR-0010, ADR-0011). */
+  /**
+   * The question is fine and answerable; the *generated query* isn't one we'll
+   * stand behind. Non-SELECT SQL; a compound SELECT whose column labels SQLite
+   * collapses onto the first branch. The user's move is to ask the same thing
+   * differently, which is what the "Result not trustworthy" headline says.
+   */
   'unsupported-shape',
   /** ADR-0012's loop ran out of iterations or rows. Not yet emitted. */
   'budget-exhausted',

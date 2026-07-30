@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { compoundSelectMessage, compoundSelectViolation } from '@/lib/chatCompoundSelect'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ADR-0011: chat-generated SQL may not use UNION or UNION ALL. SQLite names a
-// compound result set after its first branch only, so a two-branch query
-// silently relabels the second branch's figures as the first's.
+// ADR-0011: chat-generated SQL may not use a compound SELECT — UNION, UNION ALL,
+// INTERSECT or EXCEPT. SQLite names a compound result set after its first branch
+// only, so a two-branch query silently relabels the second branch's figures as
+// the first's. The 2026-07-30 addendum widened the ban from UNION to all three,
+// since the naming rule belongs to compound SELECTs and not to UNION.
 //
 // Unit coverage of the detector. Route-level coverage (both SQL passes, the
 // short-circuit, the non-answer frame) lives in tests/chatCompoundSelectRoute.test.ts.
@@ -40,6 +42,29 @@ describe('compoundSelectViolation', () => {
     expect(compoundSelectViolation('SELECT 1\nUNION\n  ALL\nSELECT 2')).toEqual({ keyword: 'UNION ALL' })
   })
 
+  it('flags INTERSECT — synthetic, never seen from the model', () => {
+    // ADR-0011's addendum bans this pre-emptively: the mechanism is a documented
+    // SQLite rule, so the only unknown is when the model reaches for the keyword.
+    const sql =
+      `SELECT category AS spent_in FROM "Transaction" WHERE strftime('%Y-%m', date) = '2026-05' ` +
+      `INTERSECT ` +
+      `SELECT category AS also_spent_in FROM "Transaction" WHERE strftime('%Y-%m', date) = '2026-06' LIMIT 200`
+    expect(compoundSelectViolation(sql)).toEqual({ keyword: 'INTERSECT' })
+  })
+
+  it('flags EXCEPT — synthetic, never seen from the model', () => {
+    const sql =
+      `SELECT category AS dropped FROM "Transaction" WHERE strftime('%Y-%m', date) = '2026-05' ` +
+      `EXCEPT ` +
+      `SELECT category AS kept FROM "Transaction" WHERE strftime('%Y-%m', date) = '2026-06' LIMIT 200`
+    expect(compoundSelectViolation(sql)).toEqual({ keyword: 'EXCEPT' })
+  })
+
+  it('is case-insensitive for INTERSECT and EXCEPT too', () => {
+    expect(compoundSelectViolation('SELECT 1 intersect SELECT 2')).toEqual({ keyword: 'INTERSECT' })
+    expect(compoundSelectViolation('SELECT 1 ExCePt SELECT 2')).toEqual({ keyword: 'EXCEPT' })
+  })
+
   it('(d) does not fire on "union" as a substring of an identifier', () => {
     // A naive substring match rejects all of these. None is a compound select.
     for (const sql of [
@@ -47,6 +72,22 @@ describe('compoundSelectViolation', () => {
       `SELECT COUNT(*) AS total FROM "Transaction" WHERE description LIKE '%reunion%' LIMIT 200`,
       `SELECT unionized AS total FROM "Transaction" LIMIT 200`,
       `SELECT SUM(amount) AS union_total FROM "Transaction" LIMIT 200`,
+    ]) {
+      expect(compoundSelectViolation(sql), sql).toBeNull()
+    }
+  })
+
+  it('(d) does not fire on "except"/"intersect" as a substring either', () => {
+    // The widened regex keeps the same boundary anchoring, so adding two keywords
+    // must not add two new families of false positive. A column alias and a
+    // category literal each carry the word without being a compound operator.
+    for (const sql of [
+      `SELECT SUM(amount) AS except_flag FROM "Transaction" LIMIT 200`,
+      `SELECT excepted AS total FROM "Transaction" LIMIT 200`,
+      `SELECT SUM(intersect_count) AS total FROM "Transaction" LIMIT 200`,
+      `SELECT COUNT(*) AS total FROM "Transaction" WHERE description LIKE '%intersection%' LIMIT 200`,
+      `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '🚧 Except Street Works' LIMIT 200`,
+      `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '🛣️ Intersect Tolls' LIMIT 200`,
     ]) {
       expect(compoundSelectViolation(sql), sql).toBeNull()
     }
@@ -129,5 +170,19 @@ describe('compoundSelectMessage', () => {
   it('is not a bare error string', () => {
     expect(message.length).toBeGreaterThan(120)
     expect(message).not.toMatch(/rejected|invalid|error/i)
+  })
+
+  it('names the operator actually used, and hardcodes none of them', () => {
+    // Phrasing the refusal around UNION read oddly when the violation was
+    // EXCEPT. The wording is generic now; only the keyword is interpolated.
+    for (const keyword of ['UNION', 'UNION ALL', 'INTERSECT', 'EXCEPT']) {
+      const text = compoundSelectMessage({ keyword })
+      expect(text, keyword).toContain(keyword)
+      expect(text, keyword).toMatch(/first\s+branch/i)
+      expect(text, keyword).toMatch(/one figure at a time/i)
+    }
+    // The EXCEPT refusal must not talk about UNION.
+    expect(compoundSelectMessage({ keyword: 'EXCEPT' })).not.toMatch(/\bUNION\b/i)
+    expect(compoundSelectMessage({ keyword: 'INTERSECT' })).not.toMatch(/\bUNION\b/i)
   })
 })

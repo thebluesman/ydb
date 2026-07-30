@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Route-level coverage of ADR-0011 in POST /api/chat: generated SQL containing
-// UNION / UNION ALL is declined before execution, on both SQL-generation passes,
-// and the decline short-circuits rather than buying a repair round-trip.
+// Route-level coverage of ADR-0011 in POST /api/chat: generated SQL containing a
+// compound SELECT — UNION, UNION ALL, INTERSECT or EXCEPT — is declined before
+// execution, on both SQL-generation passes, and the decline short-circuits rather
+// than buying a repair round-trip.
+//
+// The reason is `unsupported-shape`, not `out-of-scope`: ADR-0014's addendum
+// discriminates on what failed, and here the question is ordinary and the
+// generated query is what we won't stand behind.
 //
 // Same mocking pattern as tests/chatBalanceScopeRoute.test.ts and
 // tests/chatCategoryGroundingRoute.test.ts — '@/lib/prisma' replaced wholesale,
@@ -108,7 +113,7 @@ describe('POST /api/chat — compound SELECTs declined (ADR-0011)', () => {
     const out = await frames(res)
     expect(out).toHaveLength(1)
     expect(out[0].type).toBe('no-answer')
-    expect(out[0].reason).toBe('out-of-scope')
+    expect(out[0].reason).toBe('unsupported-shape')
     expect(String(out[0].message)).toContain("I couldn't build a single clear result for that")
     expect(String(out[0].message)).toMatch(/one figure at a time/i)
     // A non-answer shows its work (ADR-0014).
@@ -135,7 +140,7 @@ describe('POST /api/chat — compound SELECTs declined (ADR-0011)', () => {
     expect(queryCalls).toEqual([])
     const [frame] = await frames(res)
     expect(frame.type).toBe('no-answer')
-    expect(frame.reason).toBe('out-of-scope')
+    expect(frame.reason).toBe('unsupported-shape')
     expect(frame.sql).toBe(sql)
   })
 
@@ -147,19 +152,67 @@ describe('POST /api/chat — compound SELECTs declined (ADR-0011)', () => {
 
     expect(queryCalls).toEqual([])
     const [frame] = await frames(res)
-    expect(frame.reason).toBe('out-of-scope')
+    expect(frame.reason).toBe('unsupported-shape')
     expect(String(frame.message)).toContain('UNION ALL')
   })
 
-  it('(f) short-circuits: no repair round-trip is triggered by the rejection', async () => {
-    // A second reply is queued precisely to prove it is never consumed.
-    sqlReplies = [SESSION_11_SQL, `SELECT SUM(amount) AS total FROM "Transaction" LIMIT 200`]
+  it('declines a synthetic INTERSECT', async () => {
+    const sql =
+      `SELECT category AS spent_in FROM "Transaction" WHERE strftime('%Y-%m', date) = '2026-05' ` +
+      `INTERSECT ` +
+      `SELECT category AS also_spent_in FROM "Transaction" WHERE strftime('%Y-%m', date) = '2026-06' LIMIT 200`
+    sqlReplies = [sql]
 
-    await ask(SESSION_11_QUESTION)
+    const res = await ask('Which categories did I spend in both May and June?')
 
-    // Exactly one model call: the first generation. No repair, no narration.
-    expect(systemPrompts).toHaveLength(1)
-    expect(sqlReplies).toHaveLength(1)
+    expect(queryCalls).toEqual([])
+    const out = await frames(res)
+    expect(out.map((f) => f.type)).toEqual(['no-answer'])
+    expect(out[0].reason).toBe('unsupported-shape')
+    expect(String(out[0].message)).toContain('INTERSECT')
+    expect(out[0].sql).toBe(sql)
+  })
+
+  it('declines a synthetic EXCEPT', async () => {
+    const sql =
+      `SELECT category AS dropped FROM "Transaction" WHERE strftime('%Y-%m', date) = '2026-05' ` +
+      `EXCEPT ` +
+      `SELECT category AS kept FROM "Transaction" WHERE strftime('%Y-%m', date) = '2026-06' LIMIT 200`
+    sqlReplies = [sql]
+
+    const res = await ask('Which categories did I stop spending in?')
+
+    expect(queryCalls).toEqual([])
+    const out = await frames(res)
+    expect(out.map((f) => f.type)).toEqual(['no-answer'])
+    expect(out[0].reason).toBe('unsupported-shape')
+    expect(String(out[0].message)).toContain('EXCEPT')
+    // Generic phrasing: an EXCEPT refusal must not blame UNION.
+    expect(String(out[0].message)).not.toMatch(/\bUNION\b/i)
+    expect(out[0].sql).toBe(sql)
+  })
+
+  it('(f) short-circuits for all three operators: no repair round-trip is triggered', async () => {
+    const spare = `SELECT SUM(amount) AS total FROM "Transaction" LIMIT 200`
+    const offenders = [
+      SESSION_11_SQL,
+      `SELECT category AS a FROM "Transaction" INTERSECT SELECT category AS b FROM "Transaction" LIMIT 200`,
+      `SELECT category AS a FROM "Transaction" EXCEPT SELECT category AS b FROM "Transaction" LIMIT 200`,
+    ]
+
+    for (const offender of offenders) {
+      queryCalls = []
+      systemPrompts = []
+      // A second reply is queued precisely to prove it is never consumed.
+      sqlReplies = [offender, spare]
+
+      await ask(SESSION_11_QUESTION)
+
+      // Exactly one model call: the first generation. No repair, no narration.
+      expect(systemPrompts, offender).toHaveLength(1)
+      expect(sqlReplies, offender).toEqual([spare])
+      expect(queryCalls, offender).toEqual([])
+    }
   })
 
   it('(d) does not falsely reject a query whose text merely contains "union"', async () => {
@@ -207,7 +260,7 @@ describe('POST /api/chat — compound SELECTs declined (ADR-0011)', () => {
     expect(queryCalls).toEqual([broken])
     const [frame] = await frames(res)
     expect(frame.type).toBe('no-answer')
-    expect(frame.reason).toBe('out-of-scope')
+    expect(frame.reason).toBe('unsupported-shape')
     expect(frame.sql).toBe(regressed)
   })
 
@@ -224,7 +277,22 @@ describe('POST /api/chat — compound SELECTs declined (ADR-0011)', () => {
     expect(out[0]).toMatchObject({ type: 'sql', sql: fixed })
   })
 
-  it('carries the UNION rule into both SQL-generation prompts', async () => {
+  it('does not falsely reject an identifier containing "except" or "intersect"', async () => {
+    const sql =
+      `SELECT SUM(CASE WHEN amount < 0 THEN 1 ELSE 0 END) AS except_flag, ` +
+      `COUNT(*) AS intersect_count FROM "Transaction" ` +
+      `WHERE status IN ('committed','reconciled') LIMIT 200`
+    sqlReplies = [sql]
+
+    const res = await ask('How many debits do I have?')
+
+    expect(queryCalls).toEqual([sql])
+    const out = await frames(res)
+    expect(out[0]).toMatchObject({ type: 'sql', sql })
+    expect(out.some((f) => f.type === 'no-answer')).toBe(false)
+  })
+
+  it('carries the compound-SELECT rule into both SQL-generation prompts', async () => {
     const broken = `SELECT SUM(amount) AS total FROM Transactions LIMIT 200`
     const fixed = `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" LIMIT 200`
     sqlReplies = [broken, fixed]
@@ -232,7 +300,7 @@ describe('POST /api/chat — compound SELECTs declined (ADR-0011)', () => {
 
     await ask('What did I spend this month?')
 
-    expect(systemPrompts[0]).toMatch(/NEVER use UNION or UNION ALL/)
+    expect(systemPrompts[0]).toMatch(/NEVER use UNION, UNION ALL, INTERSECT or EXCEPT/)
     expect(systemPrompts[1]).toBe(systemPrompts[0])
   })
 

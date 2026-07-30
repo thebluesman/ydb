@@ -21,12 +21,13 @@
  * confidently wrong answer, invisible to everything except a human who already
  * knows the numbers.
  *
- * So: **chat-generated SQL may not use `UNION` or `UNION ALL` at all.** A flat
- * ban, not a conditional one. This schema has one fact table, so every
+ * So: **chat-generated SQL may not use a compound SELECT at all** — no `UNION`,
+ * `UNION ALL`, `INTERSECT` or `EXCEPT` (ADR-0011 and its 2026-07-30 addendum). A
+ * flat ban, not a conditional one. This schema has one fact table, so every
  * multi-metric question here is expressible as conditional aggregates in a
  * single row — which is both the clearer query and the one that keeps its
- * labels. `UNION` buys nothing and is precisely the construct that discards
- * them.
+ * labels. A compound SELECT buys nothing here and is precisely the construct
+ * that discards labels.
  *
  * Rejecting outright rather than repairing keeps the failure legible: the repair
  * round-trip exists for SQLite errors, there is no error here, and re-prompting
@@ -36,8 +37,8 @@
  * The check is textual and can over-reject, deliberately (ADR-0011
  * § Consequences). A question whose *text* contains the word "union" is
  * unaffected — this reads generated SQL, never the question — but a legitimate
- * `UNION` need would be declined too. That is an accepted gap: if it ever
- * arises, the fix is a code-computed path, not a carve-out here.
+ * compound-SELECT need would be declined too. That is an accepted gap: if it
+ * ever arises, the fix is a code-computed path, not a carve-out here.
  *
  * Lives here and is called from `app/api/chat/route.ts`, not from
  * `lib/prisma.ts`: the read-only guard stays input-agnostic and single-purpose,
@@ -45,24 +46,33 @@
  */
 
 /**
- * The compound keyword, word-boundary anchored so a substring can't trip it.
+ * All three of SQLite's compound operators, word-boundary anchored so a
+ * substring can't trip them.
  *
- * `\bUNION\b` matches `UNION`, `union`, `Union` and `UNION ALL`'s first word,
- * but not `union_dues`, `unionized` or `reunion` — in each of those the
+ * All three, because the defect is a property of compound SELECTs rather than of
+ * `UNION`: SQLite names the result set after its FIRST branch whichever operator
+ * joined the branches, so `SELECT a AS x … EXCEPT SELECT b AS y …` returns its
+ * rows keyed `x` exactly as `UNION` does. Scoping detection to the one operator
+ * that had misfired in front of a human would have left the same silent,
+ * money-denominated wrong answer reachable by a keyword nobody had happened to
+ * see yet. And nothing is given up by covering all three: the ban is flat
+ * because this schema has one fact table, and `INTERSECT`/`EXCEPT` have no
+ * legitimate use against a single fact table any more than `UNION` does.
+ *
+ * `UNION(?:\s+ALL)?` is deliberately the first alternative, so `UNION ALL`
+ * matches whole rather than being consumed as a bare `UNION` — the refusal names
+ * the operator it saw, and naming it wrong is a worse message than none.
+ *
+ * The boundaries matter as much as the keywords. `\bUNION\b` matches `UNION`,
+ * `union` and `Union` but not `union_dues`, `unionized` or `reunion`; likewise
+ * `except_flag` and `intersection` are left alone. In each of those the
  * neighbouring character is itself a word character, so there is no boundary.
- * This schema has no such identifier today; the precision is there so adding
- * one later can't quietly turn every query into a refusal.
+ * This schema has no such identifier today; the precision is there so adding one
+ * later can't quietly turn every query into a refusal.
  *
- * `ALL` is captured when present purely so the refusal can name what it saw.
- *
- * Scoped to `UNION` only, as ADR-0011 decides. SQLite's other compound
- * operators — `INTERSECT` and `EXCEPT` — share the same first-branch naming rule
- * and would have the same failure mode, but the ADR bans `UNION`/`UNION ALL` and
- * widening a decision record from the implementation ticket is not this file's
- * job. Neither has been observed from the model; if one is, that is an ADR
- * amendment for `@tech-lead`, and this constant is where it lands.
+ * The matched keyword is captured purely so the refusal can name what it saw.
  */
-const COMPOUND_RE = /\b(UNION(?:\s+ALL)?)\b/i
+const COMPOUND_RE = /\b(UNION(?:\s+ALL)?|INTERSECT|EXCEPT)\b/i
 
 /**
  * Single-quoted string literals blanked out, so a category value like
@@ -71,7 +81,7 @@ const COMPOUND_RE = /\b(UNION(?:\s+ALL)?)\b/i
  *
  * If the quoting is unbalanced — an odd number of delimiters, i.e. malformed
  * output from the model — stripping would swallow the whole tail of the
- * statement and could hide a real `UNION` behind a stray apostrophe. In that
+ * statement and could hide a real compound operator behind a stray apostrophe. In that
  * case the caller scans the raw text instead. The safe direction here is to
  * over-reject, never to under-detect.
  */
@@ -95,7 +105,7 @@ function stripStringLiterals(sql: string): { stripped: string; balanced: boolean
 }
 
 export type CompoundSelectViolation = {
-  /** The operator as it appeared, normalised to upper case: `UNION ALL`, `UNION`, … */
+  /** The operator as it appeared, normalised to upper case: `UNION ALL`, `UNION`, `INTERSECT`, `EXCEPT`. */
   keyword: string
 }
 
@@ -126,11 +136,11 @@ export function compoundSelectViolation(sql: string): CompoundSelectViolation | 
  */
 export function compoundSelectMessage(violation: CompoundSelectViolation): string {
   return (
-    `I couldn't build a single clear result for that, so I didn't run anything. The query combined two ` +
-    `separate result sets with ${violation.keyword}, and SQLite names a combined result after its first ` +
-    `branch only — so every row would have come back under the first column's name. Asking for expenses ` +
-    `and income that way returns the income figure labelled as expenses, which is how you get a confident ` +
-    `answer that contradicts itself. Try asking for one figure at a time, or ask for the same period and ` +
-    `I'll put each figure in its own column.`
+    `I couldn't build a single clear result for that, so I didn't run anything. The query joined two ` +
+    `separate SELECTs with ${violation.keyword}, and SQLite names a compound result after its first ` +
+    `branch only — so every row would have come back under the first column's name, whichever figure it ` +
+    `actually held. That is how you get a confident answer that contradicts itself: the second number ` +
+    `arrives wearing the first one's label. Try asking for one figure at a time, or ask for the same ` +
+    `period and I'll put each figure in its own column.`
   )
 }

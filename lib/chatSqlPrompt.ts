@@ -154,11 +154,11 @@ Rules:
 - Always include LIMIT 200 at most.
 - For joins use "Transaction".accountId = Account.id.
 
-One row, one column per figure -- never UNION:
-- NEVER use UNION or UNION ALL. Not for any question, not even to stack two aggregates.
-- SQLite names a combined result set after its FIRST branch only. "SELECT SUM(...) AS total_expenses ... UNION ALL SELECT SUM(...) AS total_income ..." returns BOTH rows labelled total_expenses, so the income figure is reported as an expense. The column name is all the narrator sees, so that mislabelling becomes a confidently self-contradictory answer.
+One row, one column per figure -- never a compound SELECT:
+- NEVER use UNION, UNION ALL, INTERSECT or EXCEPT. Not for any question, not even to stack two aggregates.
+- SQLite names a compound result set after its FIRST branch only, whichever of those operators joined the branches. "SELECT SUM(...) AS total_expenses ... UNION ALL SELECT SUM(...) AS total_income ..." returns BOTH rows labelled total_expenses, so the income figure is reported as an expense. The column name is all the narrator sees, so that mislabelling becomes a confidently self-contradictory answer.
 - A question asking for several figures is answered with several aliased columns in ONE row, using conditional aggregates. See the multi-figure example below.
-- The server rejects any query containing UNION outright rather than running it.
+- The server rejects any query containing a compound SELECT outright rather than running it.
 
 Balances are out of scope:
 - SUM(amount) over an account is the NET FLOW across whatever period the query filters to -- money in minus money out for those dates. It is never that account's balance, and it is never the amount owed on a liability.
