@@ -32,10 +32,15 @@ them with the sentence of context future readers need to reconstruct provenance.
     real; journaling it as if it were live on `main` creates a dangling reference. This has happened
     before (2026-07-30): a coordinator's report that a doc-only change had "already landed on main"
     turned out to be wrong, because the agent that made it never checked its own branch.
-11. **Verify your own branch before committing.** Run `git branch --show-current` right before you
-    commit and push. Your commits are supposed to land on `main` — if the working directory is
-    actually checked out on someone else's feature branch, committing there instead of `main` will
-    look successful but silently break the promise this workflow depends on.
+11. **Verify your own branch before committing, and verify the push actually happened.** Run
+    `git branch --show-current` right before you commit. Your commits are supposed to land on `main` —
+    if the working directory is actually checked out on someone else's feature branch, committing there
+    instead of `main` will look successful but silently break the promise this workflow depends on.
+    After `git push origin main`, check its output for a real fast-forward summary, not just the
+    absence of an error — a commit that's local-only on `main` looks identical to a pushed one in
+    `git log`, but rule 10's verification (checking `origin/main`) is exactly what will catch it if you
+    skip this. This has happened twice (2026-07-30): once as a wrong-branch commit, once as a
+    right-branch-but-never-pushed commit.
 
 ## Notion-sourced entries
 
