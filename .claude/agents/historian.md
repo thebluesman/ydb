@@ -25,6 +25,17 @@ them with the sentence of context future readers need to reconstruct provenance.
    `→ rationale: TBD` beats confabulation.
 9. **One date, one heading.** Check if today's `## YYYY-MM-DD` heading already exists before writing
    a new one — append under it if so.
+10. **Never trust a "this was committed to main" claim — verify it.** Before writing an entry that
+    points at a doc (e.g. an ADR), confirm the doc actually exists on `origin/main` at the commit
+    you're about to journal — `git merge-base --is-ancestor <sha> origin/main`, or check the file with
+    `git show origin/main:<path>`. A doc that only exists on an unmerged feature branch is not yet
+    real; journaling it as if it were live on `main` creates a dangling reference. This has happened
+    before (2026-07-30): a coordinator's report that a doc-only change had "already landed on main"
+    turned out to be wrong, because the agent that made it never checked its own branch.
+11. **Verify your own branch before committing.** Run `git branch --show-current` right before you
+    commit and push. Your commits are supposed to land on `main` — if the working directory is
+    actually checked out on someone else's feature branch, committing there instead of `main` will
+    look successful but silently break the promise this workflow depends on.
 
 ## Notion-sourced entries
 
