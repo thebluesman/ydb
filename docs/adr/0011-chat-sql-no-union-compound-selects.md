@@ -67,3 +67,39 @@ read-only guard stays input-agnostic and single-purpose; this is a scope check, 
 
 **Implementation is a separate ticket for `@backend-engineer`.** `@qa` should assert the session 11
 question no longer yields two identically-named columns, using the persisted query as the fixture.
+
+## Addendum (2026-07-30): the ban covers all three compound operators
+
+Reviewing PR #31 before merge, `@backend-engineer` pointed out that this ADR's text names `UNION` and
+`UNION ALL`, and the implementation scoped detection to those two accordingly — leaving SQLite's other
+two compound operators, `INTERSECT` and `EXCEPT`, undetected. They have the identical defect. The
+first-branch naming rule is a property of compound SELECTs in SQLite, not of `UNION`: `SELECT a AS x …
+EXCEPT SELECT b AS y …` returns its rows keyed `x`, exactly as `UNION` does. The failure this ADR
+exists to prevent is therefore still reachable, by a keyword nobody has yet seen the model produce.
+
+**Decided: widen the ban to all three. Chat-generated SQL may not use `UNION`, `UNION ALL`,
+`INTERSECT` or `EXCEPT`.** The decision is unchanged; only its stated extent was too narrow, because it
+was written from the one operator that had misfired in front of a human rather than from the SQLite
+rule underneath it.
+
+Closing this pre-emptively rather than waiting for a live sighting is the deliberate call, and it is a
+narrower rule than it looks. Nothing new is being judged: the ban is already flat, the justification
+already rests on the schema having one fact table, and neither `INTERSECT` nor `EXCEPT` has a
+legitimate use against a single fact table any more than `UNION` does — so the over-rejection risk this
+ADR accepted does not grow. What changes is three keywords in one regex.
+
+The general discipline of reacting to confirmed failures over speculated ones still holds, and this is
+not a licence to pre-empt hypotheticals. It is set aside here on two specifics. The failure class is
+silent and money-denominated: it produces a confident, well-formed, wrong figure that only a reader who
+already knows the number can catch, so "wait for it live" means "wait until it has already been
+believed". And the mechanism is a known, documented SQLite rule rather than a guess about model
+behaviour — the uncertainty is only over *when* the model reaches for the keyword, never over what
+happens if it does. PR #29 and PR #30 each shipped an ADR whose scope a live session then widened; a
+third instance, when the widening was identified in review and costs a regex change, would be a choice.
+
+`@backend-engineer` applies this to the same branch before merge, in `COMPOUND_RE` in
+`lib/chatCompoundSelect.ts` — the constant already documents itself as the place a widening lands. The
+refusal message and the `SQL_SYSTEM_PROMPT` rule name the operator they saw, so both need to speak of
+compound SELECTs generally rather than of `UNION` specifically. `@qa`: the session 11 fixture stays the
+regression case, plus one synthetic `EXCEPT` and one `INTERSECT` query asserting the same refusal, and
+an identifier such as `except_flag` or a literal containing the word asserting no false positive.

@@ -65,3 +65,38 @@ a regression.
 
 **Some questions will move from wrong to unanswered rather than to answered.** This ADR buys trust, not
 capability. Capability is ADR-0013's Phase C.
+
+## Addendum (2026-07-30): what separates `out-of-scope` from `unsupported-shape`
+
+The reason set has held at four, as intended, but which of the two decline reasons a given guard should
+use has been re-argued at each ticket that added one, and PR #31 surfaced a genuine mismatch: the
+`UNION` rejection shipped as `out-of-scope`, while both this ADR's Decision above and the doc comment on
+the enum in `lib/chatNonAnswer.ts` name it as `unsupported-shape`. The set needs a discriminator, not a
+per-ticket precedent.
+
+**The discriminator is what failed, the question or the artifact.**
+
+- **`out-of-scope`** — the *question* cannot be honestly answered from this ledger. Balance, net worth
+  and amount-outstanding (ADR-0009, ADR-0015); a category the ledger does not have (ADR-0008). No
+  rewrite of the SQL would help, because the ledger does not hold the answer or policy forbids it. The
+  user's move is to ask something else.
+- **`unsupported-shape`** — the question is in scope and answerable, and the *generated query* is not
+  something we will stand behind. A non-SELECT; a compound SELECT whose labels SQLite collapses
+  (ADR-0011); ADR-0013's verifier returning a non-`ok` verdict. The user's move is to ask the same thing
+  differently, and the headline "Result not trustworthy" already says so.
+
+So ADR-0011's rejection is `unsupported-shape`, alongside the non-SELECT check it sits next to — the two
+are the same failure mode at different severities, both "the pipeline produced a query, and the query is
+not answerable-with". "Expenses versus income this year" is not an out-of-scope question; it is a
+perfectly ordinary one that the model expressed in a shape that discards a column name.
+
+ADR-0010's alias check, which shipped as `out-of-scope` and which ADR-0015 has since demoted to a second
+net, stays as it is. Under this discriminator it is correctly `out-of-scope` — an alias asserting
+`balance` reveals a balance question, and the question is what is declined — and the Decision above
+listing it under `unsupported-shape` was the imprecision that started the drift. Not worth a behaviour
+change to a shipped path either way.
+
+No new reason, no wire-format change, no client change. `@backend-engineer`: switch the ADR-0011 frames
+in `app/api/chat/route.ts` (both the first-pass and repair-pass call sites) to `unsupported-shape`, and
+restate the enum's doc comments in `lib/chatNonAnswer.ts` in terms of question-versus-artifact rather
+than by listing ADRs, so the next guard has a rule to apply instead of a precedent to match.

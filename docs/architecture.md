@@ -100,9 +100,10 @@ input-agnostic and single-purpose:
   over a liability account is net flow, not `computeBalance`'s `openingBalance − Σ amount`. Balance and
   net-worth questions are declined until a `computeBalance`-backed path exists, enforced by rejecting
   both `openingBalance` references and balance-claiming result aliases.
-- **A `UNION` collapsing two aggregate labels into one** (ADR-0011) — SQLite names a compound result
-  set after its first branch, so an income sum reached narration labeled as expenses. `UNION` is
-  rejected; multi-metric answers use multiple aliased columns in one row.
+- **A compound SELECT collapsing two aggregate labels into one** (ADR-0011) — SQLite names a compound
+  result set after its first branch, so an income sum reached narration labeled as expenses. `UNION`,
+  `UNION ALL`, `INTERSECT` and `EXCEPT` are all rejected (ADR-0011 addendum); multi-metric answers use
+  multiple aliased columns in one row.
 
 The last two share a root cause worth stating plainly: narration receives `JSON.stringify(rows)` and
 nothing else, so the column alias — written by the model at inference time — is the only thing carrying
