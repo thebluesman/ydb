@@ -119,7 +119,9 @@ describe('POST /api/chat — balance semantics out of scope (ADR-0010)', () => {
   it('(a) declines a query referencing Account.openingBalance', async () => {
     sqlReplies = [`SELECT name, openingBalance / 100.0 AS opening FROM Account LIMIT 200`]
 
-    const res = await ask('What is my net worth?')
+    // Question deliberately free of stock nouns: ADR-0015 now declines "what is
+    // my net worth" before generation, and this case is about the SQL check.
+    const res = await ask('How much is on each of my accounts?')
 
     expect(queryCalls).toEqual([])
     const [frame] = await frames(res)
@@ -173,7 +175,9 @@ describe('POST /api/chat — balance semantics out of scope (ADR-0010)', () => {
     sqlReplies = [broken, regressed]
     queryResults = [() => { throw new Error('no such table: Transactions') }]
 
-    const res = await ask('How much is left on my card?')
+    // Same reason as (a): "how much is left on" is ADR-0015 vocabulary, and this
+    // case has to reach the repair round-trip to test anything.
+    const res = await ask('How much did I put on my card this month?')
 
     // Only the failed first attempt reached the DB; the repair was declined.
     expect(queryCalls).toEqual([broken])
@@ -206,5 +210,93 @@ describe('POST /api/chat — balance semantics out of scope (ADR-0010)', () => {
 
     expect(systemPrompts[0]).toMatch(/NET FLOW/)
     expect(systemPrompts[1]).toBe(systemPrompts[0])
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0015 supersedes ADR-0010's placement: the decline happens on the question,
+// before any SQL is generated. The assertion that matters in every case here is
+// `systemPrompts` staying empty — no Ollama call on the SQL path at all. A
+// response that merely "looks right" would still be a pass for the old
+// mechanism.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('POST /api/chat — balance intent declined before generation (ADR-0015)', () => {
+  it("declines Shyam's live session question and never generates SQL", async () => {
+    // The whole reason PR #30 didn't merge: this question produced
+    // `SUM(amount) AS net`, an alias no blocklist would hold, and narration
+    // answered "The balance on your car loan is AED 7034.04".
+    sqlReplies = [`SELECT SUM(amount) / 100.0 AS net FROM "Transaction" LIMIT 200`]
+
+    const res = await ask("What's the balance on my car loan?")
+
+    expect(res.status).toBe(200)
+    // Nothing was asked of the model, on either phase.
+    expect(systemPrompts).toEqual([])
+    expect(queryCalls).toEqual([])
+
+    const out = await frames(res)
+    expect(out).toHaveLength(1)
+    expect(out[0].type).toBe('no-answer')
+    expect(out[0].reason).toBe('out-of-scope')
+    expect(String(out[0].message)).toMatch(/net flow/i)
+    expect(String(out[0].message)).toMatch(/dashboard/i)
+    // No SQL was generated, so the frame carries none (contrast the ADR-0010
+    // cases above, which show the query they refused).
+    expect(out[0]).not.toHaveProperty('sql')
+  })
+
+  it.each([
+    'What is my net worth?',
+    'What do I owe on the car?',
+    'What is my outstanding balance right now?',
+    'How much is left on my loan?',
+    'How much debt do I have?',
+  ])('declines %j with no model call', async (question) => {
+    const res = await ask(question)
+
+    expect(systemPrompts).toEqual([])
+    expect(queryCalls).toEqual([])
+    const [frame] = await frames(res)
+    expect(frame.type).toBe('no-answer')
+    expect(frame.reason).toBe('out-of-scope')
+  })
+
+  it('lets the pay-off flow question through to SQL generation', async () => {
+    // ADR-0015's named trap: a legitimate flow question containing "pay off".
+    const sql =
+      `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" ` +
+      `WHERE category = '🏠 Rent' AND date >= date('now','-1 month') LIMIT 200`
+    sqlReplies = [sql]
+
+    const res = await ask('how much did I pay off my car loan last month')
+
+    // Generation happened, the query ran, and the turn narrated normally.
+    expect(systemPrompts).toHaveLength(2)
+    expect(queryCalls).toEqual([sql])
+    const out = await frames(res)
+    expect(out[0]).toMatchObject({ type: 'sql', sql })
+    expect(out.some((f) => f.type === 'no-answer')).toBe(false)
+  })
+
+  it('checks the current question only — a prior balance turn does not poison it', async () => {
+    const sql = `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" LIMIT 200`
+    sqlReplies = [sql]
+
+    const res = await POST(new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: 'How much did I spend on rent last month?',
+        history: [
+          { role: 'user', text: "What's the balance on my car loan?" },
+          { role: 'assistant', text: 'I can only answer flow questions.' },
+        ],
+      }),
+    }))
+
+    expect(queryCalls).toEqual([sql])
+    const out = await frames(res)
+    expect(out[0]).toMatchObject({ type: 'sql', sql })
   })
 })

@@ -132,6 +132,24 @@ export function balanceScopeViolation(sql: string): BalanceScopeViolation | null
 }
 
 /**
+ * Why the figure can't be computed here, and where the real one lives. Shared
+ * verbatim with `balanceIntentMessage` (ADR-0015): the scope decision is one
+ * decision and should read identically whichever net catches it. Only the detail
+ * sentence differs between the two — this file names a SQL alias or column,
+ * ADR-0015's names the question wording.
+ */
+export const BALANCE_SCOPE_PARAGRAPH =
+  `Account balances, net worth and amounts outstanding are out of scope for chat: they can't be ` +
+  `computed in SQL here. A balance is an account's opening balance combined with every transaction ` +
+  `over its whole life, with the sign rule for its account type — not something a filtered query ` +
+  `adds up. The dashboard and the accounts page show the real figures.`
+
+/** What chat *can* answer instead. Shared with `balanceIntentMessage` for the same reason. */
+export const BALANCE_SCOPE_ALTERNATIVE =
+  `I can still answer this from transactions: spend or income over a period, by category, by account, ` +
+  `or per month. Ask for the flow and read the balance off the dashboard.`
+
+/**
  * The refusal text.
  *
  * ADR-0014's standard: say what was declined, why the number would have been
@@ -139,12 +157,6 @@ export function balanceScopeViolation(sql: string): BalanceScopeViolation | null
  * answer; "I can't compute balances — the dashboard has them" is.
  */
 export function balanceScopeMessage(violation: BalanceScopeViolation): string {
-  const scope =
-    `Account balances, net worth and amounts outstanding are out of scope for chat: they can't be ` +
-    `computed in SQL here. A balance is an account's opening balance combined with every transaction ` +
-    `over its whole life, with the sign rule for its account type — not something a filtered query ` +
-    `adds up. The dashboard and the accounts page show the real figures.`
-
   const detail =
     violation.kind === 'opening-balance'
       ? `The query reached for Account.openingBalance, so I didn't run it.`
@@ -153,9 +165,5 @@ export function balanceScopeMessage(violation: BalanceScopeViolation): string {
         `outflow for those dates — and narrating that as a balance is exactly the wrong-number failure ` +
         `this check exists to stop. So I didn't run it.`
 
-  const alternative =
-    `I can still answer this from transactions: spend or income over a period, by category, by account, ` +
-    `or per month. Ask for the flow and read the balance off the dashboard.`
-
-  return `${detail} ${scope} ${alternative}`
+  return `${detail} ${BALANCE_SCOPE_PARAGRAPH} ${BALANCE_SCOPE_ALTERNATIVE}`
 }

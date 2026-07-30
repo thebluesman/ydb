@@ -21,6 +21,7 @@ import {
   unknownCategoryLiterals,
   unknownCategoryMessage,
 } from '@/lib/chatCategoryVocabulary'
+import { balanceIntentMatch, balanceIntentMessage } from '@/lib/chatBalanceIntent'
 import { balanceScopeMessage, balanceScopeViolation } from '@/lib/chatBalanceScope'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
@@ -229,6 +230,23 @@ export async function POST(request: Request) {
         .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
         .join('\n') + `\nUser: ${question}`
     : question
+
+  // ADR-0015. Balance scope is enforced on the question, before a token is
+  // spent. ADR-0010's alias check below was evaded without anyone trying to:
+  // "What's the balance on my car loan?" produced a bare `SUM(amount) AS net`,
+  // and narration answered "The balance on your car loan is AED 7034.04" —
+  // because narration frames its answer around the question, not around the
+  // column name. The question is the cause, so the question is what gets
+  // checked; the alias and `openingBalance` checks stay on as a second net for
+  // balance arithmetic on a question that named no stock noun.
+  //
+  // Current turn only, never `trimmedHistory`: a balance question earlier in
+  // the conversation must not poison a later, legitimate flow question. No
+  // `sql` on the frame — nothing was generated, so there is no work to show.
+  const balanceIntent = balanceIntentMatch(question)
+  if (balanceIntent) {
+    return nonAnswerResponse(nonAnswerFrame('out-of-scope', balanceIntentMessage(balanceIntent)))
+  }
 
   // Phase 1: generate SQL (non-streaming). temperature 0 — SQL generation wants
   // determinism, not creativity.
