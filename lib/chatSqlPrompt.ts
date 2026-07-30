@@ -154,6 +154,12 @@ Rules:
 - Always include LIMIT 200 at most.
 - For joins use "Transaction".accountId = Account.id.
 
+One row, one column per figure -- never a compound SELECT:
+- NEVER use UNION, UNION ALL, INTERSECT or EXCEPT. Not for any question, not even to stack two aggregates.
+- SQLite names a compound result set after its FIRST branch only, whichever of those operators joined the branches. "SELECT SUM(...) AS total_expenses ... UNION ALL SELECT SUM(...) AS total_income ..." returns BOTH rows labelled total_expenses, so the income figure is reported as an expense. The column name is all the narrator sees, so that mislabelling becomes a confidently self-contradictory answer.
+- A question asking for several figures is answered with several aliased columns in ONE row, using conditional aggregates. See the multi-figure example below.
+- The server rejects any query containing a compound SELECT outright rather than running it.
+
 Balances are out of scope:
 - SUM(amount) over an account is the NET FLOW across whatever period the query filters to -- money in minus money out for those dates. It is never that account's balance, and it is never the amount owed on a liability.
 - Account balances, net worth and amounts outstanding are NOT derivable in SQL here. A balance is the account's opening balance combined with every transaction over its whole life under the sign rule for its account type; that arithmetic lives in application code, not in this query. If the question asks for a balance, net worth, how much is owed, how much is left, or anything that needs one, do NOT approximate it with a sum -- answer the flow question you can answer, or return the closest transaction-level aggregate.
@@ -180,5 +186,10 @@ Q: What are my top 5 spending categories this year?
 A: SELECT category, SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND parentTransactionId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total ASC LIMIT 5
 
 Q: What is my total income this month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')${noMatchExample}`
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')
+
+Q: How much did I earn and how much did I spend last month?
+A: SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses, SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income FROM "Transaction" WHERE parentTransactionId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
+-- Two figures, two aliased columns, ONE row. Do NOT write this as two SELECTs joined by UNION ALL:
+-- the second alias would be discarded and both numbers would come back labelled total_expenses.${noMatchExample}`
 }

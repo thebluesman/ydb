@@ -23,6 +23,7 @@ import {
 } from '@/lib/chatCategoryVocabulary'
 import { balanceIntentMatch, balanceIntentMessage } from '@/lib/chatBalanceIntent'
 import { balanceScopeMessage, balanceScopeViolation } from '@/lib/chatBalanceScope'
+import { compoundSelectMessage, compoundSelectViolation } from '@/lib/chatCompoundSelect'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -313,6 +314,27 @@ export async function POST(request: Request) {
     return nonAnswerResponse(nonAnswerFrame('out-of-scope', balanceScopeMessage(scopeFirst), sql))
   }
 
+  // ADR-0011. Compound SELECTs — `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT` —
+  // are banned outright: SQLite names a compound result set after its first
+  // branch only, so session 11's `total_expenses UNION ALL total_income` came
+  // back as two rows both keyed `total_expenses` and narration reported the
+  // income figure as an expense. The duplicate key is gone by the time this
+  // route holds row objects, so there is nothing to recover downstream — the
+  // only place to stop it is here, before execution.
+  //
+  // Short-circuits for the same reason as the alias check above: this is valid
+  // SQL, there is no SQLite error, and the repair round-trip exists for errors.
+  // Re-prompting on a query that runs fine just re-rolls the dice.
+  //
+  // `unsupported-shape`, not `out-of-scope`: the question is a perfectly
+  // ordinary one, and what failed is the query we generated for it. ADR-0014's
+  // addendum draws that line — the question failed, or the artifact did. This
+  // sits with the non-SELECT check above, the same failure mode one severity up.
+  const compoundFirst = compoundSelectViolation(sql)
+  if (compoundFirst) {
+    return nonAnswerResponse(nonAnswerFrame('unsupported-shape', compoundSelectMessage(compoundFirst), sql))
+  }
+
   // Execute the SQL on a read-only connection to prevent mutations. On a SQLite
   // error, give the model exactly ONE repair round-trip (feed it the failed SQL
   // and the error) before surfacing the failure — models frequently mis-name a
@@ -369,6 +391,18 @@ export async function POST(request: Request) {
       return nonAnswerResponse(nonAnswerFrame(
         'out-of-scope',
         balanceScopeMessage(scopeRepaired),
+        repaired,
+      ))
+    }
+
+    // And the compound check (ADR-0011), independently of the first pass. A
+    // model fixing a syntax error is free to restructure the statement on its
+    // way past, and stacking branches is a shape it reaches for unprompted.
+    const compoundRepaired = compoundSelectViolation(repaired)
+    if (compoundRepaired) {
+      return nonAnswerResponse(nonAnswerFrame(
+        'unsupported-shape',
+        compoundSelectMessage(compoundRepaired),
         repaired,
       ))
     }
