@@ -50,7 +50,8 @@ and Shyam explicitly declares the trigger met (his call, not a timer).
 | Chat target architecture | Bounded agentic loop; `run_sql` via `executeReadonlyQuery` is the only execution tool | `docs/adr/0012-agentic-chat-loop-target-architecture.md` |
 | Chat rollout sequencing | Verification pass (A) → single-tool loop (B) → code-computed tools (C); only A is unblocked | `docs/adr/0013-verification-pass-before-tool-calling-loop.md` |
 | Chat non-answers | First-class `no-answer` stream type with a reason, never an HTTP error or a confident zero | `docs/adr/0014-non-answer-is-a-first-class-chat-response.md` |
-| Chat SQL scope | No balances or net worth (declined, not approximated); no `UNION` | `docs/adr/0010-balance-semantics-enforced-on-result-label.md`, `docs/adr/0011-chat-sql-no-union-compound-selects.md` |
+| Chat SQL scope | No balances or net worth (declined, not approximated); no `UNION` | `docs/adr/0015-balance-scope-enforced-on-the-question.md`, `docs/adr/0011-chat-sql-no-union-compound-selects.md` |
+| Balance-scope enforcement point | The user's question, before SQL is generated; ADR-0010's alias check kept as a second net | `docs/adr/0015-balance-scope-enforced-on-the-question.md` |
 | Chat SQL category filters | Grounded in stored `Transaction.category` values; unmatched category fails loudly | `docs/adr/0008-chat-sql-category-vocabulary-grounding.md` |
 | Chat SQL and account balances | `openingBalance` off-limits to generated SQL; balance/net-worth questions declined, not guessed | `docs/adr/0009-balance-composition-out-of-scope-for-chat-sql.md` |
 
