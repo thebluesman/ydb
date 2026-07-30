@@ -61,7 +61,13 @@ describe('transfer-exclusion rule in the SQL prompt', () => {
     const answerLines = prompt.split('\n').filter((l) => l.startsWith('A: '))
     expect(answerLines).not.toHaveLength(0)
 
-    const signSplitLines = answerLines.filter((l) => /amount\s*[<>]\s*0/.test(l))
+    // The transfer-volume example is the mirror case: it splits on the sign of
+    // amount *within* transactionType = 'transfer' on purpose, because the
+    // positive legs are the figure being asked for. It is guarded by its own
+    // test file, so exclude it rather than demanding a guard that would empty it.
+    const signSplitLines = answerLines
+      .filter((l) => /amount\s*[<>]\s*0/.test(l))
+      .filter((l) => !/transactionType\s*=\s*'transfer'/.test(l))
     expect(signSplitLines).not.toHaveLength(0)
 
     for (const line of signSplitLines) {

@@ -149,6 +149,7 @@ Rules:
 - Transaction.transactionType: 'credit' | 'debit' | 'transfer'.
 - Amount sign: negative = debit/out, positive = credit/in. Use transactionType for filtering by type.
 - Transfers are NEITHER income NOR spending: a transfer moves money between the user's own accounts and is stored as two rows, one negative leg and one positive leg. A bare sign split therefore counts the outgoing leg as an expense AND the incoming leg as income, inflating both totals by the same amount even though the pair nets to zero. Any income, expense, spending, earnings or net-flow aggregate MUST exclude them: AND transactionType != 'transfer' (equivalently AND transactionType IN ('credit','debit')). This applies whenever the query filters or branches on the sign of amount.
+- The mirror case: when the question is specifically ABOUT transfers -- "how much did I move between my accounts", "how much did I transfer" -- the answer is the VOLUME moved, and a bare SUM(amount) over transactionType = 'transfer' rows CANNOT compute it. The two legs of a transfer are equal and opposite, so they cancel: that sum always evaluates to (approximately) zero no matter how much money actually moved. Zero there is an artefact of how a transfer is stored, not a fact about the ledger. Sum the INFLOW legs only instead: SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0. Each transfer contributes exactly one positive leg whose size is the amount transferred, so that total is the volume moved, counted once. (SUM(ABS(amount)) / 2 is arithmetically the same thing; prefer the CASE form.)
 - status values: 'review', 'committed', 'reconciled'. For financial queries prefer WHERE status IN ('committed','reconciled') unless the user asks otherwise.
 - Split legs: when parentTransactionId IS NOT NULL the row is a leg; the parent is a placeholder that sums the legs. When aggregating spend, exclude parents (WHERE parentTransactionId IS NULL) OR include the legs instead, NOT both.
 - Matched reimbursement pairs (reimbursementTxId IS NOT NULL on the expense side) net to zero. To compute true net spend, exclude the expense side AND the credit that appears as a reimbursement target. Example guard on the expense side: AND reimbursementTxId IS NULL. To also skip the paired credit: AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id).
@@ -197,5 +198,12 @@ A: SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_exp
 -- income and once as an expense, and both figures come back too high by the same amount.
 
 Q: What's my total income and total expenses this year?
-A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')${noMatchExample}`
+A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')
+
+Q: How much did I move between my accounts this year?
+A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total FROM "Transaction" WHERE transactionType = 'transfer' AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')
+-- This question wants the transfer total, so here transfers are the subject rather than something to
+-- exclude -- but do NOT write it as SUM(amount) over transactionType = 'transfer'. Every transfer is a
+-- matched pair of equal and opposite legs, so that sum cancels to (approximately) zero for any ledger,
+-- however much was moved. Summing only the positive legs counts each transfer exactly once.${noMatchExample}`
 }
