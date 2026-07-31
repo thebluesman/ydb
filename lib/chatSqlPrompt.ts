@@ -176,7 +176,7 @@ Date rules:
 
 Examples:
 Q: How many transactions do I have?
-A: SELECT COUNT(*) AS total FROM "Transaction" WHERE status IN ('committed','reconciled')
+A: SELECT COUNT(*) AS total FROM "Transaction" WHERE parentTransactionId IS NULL AND status IN ('committed','reconciled')
 
 Q: How much did I spend on ${groceries.word} last month?
 A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${groceries.literal.replace(/'/g, "''")}' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
@@ -185,20 +185,26 @@ Q: What was spent on ${travel.word} in June?
 A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${travel.literal.replace(/'/g, "''")}' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '${june}' AND status IN ('committed','reconciled')
 
 Q: What are my top 5 spending categories this year?
-A: SELECT category, SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total ASC LIMIT 5
+A: SELECT category, SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total ASC LIMIT 5
 
 Q: What is my total income this month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND transactionType != 'transfer' AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')
 
 Q: How much did I earn and how much did I spend last month?
-A: SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses, SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
+A: SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses, SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id) AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
 -- Two figures, two aliased columns, ONE row. Do NOT write this as two SELECTs joined by UNION ALL:
 -- the second alias would be discarded and both numbers would come back labelled total_expenses.
 -- The transactionType guard is not optional: without it every transfer leg is counted, once as
 -- income and once as an expense, and both figures come back too high by the same amount.
+-- This example carries BOTH halves of the reimbursement guard, because it reports an expense figure
+-- and an income figure together. reimbursementTxId IS NULL drops the expense that was paid back;
+-- the NOT EXISTS drops the credit that paid it back, which is not income. Dropping only one half
+-- leaves the pair half-counted, so net spend looks too low or income looks too high. Use both halves
+-- only when the question is about true net spend or real income -- a question ABOUT reimbursements
+-- ("how much was I paid back") wants exactly the rows these two clauses remove, so it uses neither.
 
 Q: What's my total income and total expenses this year?
-A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')
+A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')
 
 Q: How much did I move between my accounts this year?
 A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total FROM "Transaction" WHERE transactionType = 'transfer' AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')
