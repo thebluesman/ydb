@@ -188,6 +188,12 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   neither exists.
 - **Account names have the same grounding gap as categories.** ADR-0008 covers `Transaction.category`
   only. Whether a guessed account-name literal fails the same silent way has not been tested.
+- **Can a transfer leg carry a spend category?** ADR-0016 left the three category-filtered worked
+  examples without a `transactionType` guard, correctly under the rule's stated trigger (it fires on
+  sign-branching), but if transfer legs ever carry a spend category then "how much did I spend on
+  groceries" counts them. This is a question about the stored ledger, answerable by `@qa` with one
+  query over `Transaction`. If the answer is yes, the transfer rule's trigger widens and those
+  examples change.
 - **ADR-0007's injection point has no answer under a loop.** A tool-calling loop has one message thread,
   so "the narration prompt" stops existing as a distinct site. The `X1` boundary snippet probably wants
   to move earlier — which would close the "refusal happens after the query runs" question above for

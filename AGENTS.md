@@ -54,6 +54,7 @@ and Shyam explicitly declares the trigger met (his call, not a timer).
 | Balance-scope enforcement point | The user's question, before SQL is generated; ADR-0010's alias check kept as a second net | `docs/adr/0015-balance-scope-enforced-on-the-question.md` |
 | Chat SQL category filters | Grounded in stored `Transaction.category` values; unmatched category fails loudly | `docs/adr/0008-chat-sql-category-vocabulary-grounding.md` |
 | Chat SQL and account balances | `openingBalance` off-limits to generated SQL; balance/net-worth questions declined, not guessed | `docs/adr/0009-balance-composition-out-of-scope-for-chat-sql.md` |
+| Chat SQL guard enforcement | Route-level detector only where a guard's applicability is decidable from the SQL alone (transfer guards); split-leg and reimbursement stay prompt-only, held consistent by a guard-matrix test over the worked examples | `docs/adr/0016-guard-enforcement-split-on-sql-decidability.md` |
 
 ## Team (subagents)
 
