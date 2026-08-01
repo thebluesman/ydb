@@ -213,17 +213,30 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   grounding gap this entry used to describe, but its `Account`-qualifier resolution is a regex over
   `FROM`/`JOIN` and deliberately fails open: a CTE or an unusual join shape is silently not checked.
   Nobody has measured which shapes the model actually produces, so the size of the remaining hole is
-  unknown. The eval harness above is what would answer it.
+  unknown. The eval harness above is what would answer it. **Narrowed 2026-08-01:** all 5 persisted
+  `ChatMessage.sql` rows — the entire live sample — reference `Account` zero times, so the fail-open
+  path has never fired, and the surface question is genuinely unmeasured rather than known-large. A
+  contributing cause was found and is separately fixable: `lib/chatSqlPrompt.ts` prose-instructs the
+  join rule (`"Transaction".accountId = Account.id`) with no worked example demonstrating it, while
+  categories get three. Few-shot shape beats prose (ADR-0008), so the model has no shape to imitate for
+  the one construct this guard reads. Adding an example whose join shape `accountNameScope`'s
+  `FROM`/`JOIN` resolver actually recognises is a `@backend-engineer` prompt ticket — no ADR, it
+  implements ADR-0018 rather than changing it. The harness question stays open regardless.
 - **ADR-0016's sign-branch detector is satisfied by a `transactionType` comparison anywhere in the
   statement**, including one inside a subquery that does not govern the sign branch. Under-detects
   rather than over-rejects, needs a real parser to close, and has not been seen live (ADR-0016
-  addendum). Left open rather than fixed.
-- **Can a transfer leg carry a spend category?** ADR-0016 left the three category-filtered worked
-  examples without a `transactionType` guard, correctly under the rule's stated trigger (it fires on
-  sign-branching), but if transfer legs ever carry a spend category then "how much did I spend on
-  groceries" counts them. This is a question about the stored ledger, answerable by `@qa` with one
-  query over `Transaction`. If the answer is yes, the transfer rule's trigger widens and those
-  examples change.
+  addendum). Left open rather than fixed. **Re-checked 2026-08-01 and unchanged:** none of the 5
+  persisted `ChatMessage.sql` rows contains a subquery, CTE or join, so the blind spot is still real by
+  code inspection and still has zero live occurrences. Parked status confirmed; no action.
+- ~~**Can a transfer leg carry a spend category?**~~ **Answered yes, 2026-08-01 — see ADR-0019.**
+  Measured against `prisma/dev.db`: all 44 transfer rows carry a nonempty category, 5 of them a real
+  spend category (`🚗 Auto loans`, `💰 Personal loans`), on the outgoing leg only. The transfer rule's
+  trigger widens from "branches on the sign of amount" to any spending/income/net-flow aggregate,
+  category-filtered ones included. It stays prompt-only: the mirror case ("how much did I pay on my car
+  loan") wants exactly those rows, which is the question-dependence ADR-0016 split on. The prompt edit
+  and the guard-matrix widening are a `@backend-engineer` ticket. Residual left open by ADR-0019: the
+  set of categories the pipeline assigns to transfers is not fixed and not this repo's to control, so
+  the mirror case's fragility persists until a code-computed path (ADR-0013 Phase C) exists.
 - **ADR-0007's injection point has no answer under a loop.** A tool-calling loop has one message thread,
   so "the narration prompt" stops existing as a distinct site. The `X1` boundary snippet probably wants
   to move earlier — which would close the "refusal happens after the query runs" question above for
