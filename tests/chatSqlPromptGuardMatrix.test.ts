@@ -44,6 +44,13 @@ const NOW = new Date('2026-07-31T09:00:00.000Z')
 // hide in that branch as easily as in the static ones.
 const CATEGORIES = ['🛒 Groceries', '✈️ Travel', '🚗 Auto loans', '🍽️ Dining']
 
+// Likewise for accounts (ADR-0018): the Account-join example takes its filter
+// literal from this list at request time, so rendering with a vocabulary and
+// without it are two different strings and an unguarded example could hide in
+// either. Shape resolution for that example is asserted separately, in
+// tests/chatSqlPromptAccountJoinExample.test.ts.
+const ACCOUNTS = ['ADCB Credit Card', 'ADCB, Current', 'Emirates NBD Savings']
+
 type Example = { question: string; sql: string }
 
 /**
@@ -90,6 +97,10 @@ describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', 
   const prompts = [
     { label: 'no stored vocabulary', prompt: buildSqlSystemPrompt(NOW) },
     { label: 'with stored vocabulary', prompt: buildSqlSystemPrompt(NOW, CATEGORIES) },
+    {
+      label: 'with stored category and account vocabulary',
+      prompt: buildSqlSystemPrompt(NOW, CATEGORIES, ACCOUNTS),
+    },
   ]
 
   for (const { label, prompt } of prompts) {

@@ -85,6 +85,33 @@ function exampleCategory(categories: string[], preferred: string, exclude?: stri
 }
 
 /**
+ * An account literal for the `Account`-join worked example, drawn from the real
+ * stored vocabulary.
+ *
+ * Same device as `exampleCategory` and for the same reason (ADR-0008, applied to
+ * the second column by ADR-0018): an example that hardcodes an account name the
+ * ledger does not have demonstrates the exact guess the closed-list rule exists
+ * to stop, and few-shot shape beats prose.
+ *
+ * `preferred` is 'Credit Card' because that is the wording session 10 actually
+ * used ("credit card"), which is a description of an account type rather than a
+ * stored name — the case the example most needs to teach. Similarity picks only
+ * which stored value illustrates the example, never a filter literal at request
+ * time; when nothing resembles `preferred` the example falls back to the first
+ * stored account and rewords the question to match.
+ */
+function exampleAccount(accounts: string[], preferred: string): { word: string; literal: string } {
+  if (accounts.length === 0) return { word: preferred.toLowerCase(), literal: preferred }
+
+  const best = accounts
+    .map((a) => ({ a, score: descriptionSimilarity(preferred, a) }))
+    .sort((x, y) => y.score - x.score)[0]
+
+  if (best.score >= 0.34) return { word: preferred.toLowerCase(), literal: best.a }
+  return { word: accounts[0], literal: accounts[0] }
+}
+
+/**
  * A word for the "no corresponding category" worked example, guaranteed not to
  * collide with anything actually stored.
  *
@@ -126,6 +153,14 @@ export function buildSqlSystemPrompt(
   const groceries = exampleCategory(categories, 'Groceries')
   const travel = exampleCategory(categories, 'Travel', groceries.literal)
   const noMatchWord = noMatchExampleWord(categories)
+  // The Account-join example. Its shape is load-bearing, not stylistic: the
+  // aliased form is one `accountNameScope` in lib/chatAccountVocabulary.ts
+  // actually resolves, and the unaliased `FROM "Transaction" JOIN Account ON ...`
+  // form this file used to instruct in prose alone is one it does NOT (its
+  // FROM/JOIN regex consumes the JOIN keyword as the first table's alias, so the
+  // Account source is never seen and the grounding check silently fails open).
+  // tests/chatSqlPromptAccountJoinExample.test.ts pins both halves of that.
+  const account = exampleAccount(accounts, 'Credit Card')
 
   // Only shown when there's a vocabulary to be grounded against — with none,
   // there's no closed list for a category to fail to correspond to, and
@@ -167,7 +202,7 @@ Rules:
 - Split legs: when parentTransactionId IS NOT NULL the row is a leg; the parent is a placeholder that sums the legs. When aggregating spend, exclude parents (WHERE parentTransactionId IS NULL) OR include the legs instead, NOT both.
 - Matched reimbursement pairs (reimbursementTxId IS NOT NULL on the expense side) net to zero. To compute true net spend, exclude the expense side AND the credit that appears as a reimbursement target. Example guard on the expense side: AND reimbursementTxId IS NULL. To also skip the paired credit: AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id).
 - Always include LIMIT 200 at most.
-- For joins use "Transaction".accountId = Account.id.
+- For joins use "Transaction".accountId = Account.id. When the join exists so you can filter on an account's NAME, write it with short aliases and qualify the name column: FROM "Transaction" t JOIN Account a ON t.accountId = a.id ... WHERE a.name = '...'. A bare unqualified name in a joined query is ambiguous -- Category.name exists too -- so qualify it always. See the account-filtered worked example below.
 
 One row, one column per figure -- never a compound SELECT:
 - NEVER use UNION, UNION ALL, INTERSECT or EXCEPT. Not for any question, not even to stack two aggregates.
@@ -197,6 +232,19 @@ A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${gr
 
 Q: What was spent on ${travel.word} in June?
 A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${travel.literal.replace(/'/g, "''")}' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '${june}' AND status IN ('committed','reconciled')
+
+Q: How much did I spend on my ${account.word} last month?
+A: SELECT SUM(-t.amount) / 100.0 AS total_spent FROM "Transaction" t JOIN Account a ON t.accountId = a.id WHERE a.name = '${account.literal.replace(/'/g, "''")}' AND t.amount < 0 AND t.transactionType != 'transfer' AND t.parentTransactionId IS NULL AND t.reimbursementTxId IS NULL AND strftime('%Y-%m', t.date) = strftime('%Y-%m', date('now','-1 month')) AND t.status IN ('committed','reconciled')
+-- Filtering by account means joining Account; this is the shape to copy. Both tables get a short alias
+-- and the name column is written QUALIFIED (a.name), never bare: Category.name exists too, so an
+-- unqualified name in a joined query is ambiguous and the server cannot tell it is an account filter.
+-- The literal is copied exactly from the account vocabulary. Do NOT filter on a description of an
+-- account type -- a.name LIKE '%credit card%' is valid SQL that matches nothing on a ledger whose cards
+-- are named after their banks, and an empty result is not "nothing was spent".
+-- Never SELECT * or a.* here: a star projection returns openingBalance without naming it and the
+-- server rejects the result set. Project only the figure you need.
+-- The transfer guard is not optional even though the question named no sign: money moved onto or off
+-- this account is stored as a transfer leg, and counting it as spending inflates the total.
 
 Q: What are my top 5 spending categories this year?
 A: SELECT category, SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total ASC LIMIT 5
