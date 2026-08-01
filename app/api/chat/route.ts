@@ -21,8 +21,19 @@ import {
   unknownCategoryLiterals,
   unknownCategoryMessage,
 } from '@/lib/chatCategoryVocabulary'
+import {
+  AccountVocabularyTooLarge,
+  loadAccountVocabulary,
+  unknownAccountLiterals,
+  unknownAccountMessage,
+} from '@/lib/chatAccountVocabulary'
 import { balanceIntentMatch, balanceIntentMessage } from '@/lib/chatBalanceIntent'
-import { balanceScopeMessage, balanceScopeViolation } from '@/lib/chatBalanceScope'
+import {
+  balanceScopeMessage,
+  balanceScopeRowMessage,
+  balanceScopeRowViolation,
+  balanceScopeViolation,
+} from '@/lib/chatBalanceScope'
 import { compoundSelectMessage, compoundSelectViolation } from '@/lib/chatCompoundSelect'
 import {
   signBranchGuardMessage,
@@ -136,9 +147,10 @@ const NARRATION_NUM_CTX = 16_384
 //
 // Ticket 2 (ADR-0008) injects the stored category vocabulary into this same
 // prompt, so the value is sized for that now rather than bumped again next
-// ticket. (As shipped it is categories only — account-name grounding is
-// explicitly out of ADR-0008's scope — so the figures below, measured with
-// both, are an over-estimate of what the block actually costs today.)
+// ticket. (ADR-0008 shipped as categories only; account-name grounding was
+// added 2026-08-01 as the same mechanism on Account.name, so the figures below
+// — always measured with both blocks present — now describe what is actually
+// injected rather than over-estimating it.)
 // Measured with the real dev-DB vocabulary (46 distinct
 // Transaction.category values — emoji-prefixed, so unusually token-expensive —
 // and 10 Account.name values) rendered as a closed list with its
@@ -220,6 +232,31 @@ export async function POST(request: Request) {
     throw e
   }
 
+  // The same grounding, applied to `Account.name` (ADR-0008's mechanism, second
+  // column — see lib/chatAccountVocabulary.ts). Loaded next to the categories so
+  // both lists are read from one consistent view of the ledger, and capped the
+  // same way for the same reason: a partial list is the original bug wearing the
+  // fix's clothes.
+  let accounts: string[]
+  try {
+    accounts = await loadAccountVocabulary(prisma)
+  } catch (e) {
+    if (e instanceof AccountVocabularyTooLarge) {
+      console.error(`[chat] ${e.message}`)
+      return new Response(
+        JSON.stringify({
+          type: 'error',
+          message:
+            `Chat is disabled until the account list is reviewed: this ledger has ${e.count} distinct ` +
+            `account names, more than the query generator can be grounded on safely. ` +
+            `Answering without the full list risks silently empty results read as zeroes.`,
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+    throw e
+  }
+
   const { ollamaUrl, chatModel } = await getLlmConfig()
   const signal = ollamaSignal(request.signal)
 
@@ -229,7 +266,7 @@ export async function POST(request: Request) {
   // calls in a turn agree on what "today" is even across a midnight boundary —
   // and, since ADR-0008, so both see the same category vocabulary. A repair
   // pass that lost the grounding could reintroduce a guessed literal.
-  const sqlSystemPrompt = buildSqlSystemPrompt(new Date(), categories)
+  const sqlSystemPrompt = buildSqlSystemPrompt(new Date(), categories, accounts)
 
   // Build SQL prompt with prior conversation context so follow-up references resolve correctly
   const sqlPrompt = trimmedHistory.length > 0
@@ -300,6 +337,21 @@ export async function POST(request: Request) {
     return nonAnswerResponse(nonAnswerFrame(
       'out-of-scope',
       unknownCategoryMessage(unknownFirst, categories),
+      sql,
+    ))
+  }
+
+  // The account-name half of the same grounding. Session 10's `WHERE a.name LIKE
+  // '%credit card%'` against a ledger whose cards are named after their banks
+  // runs clean, matches nothing, and returns the empty result ADR-0008 exists to
+  // stop being narrated as "you spent nothing on that card". Same reason code as
+  // the category check, and for the same reason: it is the "not answerable from
+  // the ledger, declared before a query runs" case.
+  const unknownAccountFirst = unknownAccountLiterals(sql, accounts)
+  if (unknownAccountFirst.length > 0) {
+    return nonAnswerResponse(nonAnswerFrame(
+      'out-of-scope',
+      unknownAccountMessage(unknownAccountFirst, accounts),
       sql,
     ))
   }
@@ -419,6 +471,18 @@ export async function POST(request: Request) {
       ))
     }
 
+    // And the account-name check, for the identical reason: a repair pass that
+    // is rewriting a join is exactly where a qualified name predicate gets
+    // reworded on its way past.
+    const unknownAccountRepaired = unknownAccountLiterals(repaired, accounts)
+    if (unknownAccountRepaired.length > 0) {
+      return nonAnswerResponse(nonAnswerFrame(
+        'out-of-scope',
+        unknownAccountMessage(unknownAccountRepaired, accounts),
+        repaired,
+      ))
+    }
+
     // Same for the scope check (ADR-0010): a repair pass is free to relabel a
     // column on its way past a syntax fix, so the second attempt is checked as
     // independently as the first.
@@ -476,6 +540,23 @@ export async function POST(request: Request) {
         { status: 422, headers: { 'Content-Type': 'application/json' } }
       )
     }
+  }
+
+  // ADR-0010's enforcement point, applied where it can only be applied after
+  // execution. `SELECT * FROM Account WHERE accountType = 'auto_loan'` names no
+  // column, so both SQL-text checks above pass it — and `openingBalance` arrives
+  // in the rows anyway, via the star expansion, where narration can report it as
+  // the loan's current balance. The column list of a star projection is not
+  // knowable from the query string; it is knowable from what came back.
+  //
+  // Placed on `rows` rather than duplicated into each execution branch, so the
+  // repaired query is checked as independently as the first one with no second
+  // call site to drift. It runs before the `no-data` check because a result set
+  // carrying a banned column is out of scope whether or not it also happens to
+  // be empty — and empty rows carry no keys, so this is a no-op in that case.
+  const scopeRows = balanceScopeRowViolation(rows)
+  if (scopeRows) {
+    return nonAnswerResponse(nonAnswerFrame('out-of-scope', balanceScopeRowMessage(scopeRows), sql))
   }
 
   // A clean run that matched nothing is a non-answer, and it never reaches

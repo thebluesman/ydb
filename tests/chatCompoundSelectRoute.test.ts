@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CATEGORIES = ['✈️ Travel', '🛒 Groceries', '🏠 Rent']
+const ACCOUNTS = ['ADCB Current', 'Emirates NBD Savings']
 
 let queryCalls: string[] = []
 let queryResults: (() => { rows: unknown[]; truncated: boolean })[] = []
@@ -25,6 +26,9 @@ vi.mock('@/lib/prisma', () => ({
   prisma: {
     setting: { findFirst: async () => ({ value: 'AED' }) },
     transaction: { findMany: async () => CATEGORIES.map((category) => ({ category })) },
+    // Account-name grounding reads this per turn (ADR-0008's mechanism on
+    // Account.name); these suites are not about it, so it stays a fixed list.
+    account: { findMany: async () => ACCOUNTS.map((name) => ({ name })) },
   },
   executeReadonlyQuery: (sql: string) => {
     queryCalls.push(sql)

@@ -26,6 +26,7 @@
  */
 
 import { NO_MATCH_SENTINEL, buildCategoryVocabularyBlock } from '@/lib/chatCategoryVocabulary'
+import { buildAccountVocabularyBlock } from '@/lib/chatAccountVocabulary'
 import { descriptionSimilarity } from '@/lib/textSimilarity'
 
 /** Zero-padded UTC calendar date, `YYYY-MM-DD`. */
@@ -98,7 +99,11 @@ function noMatchExampleWord(categories: string[]): string {
   return candidates.find((w) => !lower.some((c) => c.includes(w.toLowerCase()))) ?? candidates[0]
 }
 
-export function buildSqlSystemPrompt(now: Date = new Date(), categories: string[] = []): string {
+export function buildSqlSystemPrompt(
+  now: Date = new Date(),
+  categories: string[] = [],
+  accounts: string[] = [],
+): string {
   const today = isoDate(now)
   // The worked example is computed from `now` for the same reason the prompt
   // is: a hardcoded literal here would teach the model a stale year the moment
@@ -110,6 +115,14 @@ export function buildSqlSystemPrompt(now: Date = new Date(), categories: string[
   // no vocabulary rule — the prompt is then byte-for-byte what it was before
   // ADR-0008, rather than carrying an empty list the model has to interpret.
   const vocabularySection = vocabularyBlock ? `\n\n${vocabularyBlock}` : ''
+
+  // Account names get the same closed-list treatment as categories, for the same
+  // reason and by the same mechanism (see lib/chatAccountVocabulary.ts). Rendered
+  // as its own block rather than merged into the category one: they are two
+  // different columns with two different exact-copy rules, and one combined list
+  // would invite the model to filter a name against the category column.
+  const accountBlock = buildAccountVocabularyBlock(accounts)
+  const accountSection = accountBlock ? `\n\n${accountBlock}` : ''
   const groceries = exampleCategory(categories, 'Groceries')
   const travel = exampleCategory(categories, 'Travel', groceries.literal)
   const noMatchWord = noMatchExampleWord(categories)
@@ -139,7 +152,7 @@ Schema (readable tables only):
   Category(id, name, color)
 
 Tables you MUST NOT query (access is blocked at the driver level): Setting, ChatSession, ChatMessage, Budget, VendorRule.
-Avoid selecting from sqlite_master or any pragma_* function.${vocabularySection}
+Avoid selecting from sqlite_master or any pragma_* function.${vocabularySection}${accountSection}
 
 Rules:
 - SQLite dialect only: use strftime('%Y-%m', date) for month grouping, NOT DATE_TRUNC.
@@ -166,6 +179,7 @@ Balances are out of scope:
 - SUM(amount) over an account is the NET FLOW across whatever period the query filters to -- money in minus money out for those dates. It is never that account's balance, and it is never the amount owed on a liability.
 - Account balances, net worth and amounts outstanding are NOT derivable in SQL here. A balance is the account's opening balance combined with every transaction over its whole life under the sign rule for its account type; that arithmetic lives in application code, not in this query. If the question asks for a balance, net worth, how much is owed, how much is left, or anything that needs one, do NOT approximate it with a sum -- answer the flow question you can answer, or return the closest transaction-level aggregate.
 - Account.openingBalance must NOT be selected, aggregated, or used in an expression.
+- Never use SELECT * (or SELECT a.*) on Account. A star projection returns openingBalance without naming it, and the server rejects any result set that comes back carrying that column. List the columns you actually need instead.
 - Never label a result column 'balance', 'net_worth', 'outstanding' or 'owed' (in any casing, on its own or as part of a longer name such as 'total_balance'). The column name is all the narrator sees, so a flow figure labelled as a balance is reported as one. The server rejects such a query outright rather than running it -- name a sum 'total', 'net', 'spent' or similar instead.
 
 Date rules:
