@@ -47,8 +47,29 @@ describe('transfer-exclusion rule in the SQL prompt', () => {
     expect(prompt).toMatch(/nets to zero/i)
   })
 
-  it('ties the rule to sign-based filtering specifically', () => {
-    expect(prompt).toMatch(/whenever the query filters or branches on the sign of amount/i)
+  it('ties the rule to the aggregate rather than to sign-based filtering (ADR-0019)', () => {
+    // Was: "whenever the query filters or branches on the sign of amount". That
+    // wording exempted a category-filtered spend total, and ADR-0019 measured
+    // that transfer legs really do carry spend categories, so the exemption was
+    // a live hole rather than a harmless narrowing.
+    expect(prompt).toMatch(/The trigger is the AGGREGATE, not the sign branch/)
+    expect(prompt).toMatch(/whether or not it mentions the sign of amount/i)
+    expect(prompt).toMatch(/category-filtered spend total/i)
+  })
+
+  it('states the category mirror case, and that it cannot be read off the SQL (ADR-0019)', () => {
+    // The carve-out is the cost of the widening: a question ABOUT a category the
+    // ledger puts on transfers wants exactly the rows the guard removes. Only
+    // prose pulls the guard back off, which is why it has to actually be there.
+    expect(prompt).toMatch(/mirror case for a category filter/i)
+    expect(prompt).toMatch(/how much did I pay on my car loan/i)
+    // The two illustrative questions map onto the only two colliding categories
+    // in dev.db today, so the prompt cannot claim it has listed nothing — a model
+    // will pattern-match them regardless. It must instead mark them as examples
+    // and say the real set is the upstream pipeline's business, not a fixed list.
+    expect(prompt).toMatch(/illustrations, not the complete set/i)
+    expect(prompt).toMatch(/never as the thing that settles it/i)
+    expect(prompt).toMatch(/read it off what is being asked/i)
   })
 
   it('carries the session question as a worked example', () => {

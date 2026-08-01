@@ -626,6 +626,147 @@ describe('canary figures are unchanged — executed against a seeded ledger', ()
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0019 — a transfer leg carrying a real spend category.
+//
+// The PR #32 transfer bugs above are the classic shape: both legs are
+// `Uncategorized`, they are equal and opposite, and a sign split counts one as
+// income and one as an expense. This is a different and nastier one, and it was
+// unwritable until ADR-0019 measured prisma/dev.db on 2026-08-01: all 44
+// transfer rows carry a nonempty category and 5 carry a REAL spend category —
+// 3 `🚗 Auto loans`, 2 `💰 Personal loans` — assigned upstream by the
+// SMS-capture/YNAB pipeline, not by anything this repo controls.
+//
+// The category sits on the OUTGOING leg only (id=521, -234468, `🚗 Auto loans`,
+// linked to id=522, +234468, `Uncategorized`). So nothing cancels: a
+// category-filtered `SUM(amount)` over `🚗 Auto loans` returns the full
+// repayment volume as spending, with no arithmetic tell. The prompt's own rule —
+// "transfers are NEITHER income NOR spending" — is violated by a query that
+// never mentions the sign of amount and therefore never tripped the old trigger.
+//
+// The mirror is the reason this stays prompt-only: "how much did I SPEND on Auto
+// loans" and "how much did I PAY on my car loan" generate the same SQL and want
+// opposite answers. Asserted below as a property of the guard chain, because a
+// detector that could tell them apart is what ADR-0016 concluded does not exist.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('ADR-0019: a category-filtered spend total must not count transfer legs', () => {
+  let db: Db
+
+  const now = new Date()
+  const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+
+  /**
+   * The shape the three worked examples now teach, down to the bare SUM(amount)
+   * they use — so spending reads as a negative figure here, as it does in the app.
+   */
+  const GUARDED =
+    `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '🚗 Auto loans' ` +
+    `AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL ` +
+    `AND status IN ('committed','reconciled')`
+
+  /** The shape they taught before this ticket. Same question, wrong number. */
+  const UNGUARDED =
+    `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '🚗 Auto loans' ` +
+    `AND parentTransactionId IS NULL AND reimbursementTxId IS NULL ` +
+    `AND status IN ('committed','reconciled')`
+
+  // A separate in-memory ledger rather than rows added to the canary fixture
+  // above: the canary figures are pinned, and a second transfer pair there would
+  // move them for a reason unrelated to what they exist to protect.
+  beforeAll(() => {
+    db = new Database(':memory:')
+    db.exec(`CREATE TABLE "Transaction" (
+      id INTEGER PRIMARY KEY,
+      date TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      transactionType TEXT NOT NULL,
+      category TEXT NOT NULL,
+      status TEXT NOT NULL,
+      linkedTransferId INTEGER,
+      parentTransactionId INTEGER,
+      reimbursementTxId INTEGER
+    )`)
+    const insert = db.prepare(
+      `INSERT INTO "Transaction" (id, date, amount, transactionType, category, status, linkedTransferId)
+       VALUES (@id, @date, @amount, @transactionType, @category, 'committed', @linkedTransferId)`
+    )
+    const rows = [
+      // The loan repayment, modelled on dev.db ids 521/522. AED 2,344.68 moved
+      // from the current account to the car loan. Category on the outgoing leg
+      // only; the counterpart is Uncategorized, so the two do NOT cancel under a
+      // category filter.
+      { id: 521, date: `${ym}-10 00:00:00.000`, amount: -234_468, transactionType: 'transfer', category: '🚗 Auto loans', linkedTransferId: 522 },
+      { id: 522, date: `${ym}-10 00:00:00.000`, amount: 234_468, transactionType: 'transfer', category: 'Uncategorized', linkedTransferId: 521 },
+      // Genuine spending in the same category: a loan processing fee, AED 100.00.
+      // Without it the guarded query would return 0 and "excludes transfers" would
+      // be indistinguishable from "matches nothing".
+      { id: 530, date: `${ym}-12 00:00:00.000`, amount: -10_000, transactionType: 'debit', category: '🚗 Auto loans', linkedTransferId: null },
+    ]
+    for (const r of rows) insert.run(r)
+  })
+
+  afterAll(() => db.close())
+
+  it('the two legs do not cancel, which is what makes this worse than the double-count', () => {
+    // The premise. In the PR #32 shape a transfer pair sums to zero and the tell
+    // is arithmetic; here the filter only ever sees one leg.
+    const bothLegs = db
+      .prepare(`SELECT SUM(amount) AS net FROM "Transaction" WHERE transactionType = 'transfer'`)
+      .get() as { net: number }
+    expect(bothLegs.net).toBe(0)
+
+    const filtered = db
+      .prepare(`SELECT SUM(amount) AS net FROM "Transaction" WHERE category = '🚗 Auto loans' AND transactionType = 'transfer'`)
+      .get() as { net: number }
+    expect(filtered.net).toBe(-234_468)
+  })
+
+  it('the guarded query returns only real spending in the category', () => {
+    const out = db.prepare(GUARDED).get() as { total: number }
+    expect(out.total).toBe(-100)
+    // The load-bearing assertion: AED 2,344.68 of moved money is not spending, so
+    // the outflow stays smaller in magnitude than the repayment.
+    expect(Math.abs(out.total)).toBeLessThan(2_344.68)
+  })
+
+  it('dropping the guard reports the whole repayment as spending', () => {
+    const out = db.prepare(UNGUARDED).get() as { total: number }
+    expect(out.total).toBe(-2_444.68)
+    // Twenty-four times the real figure, well-formed, and narratable without a
+    // hint that anything is wrong. This is the number the shape used to teach.
+    expect(Math.abs(out.total)).toBeGreaterThan(20 * 100)
+  })
+
+  it('no guard in the chain refuses either shape — the protection is the prompt', () => {
+    // Stated as a passing assertion rather than a comment, because it is the
+    // ticket's "explicitly NOT in scope" item made checkable. If someone adds a
+    // detector for this to lib/chatMoneyGuards.ts, this test goes red and points
+    // at ADR-0016/0019 before the mirror case starts being refused in the app.
+    expect(runGuardChain('How much did I spend on Auto loans?', GUARDED)).toBeNull()
+    expect(runGuardChain('How much did I spend on Auto loans?', UNGUARDED)).toBeNull()
+    expect(signBranchGuardViolation(UNGUARDED)).toBeNull()
+    expect(transferSumViolation(UNGUARDED)).toBeNull()
+  })
+
+  it('MIRROR CASE (prompt-only, expected fragile): a loan-repayment question wants those rows', () => {
+    // @qa — flagged, not pinned. "How much did I pay on my car loan" is answered
+    // by the UNGUARDED shape: the transfer legs are the subject. Nothing in code
+    // produces that shape; only the mirror-case prose in lib/chatSqlPrompt.ts
+    // pulls the guard back off, and the model may well ignore it. Treat a failure
+    // in the app as a prompt regression to investigate, not as a broken invariant.
+    const paid = db.prepare(UNGUARDED).get() as { total: number }
+    expect(paid.total).toBe(-2_444.68)
+
+    // The whole reason for prompt-only: identical SQL, opposite intents, and the
+    // guard chain cannot separate them because the difference is in the question.
+    // Neither question is a balance question either, so ADR-0015's pre-check —
+    // the one mechanism that DOES read the question — is silent on both.
+    expect(runGuardChain('How much did I pay on my car loan?', UNGUARDED)).toBeNull()
+    expect(balanceIntentMatch('How much did I spend on Auto loans?')).toBeNull()
+    expect(balanceIntentMatch('How much did I pay on my car loan?')).toBeNull()
+  })
+})
+
 describe('refusal reasons are distinguishable', () => {
   const cases: Array<[string, string, string, NonAnswerReason]> = [
     ['balance question', "What's my net worth?", 'SELECT 1', 'out-of-scope'],
