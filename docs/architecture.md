@@ -19,14 +19,14 @@ breaking API changes from training-data Next.js.
 | LAN-only, no auth/multi-user | `docs/archive/IMPROVEMENT_PLAN.md` §4 |
 | All LLM inference is self-hosted (Ollama); no ledger data, query result, or user question goes to a hosted inference API | `docs/adr/0006-local-only-llm-inference.md`, `lib/llm-config.ts` |
 | WAL mode, `synchronous = NORMAL`, `busy_timeout = 5000`, FK on | `docs/archive/IMPROVEMENT_PLAN.md` Phase 0 |
-| Transfer pairs are exclusive: no self-link, no stealing a taken counterpart, no orphaning an inbound pointer | `docs/adr/0021-transfer-pair-exclusivity-enforced-by-db-trigger.md` |
+| Transfer pairs are exclusive: no self-link, no stealing a taken counterpart, no orphaning an inbound pointer, no second claim on a target another row already names | `docs/adr/0021-transfer-pair-exclusivity-enforced-by-db-trigger.md`, `docs/adr/0022-transfer-pair-trigger-rejects-a-second-claim-on-the-same-target.md` |
 
 ### DB-level invariants on `"Transaction"` — re-create these on any table rebuild
 
 Three constraints on `"Transaction"` are hand-written into migrations because Prisma's schema cannot
 express them: the `amount` sign vs `transactionType` CHECK (in
 `prisma/migrations/20260716201150_split_leg_cascade_and_check_constraint`), and the two transfer-pair
-triggers from ADR-0021. Prisma's `RedefineTables` strategy drops and rebuilds the table from its own
+triggers from ADR-0021 (four conditions each, per ADR-0022). Prisma's `RedefineTables` strategy drops and rebuilds the table from its own
 schema, so **any future migration that rebuilds `"Transaction"` silently drops all three.** Check for
 them after generating such a migration and hand-edit them back in.
 
