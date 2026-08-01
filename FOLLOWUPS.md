@@ -42,12 +42,16 @@ end up in the DB naturally. A "force two-sided" option at import time
 - ~~CHECK on `Transaction.amount` sign vs `transactionType`~~ — shipped.
 - ~~`onDelete: Cascade` for split legs instead of application-level cascade~~
   — shipped.
-- Enforce `linkedTransferId` symmetry via a trigger — still open. Symmetry is
-  currently maintained by hand-written logic across four separate write
-  paths, including a delete-and-recreate re-pair branch in the transaction
-  PATCH handler. Tracked as a Notion ticket on the YDB Migration board:
-  "Enforce linkedTransferId symmetry at the DB level" (Phase: Other, Owner:
-  @backend-engineer, needs @tech-lead sign-off).
+- Enforce `linkedTransferId` symmetry via a trigger — designed and signed off
+  2026-08-02, not yet implemented. Integrity is currently maintained by
+  hand-written logic across **five** write paths in four files (the count of
+  four was wrong — `app/api/transactions/manual/route.ts` was missed),
+  including a delete-and-recreate re-pair branch in the transaction PATCH
+  handler. The enforced predicate is pair *exclusivity*, not literal symmetry:
+  see `docs/adr/0021-transfer-pair-exclusivity-enforced-by-db-trigger.md` for
+  the trigger design `@backend-engineer` implements against. Tracked as a
+  Notion ticket on the YDB Migration board: "Enforce linkedTransferId symmetry
+  at the DB level" (Phase: Other, Owner: @backend-engineer).
 
 ## 6. Category handling on splits
 
