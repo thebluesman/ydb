@@ -232,10 +232,16 @@ describe('POST /api/chat — compound SELECTs declined (ADR-0011)', () => {
   it('(g) runs the conditional-aggregate shape the prompt now teaches', async () => {
     // Session 11's question, answered the right way: two figures, two columns,
     // one row — labels intact.
+    //
+    // The transactionType guard is not decoration here. ADR-0016's first
+    // detector declines a sign-branching aggregate that carries no
+    // transactionType predicate at all, and without it this fixture would be
+    // refused for a reason that has nothing to do with ADR-0011.
     const sql =
       `SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses, ` +
       `SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income ` +
-      `FROM "Transaction" WHERE status IN ('committed','reconciled') LIMIT 200`
+      `FROM "Transaction" WHERE transactionType != 'transfer' ` +
+      `AND status IN ('committed','reconciled') LIMIT 200`
     sqlReplies = [sql]
 
     const res = await ask(SESSION_11_QUESTION)
@@ -278,10 +284,12 @@ describe('POST /api/chat — compound SELECTs declined (ADR-0011)', () => {
   })
 
   it('does not falsely reject an identifier containing "except" or "intersect"', async () => {
+    // Carries a transactionType predicate for the same reason as (g) above: the
+    // CASE branches on the sign of amount, which is ADR-0016's first trigger.
     const sql =
       `SELECT SUM(CASE WHEN amount < 0 THEN 1 ELSE 0 END) AS except_flag, ` +
       `COUNT(*) AS intersect_count FROM "Transaction" ` +
-      `WHERE status IN ('committed','reconciled') LIMIT 200`
+      `WHERE transactionType != 'transfer' AND status IN ('committed','reconciled') LIMIT 200`
     sqlReplies = [sql]
 
     const res = await ask('How many debits do I have?')

@@ -4,6 +4,12 @@ import type { Database as Db } from 'better-sqlite3'
 import { balanceIntentMatch, balanceIntentMessage } from '@/lib/chatBalanceIntent'
 import { balanceScopeMessage, balanceScopeViolation } from '@/lib/chatBalanceScope'
 import { compoundSelectMessage, compoundSelectViolation } from '@/lib/chatCompoundSelect'
+import {
+  signBranchGuardMessage,
+  signBranchGuardViolation,
+  transferSumMessage,
+  transferSumViolation,
+} from '@/lib/chatMoneyGuards'
 import { unknownCategoryLiterals, unknownCategoryMessage } from '@/lib/chatCategoryVocabulary'
 import { NON_ANSWER_HEADLINE, isNonAnswerReason, type NonAnswerReason } from '@/lib/chatNonAnswer'
 
@@ -57,7 +63,13 @@ const CATEGORIES = [
 type GuardOutcome = {
   reason: NonAnswerReason
   /** Which guard fired — for asserting the reason is attributable, not just present. */
-  guard: 'balance-intent' | 'category-vocabulary' | 'balance-scope' | 'compound-select'
+  guard:
+    | 'balance-intent'
+    | 'category-vocabulary'
+    | 'balance-scope'
+    | 'compound-select'
+    | 'sign-branch-guard'
+    | 'transfer-sum'
   detail: string
   message: string
 }
@@ -112,6 +124,26 @@ function runGuardChain(question: string, sql: string, categories = CATEGORIES): 
       guard: 'compound-select',
       detail: compound.keyword,
       message: compoundSelectMessage(compound),
+    }
+  }
+
+  const signBranch = signBranchGuardViolation(sql)
+  if (signBranch) {
+    return {
+      reason: 'unsupported-shape',
+      guard: 'sign-branch-guard',
+      detail: signBranch.branch,
+      message: signBranchGuardMessage(signBranch),
+    }
+  }
+
+  const transferSum = transferSumViolation(sql)
+  if (transferSum) {
+    return {
+      reason: 'unsupported-shape',
+      guard: 'transfer-sum',
+      detail: transferSum.pin,
+      message: transferSumMessage(transferSum),
     }
   }
 
@@ -243,6 +275,81 @@ describe('must not mislabel — compound SELECTs (ADR-0011)', () => {
   })
 })
 
+describe('must not miscount money — the two PR #32 shapes (ADR-0016)', () => {
+  // ADR-0016 § Consequences names these two as regression cases, and names the
+  // transfer-volume few-shot as the thing they must NOT catch. All three live
+  // here rather than in the per-detector suite because the point is the chain:
+  // each new check is a fresh chance to refuse an ordinary question.
+
+  /**
+   * PR #32's first bug. Income and expenses split by sign with no transactionType
+   * predicate: every transfer's outgoing leg is counted as spending and its
+   * incoming leg as income, so both figures come back too high by the amount
+   * moved. [reconstructed] — the shape ADR-0016 § Context describes.
+   */
+  const UNGUARDED_SIGN_SPLIT =
+    'SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income, ' +
+    'SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses ' +
+    'FROM "Transaction" WHERE status IN (\'committed\',\'reconciled\') ' +
+    "AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now'))"
+
+  /**
+   * PR #32's second bug: transfer volume as a bare SUM over transfer-pinned rows.
+   * Nets to approximately zero for any ledger. [reconstructed].
+   */
+  const NAIVE_TRANSFER_SUM =
+    "SELECT SUM(amount) / 100.0 AS total FROM \"Transaction\" WHERE transactionType = 'transfer' " +
+    "AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')"
+
+  /** The prompt's own transfer-volume answer, verbatim in shape. [verbatim-prompt]. */
+  const TRANSFER_VOLUME_FEWSHOT =
+    'SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total FROM "Transaction" ' +
+    "WHERE transactionType = 'transfer' AND strftime('%Y', date) = strftime('%Y', date('now')) " +
+    "AND status IN ('committed','reconciled')"
+
+  it('a sign-branching query with no transactionType predicate is refused', () => {
+    const outcome = runGuardChain("What's my income and spending this month?", UNGUARDED_SIGN_SPLIT)
+    expect(outcome).not.toBeNull()
+    expect(outcome!.guard).toBe('sign-branch-guard')
+    // The question was ordinary; the query we wrote for it wasn't.
+    expect(outcome!.reason).toBe('unsupported-shape')
+    // Names the arithmetic, per ADR-0016's requirement on the refusal copy.
+    expect(outcome!.message).toMatch(/too high/i)
+    expect(outcome!.message).toMatch(/transfer/i)
+  })
+
+  it('SUM(amount) over transfer-pinned rows is refused', () => {
+    const outcome = runGuardChain('How much did I move between my accounts this year?', NAIVE_TRANSFER_SUM)
+    expect(outcome).not.toBeNull()
+    expect(outcome!.guard).toBe('transfer-sum')
+    expect(outcome!.reason).toBe('unsupported-shape')
+    // It must deny the zero outright, the same way ADR-0008's refusal denies the
+    // empty total: a confident "nothing" is the wrong answer, not a small one.
+    expect(outcome!.message).toMatch(/zero/i)
+  })
+
+  it('the transfer-volume few-shot itself still passes both', () => {
+    // The load-bearing non-rejection. It branches on sign AND pins to transfers —
+    // the exact intersection of the two triggers — and is entirely correct,
+    // because the check demands SOME transactionType predicate rather than a
+    // particular one, and its SUM is conditional rather than bare.
+    expect(signBranchGuardViolation(TRANSFER_VOLUME_FEWSHOT)).toBeNull()
+    expect(transferSumViolation(TRANSFER_VOLUME_FEWSHOT)).toBeNull()
+    expect(runGuardChain('How much did I move between my accounts this year?', TRANSFER_VOLUME_FEWSHOT))
+      .toBeNull()
+  })
+
+  it('adding the transactionType guard is all it takes to un-refuse the sign split', () => {
+    // Proof the detector objects to the missing guard and nothing else — an
+    // over-rejecting check that cannot be satisfied is a dead end, not a guard.
+    const guarded = UNGUARDED_SIGN_SPLIT.replace(
+      'WHERE status',
+      "WHERE transactionType != 'transfer' AND status",
+    )
+    expect(runGuardChain("What's my income and spending this month?", guarded)).toBeNull()
+  })
+})
+
 describe('the guard chain never over-rejects an ordinary aggregate', () => {
   // The ticket's named canaries are sessions 6 and 9. Those rows are gone (see
   // the provenance note at the top), so these are the closest available
@@ -305,6 +412,8 @@ describe('the guard chain never over-rejects an ordinary aggregate', () => {
       expect(unknownCategoryLiterals(sql, CATEGORIES), label).toEqual([])
       expect(balanceScopeViolation(sql), label).toBeNull()
       expect(compoundSelectViolation(sql), label).toBeNull()
+      expect(signBranchGuardViolation(sql), label).toBeNull()
+      expect(transferSumViolation(sql), label).toBeNull()
     }
   })
 
@@ -460,6 +569,18 @@ describe('refusal reasons are distinguishable', () => {
       'out-of-scope',
     ],
     ['compound select', 'two figures', SESSION_11_SQL, 'unsupported-shape'],
+    [
+      'sign split with no transactionType guard',
+      'what did I earn and spend?',
+      'SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) AS income FROM "Transaction"',
+      'unsupported-shape',
+    ],
+    [
+      'naive transfer sum',
+      'how much did I move between accounts?',
+      "SELECT SUM(amount) AS total FROM \"Transaction\" WHERE transactionType = 'transfer'",
+      'unsupported-shape',
+    ],
   ]
 
   it.each(cases)('%s yields reason %s', (_label, question, sql, expected) => {

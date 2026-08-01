@@ -24,6 +24,12 @@ import {
 import { balanceIntentMatch, balanceIntentMessage } from '@/lib/chatBalanceIntent'
 import { balanceScopeMessage, balanceScopeViolation } from '@/lib/chatBalanceScope'
 import { compoundSelectMessage, compoundSelectViolation } from '@/lib/chatCompoundSelect'
+import {
+  signBranchGuardMessage,
+  signBranchGuardViolation,
+  transferSumMessage,
+  transferSumViolation,
+} from '@/lib/chatMoneyGuards'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -335,6 +341,36 @@ export async function POST(request: Request) {
     return nonAnswerResponse(nonAnswerFrame('unsupported-shape', compoundSelectMessage(compoundFirst), sql))
   }
 
+  // ADR-0016. The two money-arithmetic shapes that are decidable from the SQL
+  // alone, both of them PR #32's bugs restated as properties of the text.
+  //
+  // A sign split with no transactionType predicate counts every transfer's
+  // outgoing leg as spending and its incoming leg as income, inflating both
+  // figures by the amount moved. The check demands SOME transactionType
+  // predicate rather than a specific one, so the transfer-volume shape — a sign
+  // branch over `transactionType = 'transfer'`, entirely correct — passes.
+  //
+  // The other two money guards, split-leg and reimbursement, deliberately get no
+  // detector: whether they apply depends on what the question meant, and
+  // ADR-0015 already established the pipeline cannot judge that. They stay
+  // prompt-only, held consistent by tests/chatSqlPromptGuardMatrix.test.ts.
+  //
+  // Short-circuits like the three checks above: this SQL runs cleanly, there is
+  // no SQLite error, and the repair round-trip exists for errors.
+  const signBranchFirst = signBranchGuardViolation(sql)
+  if (signBranchFirst) {
+    return nonAnswerResponse(nonAnswerFrame('unsupported-shape', signBranchGuardMessage(signBranchFirst), sql))
+  }
+
+  // And the mirror case: a bare SUM(amount) over transfer-pinned rows cancels to
+  // approximately zero by construction, since the two legs of every transfer are
+  // equal and opposite. Arithmetically dead however much was actually moved, so
+  // there is no intent under which it is the right query.
+  const transferSumFirst = transferSumViolation(sql)
+  if (transferSumFirst) {
+    return nonAnswerResponse(nonAnswerFrame('unsupported-shape', transferSumMessage(transferSumFirst), sql))
+  }
+
   // Execute the SQL on a read-only connection to prevent mutations. On a SQLite
   // error, give the model exactly ONE repair round-trip (feed it the failed SQL
   // and the error) before surfacing the failure — models frequently mis-name a
@@ -403,6 +439,27 @@ export async function POST(request: Request) {
       return nonAnswerResponse(nonAnswerFrame(
         'unsupported-shape',
         compoundSelectMessage(compoundRepaired),
+        repaired,
+      ))
+    }
+
+    // And ADR-0016's two, independently of the first pass. A model fixing a
+    // syntax error routinely rewrites the aggregate on its way past, and
+    // dropping the transactionType guard is one of the edits it reaches for.
+    const signBranchRepaired = signBranchGuardViolation(repaired)
+    if (signBranchRepaired) {
+      return nonAnswerResponse(nonAnswerFrame(
+        'unsupported-shape',
+        signBranchGuardMessage(signBranchRepaired),
+        repaired,
+      ))
+    }
+
+    const transferSumRepaired = transferSumViolation(repaired)
+    if (transferSumRepaired) {
+      return nonAnswerResponse(nonAnswerFrame(
+        'unsupported-shape',
+        transferSumMessage(transferSumRepaired),
         repaired,
       ))
     }

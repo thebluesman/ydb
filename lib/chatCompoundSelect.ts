@@ -45,6 +45,8 @@
  * and this is a scope check on generated SQL, not a safety check.
  */
 
+import { scanStringLiterals } from './chatSqlText'
+
 /**
  * All three of SQLite's compound operators, word-boundary anchored so a
  * substring can't trip them.
@@ -74,36 +76,6 @@
  */
 const COMPOUND_RE = /\b(UNION(?:\s+ALL)?|INTERSECT|EXCEPT)\b/i
 
-/**
- * Single-quoted string literals blanked out, so a category value like
- * `'🍽️ Union Square Diner'` is not read as a compound operator. SQLite escapes
- * a quote by doubling it, which this handles by consuming `''` inside a literal.
- *
- * If the quoting is unbalanced — an odd number of delimiters, i.e. malformed
- * output from the model — stripping would swallow the whole tail of the
- * statement and could hide a real compound operator behind a stray apostrophe. In that
- * case the caller scans the raw text instead. The safe direction here is to
- * over-reject, never to under-detect.
- */
-function stripStringLiterals(sql: string): { stripped: string; balanced: boolean } {
-  let out = ''
-  let inLiteral = false
-  for (let i = 0; i < sql.length; i++) {
-    const ch = sql[i]
-    if (!inLiteral) {
-      if (ch === "'") { inLiteral = true; out += ' ' } else { out += ch }
-      continue
-    }
-    if (ch === "'") {
-      // A doubled quote is an escaped quote, not the end of the literal.
-      if (sql[i + 1] === "'") { out += '  '; i++; continue }
-      inLiteral = false
-    }
-    out += ' '
-  }
-  return { stripped: out, balanced: !inLiteral }
-}
-
 export type CompoundSelectViolation = {
   /** The operator as it appeared, normalised to upper case: `UNION ALL`, `UNION`, `INTERSECT`, `EXCEPT`. */
   keyword: string
@@ -119,7 +91,10 @@ export type CompoundSelectViolation = {
  * the query — it never rewrites it.
  */
 export function compoundSelectViolation(sql: string): CompoundSelectViolation | null {
-  const { stripped, balanced } = stripStringLiterals(sql)
+  // Literals blanked so a category value like `'🍽️ Union Square Diner'` is not
+  // read as structure; raw text when the quoting is malformed, because stripping
+  // would then swallow the tail and could hide a real operator.
+  const { stripped, balanced } = scanStringLiterals(sql)
   const match = COMPOUND_RE.exec(balanced ? stripped : sql)
   if (!match) return null
   return { keyword: match[1].replace(/\s+/g, ' ').toUpperCase() }
