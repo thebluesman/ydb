@@ -267,7 +267,17 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   cap is 2,000 rows of context, which the single-shot path could never produce. `NARRATION_ROW_CAP` is
   20 today; what the equivalent whole-turn ceiling should be is unmeasured and depends on Phase B's
   real prompt sizes.
-- **`num_ctx` is never set anywhere in the app.** Both chat calls and the extraction call run at
-  Ollama's resolved default, and the narration prompt is only loosely bounded. Ticket 4 has to resolve
-  this for narration; the extraction path (`app/api/ollama/route.ts`) has the same latent issue and
-  nobody owns it.
+- **`num_ctx` is set on the two chat calls and nowhere else.** Ticket 4 resolved it for narration
+  (`NARRATION_NUM_CTX` = 16,384) and the SQL call followed (`SQL_NUM_CTX`), both in
+  `app/api/chat/route.ts`. The extraction path (`app/api/ollama/route.ts`) still runs at Ollama's
+  resolved default with a prompt sized by whatever statement text was uploaded, and nobody owns it.
+- **How far `narrationModel` can be sized down is unknown, and it is coupled to the knowledge block.**
+  The `sqlModel`/`narrationModel` split exists so narration can run something smaller, but
+  `NARRATION_NUM_CTX` (16,384) is validated only against the two recommended chat models, both ≥32k
+  native. A smaller narration model with a shorter native context brings back the silent
+  front-of-prompt truncation ADR-0007 flagged — at the position the injected knowledge block occupies,
+  whose ~1,000 tokens are a fixed cost that grows in relative weight as the model shrinks. So "how
+  small can narration go" and "how much knowledge does it carry" are one question. See ADR-0007's
+  2026-08-01 addendum. The eval harness above is what would answer it; a guessed parameter floor would
+  be the fifth unmeasured heuristic in this pipeline, and three of the previous four were falsified by
+  live sessions.

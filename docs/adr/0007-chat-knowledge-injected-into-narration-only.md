@@ -105,3 +105,39 @@ string this ticket edits, specifically the "may already be dollars … or raw ce
 clause that is the bug. Land chat-bug first if it is near-term. If ticket 4 goes first, it must not touch
 that clause, and no injected snippet may introduce a currency-formatted figure — otherwise a determinism
 regression becomes unattributable between the two changes.
+
+## Addendum (2026-08-01): the route runs two models now, and narration is independently sizeable
+
+§ Context describes the route as running "two Ollama calls against one model (`chatModel`)". PR #39
+— the *chat-perf* ticket § Consequences flagged under sequencing — splits that setting into `sqlModel`
+and `narrationModel`. The premise is stale. The decision is not, and this addendum is what keeps it
+from being read as conditional on the one-model arrangement it was written under.
+
+**Narration-only injection stands, and the split strengthens the argument for it.** The decision was
+argued from the two calls having opposite characters: a temperature-0 translation step whose output no
+user reads, billed twice on the repair path, versus the prose the user actually watches. Under the
+split that is a configuration fact rather than an observation about one model doing two jobs.
+`sqlModel` can now be set to a small coder model whose entire budget is the schema contract, which
+makes ~1,000 tokens of interpretive prose in the SQL prompt worse than it would have been before, not
+better. § Consequences' standing requirement — the knowledge block travels with the narration role and
+whoever splits the models keeps it attached there — is binding on this change and PR #39 honours it
+(`lib/chatKnowledge.ts` untouched, block still built into the narration `system` field only).
+
+**One consequence is genuinely new, and it cuts against the token budget § Consequences accepted.**
+That budget was priced against a 32B model with ≥32k native context: ~1,000 tokens, "a fraction of what
+20 rows of JSON already cost", ceiling fixed rather than scaling with data. All still true in absolute
+terms. But the entire point of a separate `narrationModel` is to run something *smaller* here, and a
+fixed absolute cost grows in relative weight as the model it rides shrinks. `NARRATION_NUM_CTX` (16,384)
+is validated only against the two recommended chat models, both ≥32k native; a 7B narration model with
+an 8k native context reinstates exactly the silent front-of-prompt truncation § Consequences flagged,
+at exactly the position the knowledge block occupies.
+
+So the two knobs are now coupled: how far narration can be sized down, and how much knowledge is
+injected into it, are one question rather than two. This addendum does not answer it. Neither half can
+be settled without the eval harness `docs/architecture.md` § Open questions has been blocking on for
+four decisions already, and guessing a floor for `narrationModel` would be a fifth unmeasured heuristic
+in a pipeline that has had three falsified. Recorded there as an open question, and as a caveat in the
+route's `NARRATION_NUM_CTX` comment, rather than decided here.
+
+The P2 hold on `D4`/`F2`/`F3` inherits this. Lifting it was gated on measured token cost; that
+measurement is now per-narration-model, not a single number for the app.
