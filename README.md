@@ -181,21 +181,35 @@ has real accounts — re-running it wipes and regenerates just the seed data.
 
 ## Models
 
-ydb drives Ollama for two distinct jobs, each configurable in **Settings → Preferences → Local
+ydb drives Ollama for three distinct jobs, each configurable in **Settings → Preferences → Local
 models**. The picker is defaults-first: each role shows a recommendation, and an **Advanced**
 disclosure lists your installed models (annotated) if you want to change them.
 
 | Role | Setting key | Default | Why |
 |------|-------------|---------|-----|
 | **Extraction** | `extractionModel` | `qwen2.5-coder:14b` | Reads statement text into a structured transaction array. This model reliably honours Ollama's structured-output (`format`) constraint — verified against real statement text — and fits modest VRAM. |
-| **Chat / SQL** | `chatModel` | `qwen2.5:32b` | Generates SQLite from natural language. The 32b is the most accurate here; drop to `qwen2.5-coder:14b` if the box is short on memory. |
+| **SQL** | `sqlModel` | `qwen2.5:32b` | Generates SQLite from natural language. Runs at temperature 0, off-screen, and can afford to be slow — accuracy is all that matters. The 32b is the most accurate here; drop to `qwen2.5-coder:14b` if the box is short on memory. |
+| **Narration** | `narrationModel` | `qwen2.5:32b` | Writes the answer you watch stream in, from rows the query already returned. Speed is felt here, so a smaller model is often the better trade. |
+
+A chat turn uses the last two in sequence: one call to generate the query, one to narrate the
+result. They ship as the same model, which is exactly how a single `chatModel` behaved before the
+split — set them apart only when you want to.
+
+**If you do set them apart, size the pair to co-reside in VRAM** — roughly 14B + 7B, not 32B + 32B.
+Both models load within a single turn, and a box that can only hold one will evict and reload
+mid-answer. Requests pin each model with `keep_alive` to avoid the idle-unload case, but nothing can
+reserve memory that isn't there.
 
 Resolution precedence per role is **Setting → environment variable → shipped default**, so an
 un-configured install still works out of the box:
 
 - `OLLAMA_URL` (default `http://localhost:11434`) — override with the `ollamaUrl` setting
 - `OLLAMA_MODEL` — extraction model fallback
-- `CHAT_MODEL` — chat/SQL model fallback
+- `SQL_MODEL`, `NARRATION_MODEL` — per-role chat fallbacks
+- `CHAT_MODEL` — pre-split fallback, still honoured for both chat roles if the per-role ones are unset
+
+A pre-split install that set `chatModel` (or `CHAT_MODEL`) keeps running that model for both chat
+roles; nothing needs migrating. Saving either role in Settings supersedes it for that role.
 
 Settings changes take effect on the next request (no restart), since the config is resolved
 per-request rather than cached.

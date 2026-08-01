@@ -66,6 +66,7 @@ async function generateSql(
         system,
         prompt,
         stream: false,
+        keep_alive: OLLAMA_KEEP_ALIVE,
         options: { temperature: 0, num_ctx: SQL_NUM_CTX },
       }),
       signal,
@@ -99,6 +100,26 @@ const HISTORY_CHAR_CAP = 2000
 // the client's abort so navigating away cancels generation server-side too.
 const OLLAMA_TIMEOUT_MS = 120_000
 
+// How long Ollama should hold each model resident after its call returns. Sent
+// on BOTH calls of a turn (top-level request field, sibling of `model` — not an
+// `options` member; Ollama ignores it there silently).
+//
+// It exists because SQL generation and narration can now run on two different
+// models (sqlModel / narrationModel). Ollama's default 5-minute idle unload is
+// per-runner, so on a box that chats intermittently the narration model could
+// be cold on the second call of a turn whose first call it just sat through —
+// a stall that did not exist when one model served both. 30m covers a normal
+// day's use.
+//
+// What it does NOT do: reserve VRAM. If the two configured models cannot fit
+// side by side, Ollama evicts one to load the other regardless of keep_alive,
+// and the turn stalls mid-answer. Nothing in code can fix that — it is a sizing
+// decision, and it is documented where the models get chosen (ROLE_META in
+// lib/llm-models.ts) rather than enforced here, because "fits" depends on the
+// box and this app cannot see it. The shipped defaults point both roles at the
+// same model, where the question cannot arise.
+const OLLAMA_KEEP_ALIVE = '30m'
+
 // Ollama silently truncates an over-length prompt from the FRONT — exactly
 // where the injected knowledge block sits — so the context window has to be
 // resolved rather than inherited.
@@ -125,6 +146,12 @@ const OLLAMA_TIMEOUT_MS = 120_000
 // has exactly one operator who chooses the model deliberately. If the
 // picker's model set changes, or a smaller-context model becomes common, this
 // assumption needs revisiting.
+//
+// Splitting narration onto its own setting makes that likelier, not less: the
+// whole point of a separate narrationModel is to run something smaller here,
+// and "smaller" sometimes means a shorter native context as well as fewer
+// parameters. The failure mode stays loud (Ollama errors on an unsupported
+// num_ctx) rather than silent, which is why this is a caveat and not a guard.
 const NARRATION_NUM_CTX = 16_384
 
 // Same reasoning for the SQL-generation call (generateSql), which until now set
@@ -174,6 +201,11 @@ const NARRATION_NUM_CTX = 16_384
 // named constants because they bound two different prompts and will drift
 // apart if either grows; if they do diverge, the reload cost is the trade to
 // price in.
+//
+// That reload cost applies only while sqlModel and narrationModel resolve to
+// the same model, which is how they ship — two different models are two
+// separate runners keyed independently, and divergent num_ctx values cost
+// nothing extra there.
 //
 // Same model caveat as NARRATION_NUM_CTX: validated only against the two
 // recommended chat models (qwen2.5:32b, qwen2.5-coder:14b, both ≥32k native
@@ -257,7 +289,7 @@ export async function POST(request: Request) {
     throw e
   }
 
-  const { ollamaUrl, chatModel } = await getLlmConfig()
+  const { ollamaUrl, sqlModel, narrationModel } = await getLlmConfig()
   const signal = ollamaSignal(request.signal)
 
   const trimmedHistory = trimHistory(history)
@@ -296,7 +328,7 @@ export async function POST(request: Request) {
   // determinism, not creativity.
   let sql: string
   try {
-    sql = await generateSql(ollamaUrl, chatModel, sqlSystemPrompt, sqlPrompt, signal)
+    sql = await generateSql(ollamaUrl, sqlModel, sqlSystemPrompt, sqlPrompt, signal)
   } catch (e) {
     const message = e instanceof OllamaUnavailable ? e.message : `Could not connect to Ollama at ${ollamaUrl}`
     return new Response(
@@ -443,7 +475,7 @@ export async function POST(request: Request) {
 
     let repaired: string
     try {
-      repaired = await generateSql(ollamaUrl, chatModel, sqlSystemPrompt, repairPrompt, signal)
+      repaired = await generateSql(ollamaUrl, sqlModel, sqlSystemPrompt, repairPrompt, signal)
     } catch {
       // Repair round-trip couldn't reach the model — surface the original error.
       return new Response(
@@ -599,10 +631,11 @@ export async function POST(request: Request) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: chatModel,
+        model: narrationModel,
         system: buildNarrationSystemPrompt(baseCurrency, knowledgeBlock),
         prompt: `${priorContext}User: ${question}\n\nData:\n${JSON.stringify(narrationRows, null, 2)}${truncationNote}`,
         stream: true,
+        keep_alive: OLLAMA_KEEP_ALIVE,
         options: { num_ctx: NARRATION_NUM_CTX },
       }),
       signal: ollamaSignal(request.signal),
