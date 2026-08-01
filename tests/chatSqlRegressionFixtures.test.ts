@@ -655,15 +655,18 @@ describe('ADR-0019: a category-filtered spend total must not count transfer legs
   const now = new Date()
   const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
 
-  /** The shape the three worked examples now teach. */
+  /**
+   * The shape the three worked examples now teach, down to the bare SUM(amount)
+   * they use — so spending reads as a negative figure here, as it does in the app.
+   */
   const GUARDED =
-    `SELECT SUM(-amount) / 100.0 AS total FROM "Transaction" WHERE category = '🚗 Auto loans' ` +
+    `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '🚗 Auto loans' ` +
     `AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL ` +
     `AND status IN ('committed','reconciled')`
 
   /** The shape they taught before this ticket. Same question, wrong number. */
   const UNGUARDED =
-    `SELECT SUM(-amount) / 100.0 AS total FROM "Transaction" WHERE category = '🚗 Auto loans' ` +
+    `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '🚗 Auto loans' ` +
     `AND parentTransactionId IS NULL AND reimbursementTxId IS NULL ` +
     `AND status IN ('committed','reconciled')`
 
@@ -720,17 +723,18 @@ describe('ADR-0019: a category-filtered spend total must not count transfer legs
 
   it('the guarded query returns only real spending in the category', () => {
     const out = db.prepare(GUARDED).get() as { total: number }
-    expect(out.total).toBe(100)
-    // The load-bearing assertion: AED 2,344.68 of moved money is not spending.
-    expect(out.total).toBeLessThan(2_344.68)
+    expect(out.total).toBe(-100)
+    // The load-bearing assertion: AED 2,344.68 of moved money is not spending, so
+    // the outflow stays smaller in magnitude than the repayment.
+    expect(Math.abs(out.total)).toBeLessThan(2_344.68)
   })
 
   it('dropping the guard reports the whole repayment as spending', () => {
     const out = db.prepare(UNGUARDED).get() as { total: number }
-    expect(out.total).toBe(2_444.68)
+    expect(out.total).toBe(-2_444.68)
     // Twenty-four times the real figure, well-formed, and narratable without a
     // hint that anything is wrong. This is the number the shape used to teach.
-    expect(out.total).toBeGreaterThan(20 * 100)
+    expect(Math.abs(out.total)).toBeGreaterThan(20 * 100)
   })
 
   it('no guard in the chain refuses either shape — the protection is the prompt', () => {
@@ -751,7 +755,7 @@ describe('ADR-0019: a category-filtered spend total must not count transfer legs
     // pulls the guard back off, and the model may well ignore it. Treat a failure
     // in the app as a prompt regression to investigate, not as a broken invariant.
     const paid = db.prepare(UNGUARDED).get() as { total: number }
-    expect(paid.total).toBe(2_444.68)
+    expect(paid.total).toBe(-2_444.68)
 
     // The whole reason for prompt-only: identical SQL, opposite intents, and the
     // guard chain cannot separate them because the difference is in the question.

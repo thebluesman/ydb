@@ -63,9 +63,12 @@ describe('transfer-exclusion rule in the SQL prompt', () => {
     // prose pulls the guard back off, which is why it has to actually be there.
     expect(prompt).toMatch(/mirror case for a category filter/i)
     expect(prompt).toMatch(/how much did I pay on my car loan/i)
-    // It must not hand the model a fixed list to pattern-match against — which
-    // categories can land on a transfer is the upstream pipeline's business.
-    expect(prompt).toMatch(/not fixed and is deliberately not listed here/i)
+    // The two illustrative questions map onto the only two colliding categories
+    // in dev.db today, so the prompt cannot claim it has listed nothing — a model
+    // will pattern-match them regardless. It must instead mark them as examples
+    // and say the real set is the upstream pipeline's business, not a fixed list.
+    expect(prompt).toMatch(/illustrations, not the complete set/i)
+    expect(prompt).toMatch(/never as the thing that settles it/i)
     expect(prompt).toMatch(/read it off what is being asked/i)
   })
 
