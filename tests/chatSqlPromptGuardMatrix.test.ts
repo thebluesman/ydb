@@ -54,6 +54,13 @@ const NOW = new Date('2026-07-31T09:00:00.000Z')
 // hide in that branch as easily as in the static ones.
 const CATEGORIES = ['🛒 Groceries', '✈️ Travel', '🚗 Auto loans', '🍽️ Dining']
 
+// Likewise for accounts (ADR-0018): the Account-join example takes its filter
+// literal from this list at request time, so rendering with a vocabulary and
+// without it are two different strings and an unguarded example could hide in
+// either. Shape resolution for that example is asserted separately, in
+// tests/chatSqlPromptAccountJoinExample.test.ts.
+const ACCOUNTS = ['ADCB Credit Card', 'ADCB, Current', 'Emirates NBD Savings']
+
 type Example = { question: string; sql: string }
 
 /**
@@ -104,12 +111,29 @@ const STATUS = /status IN \('committed','reconciled'\)/
 const TRANSACTION_TYPE = /transactionType\s*(!=|=|IN)/
 
 describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', () => {
+  // `categoryFiltered` is the exact number of category-filtered worked examples
+  // each rendering is expected to contain, stated per entry rather than derived
+  // from the label. A string-match on the label put every future row into
+  // whichever branch it did not match, silently handing new rows the weaker
+  // bound — which is the drift this matrix exists to catch, arriving through the
+  // matrix itself. Adding a row now forces a deliberate count.
+  //
+  // Two of the three are static (groceries, travel); the third is the ADR-0008
+  // no-matching-category example, which only renders when there is a vocabulary
+  // for a category to fail to correspond to. The account vocabulary adds an
+  // Account-join example that filters on `a.name`, not on category, so it does
+  // not move this count.
   const prompts = [
-    { label: 'no stored vocabulary', prompt: buildSqlSystemPrompt(NOW) },
-    { label: 'with stored vocabulary', prompt: buildSqlSystemPrompt(NOW, CATEGORIES) },
+    { label: 'no stored vocabulary', prompt: buildSqlSystemPrompt(NOW), categoryFiltered: 2 },
+    { label: 'with stored vocabulary', prompt: buildSqlSystemPrompt(NOW, CATEGORIES), categoryFiltered: 3 },
+    {
+      label: 'with stored category and account vocabulary',
+      prompt: buildSqlSystemPrompt(NOW, CATEGORIES, ACCOUNTS),
+      categoryFiltered: 3,
+    },
   ]
 
-  for (const { label, prompt } of prompts) {
+  for (const { label, prompt, categoryFiltered: expectedCategoryFiltered } of prompts) {
     describe(label, () => {
       const examples = extractExamples(prompt)
 
@@ -180,8 +204,12 @@ describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', 
         // drifting such that they stop being selected would silently restore the
         // exemption. `CATEGORIES` includes `🚗 Auto loans` so the rendered
         // examples are built from a vocabulary that really does collide.
+        //
+        // Exact, not a lower bound: the count comes from the `prompts` entry, so
+        // a rendering that gains or loses a category-filtered example has to say
+        // so there rather than slipping under a `>=`.
         const categoryFiltered = examples.filter((ex) => /category\s*=\s*'/.test(ex.sql))
-        expect(categoryFiltered.length).toBeGreaterThanOrEqual(label === 'with stored vocabulary' ? 3 : 2)
+        expect(categoryFiltered.length).toBe(expectedCategoryFiltered)
         for (const ex of categoryFiltered) {
           expect(has(ex.sql, /transactionType != 'transfer'/), `transfer exclusion missing: ${ex.question}`).toBe(true)
         }
