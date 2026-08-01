@@ -215,13 +215,33 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   Nobody has measured which shapes the model actually produces, so the size of the remaining hole is
   unknown. The eval harness above is what would answer it. **Narrowed 2026-08-01:** all 5 persisted
   `ChatMessage.sql` rows — the entire live sample — reference `Account` zero times, so the fail-open
-  path has never fired, and the surface question is genuinely unmeasured rather than known-large. A
-  contributing cause was found and is separately fixable: `lib/chatSqlPrompt.ts` prose-instructs the
-  join rule (`"Transaction".accountId = Account.id`) with no worked example demonstrating it, while
-  categories get three. Few-shot shape beats prose (ADR-0008), so the model has no shape to imitate for
-  the one construct this guard reads. Adding an example whose join shape `accountNameScope`'s
-  `FROM`/`JOIN` resolver actually recognises is a `@backend-engineer` prompt ticket — no ADR, it
-  implements ADR-0018 rather than changing it. The harness question stays open regardless.
+  path has never fired, and the surface question is genuinely unmeasured rather than known-large.
+  Two separate things were then found, and they should not be conflated:
+
+  1. *A prompt gap, since closed (PR #38).* `lib/chatSqlPrompt.ts` prose-instructed the join rule
+     (`"Transaction".accountId = Account.id`) with no worked example, while categories got three.
+     Few-shot shape beats prose (ADR-0008), so the model had no shape to imitate for the one construct
+     this guard reads. An aliased worked example was added — no ADR, it implements ADR-0018.
+  2. *A bug in the resolver, still open.* The fail-open surface is **not** the exotic shapes ADR-0018
+     described as "a CTE or an unusual join form" — it is the plainest join the model can write.
+     `TABLE_SOURCE_RE` in `lib/chatAccountVocabulary.ts` gives the alias slot an unconditional
+     `\s+identifier` match, so on an **unaliased** source the alias slot consumes the following
+     `JOIN`/`FROM` keyword itself. `NOT_AN_ALIAS` correctly declines to bind it as an alias, but the
+     regex's `lastIndex` has already advanced past it, so the *next* table source is never matched at
+     all. Two distinct symptoms, both pinned as tripwires in
+     `tests/chatSqlPromptAccountJoinExample.test.ts` (six shapes plus two aliased controls):
+     `FROM "Transaction" JOIN Account …` silently registers no `Account` qualifier and is not checked
+     (fail-open); `FROM Account JOIN "Transaction" …` loses the second table, so `tables.size === 1`
+     and `bareNameIsAccount` wrongly returns true, refusing a bare `name` that belongs to the other
+     table (false ADR-0014 refusal). A third shape fails by a different mechanism: comma joins
+     (`FROM "Transaction", Account`) are missed regardless of aliasing, because the regex anchors on
+     `FROM`/`JOIN` only and `,` is not a source-introducing token. Aliasing every source hides all
+     three, which is why the PR #38 example is aliased — a workaround, not the fix. Scoped as a
+     `@backend-engineer` bug ticket; no ADR, this is a defect in a guard's detection logic, not a
+     change to what ADR-0018 decided to check.
+
+  The harness question stays open regardless: it is what would say how often the model writes the
+  affected shapes, which is a different question from whether the resolver handles them.
 - **ADR-0016's sign-branch detector is satisfied by a `transactionType` comparison anywhere in the
   statement**, including one inside a subquery that does not govern the sign branch. Under-detects
   rather than over-rejects, needs a real parser to close, and has not been seen live (ADR-0016
