@@ -34,6 +34,16 @@ import { buildSqlSystemPrompt } from '@/lib/chatSqlPrompt'
 // route-level detectors in a separate @backend-engineer ticket. They are
 // asserted here too, so the prompt can never teach the shape its own detector
 // would refuse.
+//
+// ADR-0019 (2026-08-01) widened one column of this matrix. The transfer
+// exclusion used to be required only where a query branches on the sign of
+// amount, which left the three category-filtered examples exempt; measuring
+// prisma/dev.db showed transfer legs really do carry spend categories (loan
+// repayments), so a category-filtered spend total needs the guard for the same
+// reason a sign split does. It stays prompt-only and gets NO detector, for
+// ADR-0016's reason unchanged: "how much did I spend on Auto loans" and "how
+// much did I pay on my car loan" produce identical SQL and want opposite
+// answers, so applicability is a fact about the question, not the query.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const NOW = new Date('2026-07-31T09:00:00.000Z')
@@ -66,7 +76,7 @@ function extractExamples(prompt: string): Example[] {
 
 // ── Shape predicates ─────────────────────────────────────────────────────────
 
-/** Branches or filters on the sign of amount — the transfer rule's stated trigger. */
+/** Branches or filters on the sign of amount — the transfer rule's ORIGINAL stated trigger. */
 const branchesOnSign = (sql: string) => /amount\s*[<>]\s*0/.test(sql)
 
 /** Transfers are the SUBJECT of the question, not something to exclude. */
@@ -77,6 +87,13 @@ const sumsMoney = (sql: string) => /SUM\s*\(/i.test(sql)
 
 /** Computes a spend figure: an explicit negative-side branch, or a category-filtered total. */
 const computesSpend = (sql: string) => /amount\s*<\s*0/.test(sql) || /category\s*=\s*'/.test(sql)
+
+/**
+ * Computes a money figure of the kind transfers must not contaminate — ADR-0019's
+ * widened trigger. Spending, income, earnings or net flow, whether it reaches
+ * that figure through a sign branch or through a category filter.
+ */
+const isFlowAggregate = (sql: string) => sumsMoney(sql) && (branchesOnSign(sql) || computesSpend(sql))
 
 const has = (sql: string, re: RegExp) => re.test(sql)
 
@@ -134,15 +151,39 @@ describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', 
         expect(withPairedCredit).toHaveLength(1)
       })
 
-      it('names a transactionType wherever it branches on the sign of amount', () => {
-        // The decidable guard, and the first of the two PR #32 bugs. A sign
-        // split with no transactionType predicate counts the outgoing leg of a
-        // transfer as an expense and the incoming leg as income, inflating both
+      it('names a transactionType wherever it computes a spending or flow figure', () => {
+        // The first of the two PR #32 bugs, with ADR-0019's widened trigger. A
+        // sign split with no transactionType predicate counts the outgoing leg of
+        // a transfer as an expense and the incoming leg as income, inflating both
         // by the same amount. Some predicate is required, not a specific one —
         // the transfer-volume example passes on `= 'transfer'`.
+        //
+        // ADR-0019 moved this column from `n/a` to required on the CATEGORY-
+        // filtered rows too, which used to be exempt because they never mention
+        // the sign of amount. Measured against prisma/dev.db on 2026-08-01: all
+        // 44 transfer rows carry a category and 5 carry a real spend category
+        // (3 `🚗 Auto loans`, 2 `💰 Personal loans`), assigned upstream by the
+        // SMS-capture pipeline. Worse than the double-count, not milder — the
+        // category is on the outgoing leg only and the counterpart is
+        // `Uncategorized`, so nothing cancels and the full amount moved comes
+        // back as spending. The sign branch was the SYMPTOM in PR #32, never the
+        // reason; the reason is that a transfer is not spending.
         for (const ex of examples) {
-          if (!branchesOnSign(ex.sql)) continue
+          if (!isFlowAggregate(ex.sql)) continue
           expect(has(ex.sql, TRANSACTION_TYPE), `transactionType guard missing: ${ex.question}`).toBe(true)
+        }
+      })
+
+      it('guards the category-filtered spend examples specifically (ADR-0019)', () => {
+        // Stated as its own assertion rather than left implicit in the loop
+        // above: these are the three examples ADR-0019 changed, and a predicate
+        // drifting such that they stop being selected would silently restore the
+        // exemption. `CATEGORIES` includes `🚗 Auto loans` so the rendered
+        // examples are built from a vocabulary that really does collide.
+        const categoryFiltered = examples.filter((ex) => /category\s*=\s*'/.test(ex.sql))
+        expect(categoryFiltered.length).toBeGreaterThanOrEqual(label === 'with stored vocabulary' ? 3 : 2)
+        for (const ex of categoryFiltered) {
+          expect(has(ex.sql, /transactionType != 'transfer'/), `transfer exclusion missing: ${ex.question}`).toBe(true)
         }
       })
 
@@ -197,6 +238,16 @@ describe('the guard matrix is actually load-bearing', () => {
     `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE transactionType = 'transfer' ` +
     `AND status IN ('committed','reconciled')`
 
+  /**
+   * ADR-0019's shape: a category-filtered spend total with no sign comparison
+   * anywhere. This is what the three worked examples looked like before this
+   * ticket, and it is the mutation the matrix now catches — drop
+   * `AND transactionType != 'transfer'` from an example and it renders as this.
+   */
+  const UNGUARDED_CATEGORY_SPEND =
+    `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '🚗 Auto loans' ` +
+    `AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND status IN ('committed','reconciled')`
+
   it('recognises a sign branch with no transactionType predicate', () => {
     expect(branchesOnSign(UNGUARDED_SIGN_SPLIT)).toBe(true)
     expect(has(UNGUARDED_SIGN_SPLIT, TRANSACTION_TYPE)).toBe(false)
@@ -205,6 +256,24 @@ describe('the guard matrix is actually load-bearing', () => {
   it('recognises a bare sum over transfer rows', () => {
     expect(transferIsSubject(BARE_TRANSFER_SUM)).toBe(true)
     expect(/SUM\s*\(\s*amount\s*\)/i.test(BARE_TRANSFER_SUM)).toBe(true)
+  })
+
+  it('recognises a category-filtered spend total with no transfer exclusion (ADR-0019)', () => {
+    // The trigger must fire on this even though `branchesOnSign` does not — that
+    // gap is precisely what ADR-0019 closed. If `isFlowAggregate` ever narrows
+    // back to the sign branch, this goes red instead of the matrix quietly
+    // waving the category examples through.
+    expect(branchesOnSign(UNGUARDED_CATEGORY_SPEND)).toBe(false)
+    expect(isFlowAggregate(UNGUARDED_CATEGORY_SPEND)).toBe(true)
+    expect(has(UNGUARDED_CATEGORY_SPEND, TRANSACTION_TYPE)).toBe(false)
+  })
+
+  it('a counting query over a category is not treated as a flow aggregate', () => {
+    // Over-rejection check on the widened trigger: COUNT(*) is not a money
+    // figure, so a transfer row inside it is not a wrong number.
+    const countByCategory =
+      `SELECT COUNT(*) AS n FROM "Transaction" WHERE category = '🚗 Auto loans' AND status IN ('committed','reconciled')`
+    expect(isFlowAggregate(countByCategory)).toBe(false)
   })
 
   it('does not mistake an exclusion guard for a transfer subject', () => {
