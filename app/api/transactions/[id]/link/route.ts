@@ -51,6 +51,26 @@ export async function POST(
   if (target.linkedTransferId !== null && target.linkedTransferId !== txId) {
     return NextResponse.json({ error: 'target is already linked to another transaction' }, { status: 409 })
   }
+  // The two checks above only inspect OUTBOUND pointers. A third row may still
+  // point INBOUND at either side; pairing over it would silently orphan that
+  // row (A→B, then B→C leaves A dangling). The ADR-0021 trigger aborts this,
+  // but as a raw SQLite error — so catch it here and return a real 409.
+  const inboundOrphan = await prisma.transaction.findFirst({
+    where: {
+      linkedTransferId: { in: [txId, tgtId] },
+      id: { notIn: [txId, tgtId] },
+    },
+    select: { id: true, linkedTransferId: true },
+  })
+  if (inboundOrphan) {
+    const side = inboundOrphan.linkedTransferId === txId ? 'source' : 'target'
+    return NextResponse.json(
+      {
+        error: `cannot link: transaction ${inboundOrphan.id} still points at the ${side}, and linking would orphan it`,
+      },
+      { status: 409 },
+    )
+  }
 
   await prisma.$transaction([
     prisma.transaction.update({
