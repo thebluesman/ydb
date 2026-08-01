@@ -15,7 +15,8 @@ type HealthState =
 const DEFAULT_VALUE = '__default__'
 
 /**
- * Defaults-first model configuration. The two roles (extraction, chat) are
+ * Defaults-first model configuration. The three roles (extraction, and the two
+ * halves of a chat turn — SQL generation and narration) are each
  * shown with their current value and a plain-English recommendation. Actually
  * changing them lives behind an "Advanced" disclosure that lists the installed
  * models (via GET /api/ollama/health, which proxies ${ollamaUrl}/api/tags),
@@ -26,9 +27,16 @@ export function ModelSettings({ initialSettings }: { initialSettings: Setting[] 
   const settingValue = (key: string) =>
     initialSettings.find((s) => s.key === key)?.value?.trim() ?? ''
 
+  // The pre-split `chatModel` value seeds both chat roles for display, matching
+  // what lib/llm-config.ts resolves at request time — otherwise an install
+  // configured before the split would show "(default)" next to a model it is
+  // not actually running. Saving either role writes the new key and the legacy
+  // one stops mattering (it is never written back here).
+  const legacyChatModel = settingValue('chatModel')
   const [values, setValues] = useState<Record<string, string>>({
     extractionModel: settingValue('extractionModel'),
-    chatModel: settingValue('chatModel'),
+    sqlModel: settingValue('sqlModel') || legacyChatModel,
+    narrationModel: settingValue('narrationModel') || legacyChatModel,
     ollamaUrl: settingValue('ollamaUrl'),
   })
   const [advanced, setAdvanced] = useState(false)
@@ -126,7 +134,8 @@ export function ModelSettings({ initialSettings }: { initialSettings: Setting[] 
       </div>
 
       {roleCard('extraction')}
-      {roleCard('chat')}
+      {roleCard('sql')}
+      {roleCard('narration')}
 
       <button
         type="button"

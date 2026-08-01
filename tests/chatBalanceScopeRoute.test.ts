@@ -34,7 +34,11 @@ vi.mock('@/lib/prisma', () => ({
 }))
 
 vi.mock('@/lib/llm-config', () => ({
-  getLlmConfig: async () => ({ ollamaUrl: 'http://ollama.test', chatModel: 'qwen2.5:32b' }),
+  getLlmConfig: async () => ({
+    ollamaUrl: 'http://ollama.test',
+    sqlModel: 'qwen2.5:32b',
+    narrationModel: 'qwen2.5:32b',
+  }),
 }))
 
 const { POST } = await import('@/app/api/chat/route')
