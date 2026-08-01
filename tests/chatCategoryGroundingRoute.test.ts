@@ -17,6 +17,8 @@ const CATEGORIES = ['✈️ Travel', '🛒 Groceries', '🏠 Rent']
 // that's the whole reason the substitution was invisible to the old guard.
 const CATEGORIES_WITH_CATCHALL = ['✈️ Travel', '🛒 Groceries', '🏠 Rent', 'Uncategorized']
 
+const ACCOUNTS = ['ADCB Current', 'Emirates NBD Savings']
+
 /** What the fake ledger has stored; overridden by the cap test. */
 let storedCategories: string[] = CATEGORIES
 
@@ -29,6 +31,10 @@ vi.mock('@/lib/prisma', () => ({
     transaction: {
       findMany: async () => storedCategories.map((category) => ({ category })),
     },
+    // Account-name grounding reads this per turn (ADR-0008's mechanism on
+    // Account.name). This suite is about categories, so it stays a fixed list —
+    // but it has to be present, because the route now loads both.
+    account: { findMany: async () => ACCOUNTS.map((name) => ({ name })) },
   },
   executeReadonlyQuery: (sql: string) => {
     queryCalls.push(sql)

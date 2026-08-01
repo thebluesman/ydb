@@ -18,6 +18,9 @@ vi.mock('@/lib/prisma', () => ({
     // Empty here: this test is about what does and doesn't reach each prompt,
     // and an empty vocabulary leaves the SQL prompt exactly as it was.
     transaction: { findMany: async () => [] },
+    // Same for the stored account-name vocabulary, and empty for the same
+    // reason — an empty vocabulary renders no block at all.
+    account: { findMany: async () => [] },
   },
   executeReadonlyQuery: () => ({ rows: [{ total: 42 }], truncated: false }),
 }))

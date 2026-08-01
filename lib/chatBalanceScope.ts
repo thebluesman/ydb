@@ -45,6 +45,36 @@
  * This lives here and is called from `app/api/chat/route.ts`, not from
  * `lib/prisma.ts`: the read-only guard stays input-agnostic and single-purpose,
  * and this is a scope check on generated SQL, not a safety check.
+ *
+ * ── The star-expansion gap (added 2026-08-01) ────────────────────────────────
+ *
+ * `SELECT * FROM Account WHERE accountType = 'auto_loan'` names no column at
+ * all, so both SQL-text checks above pass it, and `openingBalance` arrives in
+ * the result rows anyway — via the star expansion — where narration is free to
+ * read it as a live balance. That is the ADR-0009 miss all over again: a check
+ * aimed at a construct the model does not have to use.
+ *
+ * The fix follows ADR-0010's own logic rather than extending the text scan.
+ * ADR-0010 moved enforcement from the input column to the OUTPUT LABEL, because
+ * narration receives `JSON.stringify(rows)` and the key is the only thing
+ * telling it what a number means. Result-row keys ARE those output labels — the
+ * same labels, resolved by SQLite instead of written out by the model. So the
+ * check is applied to them, after execution and before narration, by
+ * `balanceScopeRowViolation` below.
+ *
+ * The alternative considered and rejected: banning `SELECT *` outright in the
+ * SQL text. Cheaper, and it never spends a query — but it puts enforcement back
+ * on the input, which is the direction ADR-0010 abandoned for cause, and it
+ * over-rejects into ordinary territory ("show me my recent transactions" is a
+ * perfectly good star projection over a table with no sensitive column). Rows
+ * cost nothing to inspect: the query has already run on a read-only connection,
+ * which is the actual safety boundary, and refusing after execution costs one
+ * local SQLite read and no model tokens — narration is where the tokens are, and
+ * narration is what this stops.
+ *
+ * Note the direction of the win: this is a check on what the *engine* produced,
+ * so it is exact rather than heuristic. It is not general query analysis (the
+ * thing ADR-0010 forbids growing this into) — it never looks at the query.
  */
 
 /**
@@ -131,6 +161,59 @@ export function balanceScopeViolation(sql: string): BalanceScopeViolation | null
   return null
 }
 
+// ── Result-row keys (the star-expansion net) ────────────────────────────────
+
+export type BalanceScopeRowViolation =
+  /** A result column IS `openingBalance`, however it got there. */
+  | { kind: 'result-opening-balance'; column: string }
+  /** A result column's name asserts balance semantics, per BALANCE_ALIAS_WORDS. */
+  | { kind: 'result-balance-alias'; column: string; word: string }
+
+/**
+ * The union of every key present across the result rows, in first-seen order.
+ *
+ * All rows rather than `rows[0]`: better-sqlite3 gives uniform keys today, but
+ * that is a property of the driver and not of this check, and a first row that
+ * happened to be sparse would be a silent hole in a guard whose whole job is
+ * to have no silent holes. The cost is a walk over at most the driver's row cap.
+ */
+function resultColumns(rows: unknown[]): string[] {
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (row === null || typeof row !== 'object') continue
+    for (const key of Object.keys(row as Record<string, unknown>)) seen.add(key)
+  }
+  return [...seen]
+}
+
+/**
+ * The first balance-scope violation among the columns a query actually
+ * returned, or `null` if the result set is in scope.
+ *
+ * Run AFTER execution and BEFORE narration. It exists for the projections that
+ * cannot be judged from the query string — `SELECT *`, `SELECT a.*`, a star in
+ * a CTE — where the column list is decided by the schema rather than written by
+ * the model. `balanceScopeViolation` above still runs first and still catches
+ * everything the text can decide, so a named `openingBalance` never gets as far
+ * as being executed.
+ *
+ * The two rules are the same two rules, deliberately: this is one scope
+ * decision with two enforcement points, not a second policy.
+ */
+export function balanceScopeRowViolation(rows: unknown[]): BalanceScopeRowViolation | null {
+  const columns = resultColumns(rows)
+
+  for (const column of columns) {
+    if (OPENING_BALANCE_RE.test(column)) return { kind: 'result-opening-balance', column }
+  }
+  for (const column of columns) {
+    for (const word of BALANCE_ALIAS_WORDS) {
+      if (aliasAsserts(column, word)) return { kind: 'result-balance-alias', column, word }
+    }
+  }
+  return null
+}
+
 /**
  * Why the figure can't be computed here, and where the real one lives. Shared
  * verbatim with `balanceIntentMessage` (ADR-0015): the scope decision is one
@@ -164,6 +247,26 @@ export function balanceScopeMessage(violation: BalanceScopeViolation): string {
         `What it would actually have returned is the net flow across the filtered period — inflow minus ` +
         `outflow for those dates — and narrating that as a balance is exactly the wrong-number failure ` +
         `this check exists to stop. So I didn't run it.`
+
+  return `${detail} ${BALANCE_SCOPE_PARAGRAPH} ${BALANCE_SCOPE_ALTERNATIVE}`
+}
+
+/**
+ * The refusal text for a violation found in the result rows.
+ *
+ * Says explicitly that the query ran, because it did — the user can see the SQL
+ * on the frame and "I didn't run it" would be a lie about work that happened.
+ * Nothing was narrated, which is the part that matters.
+ */
+export function balanceScopeRowMessage(violation: BalanceScopeRowViolation): string {
+  const detail =
+    violation.kind === 'result-opening-balance'
+      ? `The query ran, but it came back with an Account.openingBalance column ("${violation.column}") — ` +
+        `a SELECT * picks that up without ever naming it — so I stopped before describing the result. ` +
+        `An opening balance is not a current balance, and reporting it as one is the wrong-number ` +
+        `failure this check exists to stop.`
+      : `The query ran, but one of the columns it returned is named "${violation.column}", which claims ` +
+        `to be a balance figure. I stopped before describing the result rather than repeat that claim.`
 
   return `${detail} ${BALANCE_SCOPE_PARAGRAPH} ${BALANCE_SCOPE_ALTERNATIVE}`
 }

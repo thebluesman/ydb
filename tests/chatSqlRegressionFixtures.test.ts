@@ -2,7 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import Database from 'better-sqlite3'
 import type { Database as Db } from 'better-sqlite3'
 import { balanceIntentMatch, balanceIntentMessage } from '@/lib/chatBalanceIntent'
-import { balanceScopeMessage, balanceScopeViolation } from '@/lib/chatBalanceScope'
+import {
+  balanceScopeMessage,
+  balanceScopeRowMessage,
+  balanceScopeRowViolation,
+  balanceScopeViolation,
+} from '@/lib/chatBalanceScope'
 import { compoundSelectMessage, compoundSelectViolation } from '@/lib/chatCompoundSelect'
 import {
   signBranchGuardMessage,
@@ -11,6 +16,7 @@ import {
   transferSumViolation,
 } from '@/lib/chatMoneyGuards'
 import { unknownCategoryLiterals, unknownCategoryMessage } from '@/lib/chatCategoryVocabulary'
+import { unknownAccountLiterals, unknownAccountMessage } from '@/lib/chatAccountVocabulary'
 import { NON_ANSWER_HEADLINE, isNonAnswerReason, type NonAnswerReason } from '@/lib/chatNonAnswer'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,16 +66,32 @@ const CATEGORIES = [
   '⛽ Fuel',
 ]
 
+/**
+ * The stored `Account.name` vocabulary the account guard grounds against.
+ *
+ * Named after their banks, which is the point: session 10's model wrote
+ * `LIKE '%credit card%'`, a description of an account TYPE, and no real ledger
+ * names an account that way. The generic phrase matching nothing is the bug.
+ */
+const ACCOUNTS = [
+  'ADCB Current',
+  'Emirates NBD Savings',
+  'Mashreq Neo Visa',
+  '🚗 Car loan',
+]
+
 type GuardOutcome = {
   reason: NonAnswerReason
   /** Which guard fired — for asserting the reason is attributable, not just present. */
   guard:
     | 'balance-intent'
     | 'category-vocabulary'
+    | 'account-vocabulary'
     | 'balance-scope'
     | 'compound-select'
     | 'sign-branch-guard'
     | 'transfer-sum'
+    | 'balance-scope-rows'
   detail: string
   message: string
 }
@@ -85,8 +107,32 @@ type GuardOutcome = {
  *
  * If route.ts adds, removes or reorders a guard, this function must change with
  * it, and the over-rejection canaries below are what will catch the difference.
+ *
+ * `rows` is the one thing this re-statement cannot fabricate. Since 2026-08-01
+ * the route runs a final balance-scope check on the columns the query actually
+ * RETURNED, because a `SELECT *` cannot be judged from the query string — the
+ * schema decides its column list, not the model. Callers that care about that
+ * guard execute the SQL themselves and hand the rows in; callers that don't pass
+ * nothing, and the row check is a no-op on an empty result exactly as it is in
+ * the route. This is the only place the chain is not a pure function of text,
+ * and it is a property of the guard, not of the harness.
  */
-function runGuardChain(question: string, sql: string, categories = CATEGORIES): GuardOutcome | null {
+type GuardChainOptions = {
+  categories?: string[]
+  accounts?: string[]
+  /** Result rows, when the caller executed the query. */
+  rows?: unknown[]
+}
+
+function runGuardChain(
+  question: string,
+  sql: string,
+  opts: GuardChainOptions = {},
+): GuardOutcome | null {
+  const categories = opts.categories ?? CATEGORIES
+  const accounts = opts.accounts ?? ACCOUNTS
+  const rows = opts.rows ?? []
+
   const intent = balanceIntentMatch(question)
   if (intent) {
     return {
@@ -104,6 +150,16 @@ function runGuardChain(question: string, sql: string, categories = CATEGORIES): 
       guard: 'category-vocabulary',
       detail: unknown.join(', '),
       message: unknownCategoryMessage(unknown, categories),
+    }
+  }
+
+  const unknownAccounts = unknownAccountLiterals(sql, accounts)
+  if (unknownAccounts.length > 0) {
+    return {
+      reason: 'out-of-scope',
+      guard: 'account-vocabulary',
+      detail: unknownAccounts.join(', '),
+      message: unknownAccountMessage(unknownAccounts, accounts),
     }
   }
 
@@ -147,12 +203,25 @@ function runGuardChain(question: string, sql: string, categories = CATEGORIES): 
     }
   }
 
+  // Post-execution, and last: everything above refuses before a query runs, so
+  // this only ever sees a result set the text checks were happy to produce.
+  const scopeRows = balanceScopeRowViolation(rows)
+  if (scopeRows) {
+    return {
+      reason: 'out-of-scope',
+      guard: 'balance-scope-rows',
+      detail: scopeRows.column,
+      message: balanceScopeRowMessage(scopeRows),
+    }
+  }
+
   return null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixture corpus
 // ─────────────────────────────────────────────────────────────────────────────
+
 
 /** Session 10, "which should I pay off first". [verbatim-adr] ADR-0010 §Context. */
 const SESSION_10_SQL =
@@ -274,7 +343,6 @@ describe('must not mislabel — compound SELECTs (ADR-0011)', () => {
     expect(runGuardChain('how many?', sql)).toBeNull()
   })
 })
-
 describe('must not miscount money — the two PR #32 shapes (ADR-0016)', () => {
   // ADR-0016 § Consequences names these two as regression cases, and names the
   // transfer-volume few-shot as the thing they must NOT catch. All three live
@@ -350,56 +418,60 @@ describe('must not miscount money — the two PR #32 shapes (ADR-0016)', () => {
   })
 })
 
-describe('the guard chain never over-rejects an ordinary aggregate', () => {
-  // The ticket's named canaries are sessions 6 and 9. Those rows are gone (see
-  // the provenance note at the top), so these are the closest available
-  // equivalent: plain transaction-level aggregates taken verbatim from the one
-  // chat session prisma/dev.db still holds. Same role — if any current or future
-  // guard starts rejecting these, an ordinary question has stopped working.
-  //
-  // One substitution, deliberate: the persisted vendor-filter query matched on
-  // Shyam's real employer name. Replaced with a neutral literal. Nothing about
-  // the query shape depends on the string.
-  const CANARIES: Array<[string, string, string]> = [
-    [
-      'total expenses this month [verbatim-db]',
-      'Is there any room for savings in my expenses?',
-      'SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses ' +
-        'FROM "Transaction" WHERE transactionType != \'transfer\' AND parentTransactionId IS NULL ' +
-        "AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) " +
-        "AND status IN ('committed','reconciled') LIMIT 200",
-    ],
-    [
-      'spending by category this month [verbatim-db]',
-      'Where can I cut down in my expenses?',
-      'SELECT category, SUM(amount) / 100.0 AS total_expenses FROM "Transaction" ' +
-        "WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL " +
-        "AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) " +
-        "AND status IN ('committed','reconciled') GROUP BY category ORDER BY total_expenses DESC LIMIT 200",
-    ],
-    [
-      'income and expenses split by transactionType [verbatim-db, vendor anonymised]',
-      "What's my income and spending this month?",
-      "SELECT SUM(CASE WHEN T1.amount > 0 AND T1.transactionType = 'credit' THEN T1.amount ELSE 0 END) / 100.0 AS total_income, " +
-        "SUM(CASE WHEN T1.amount < 0 AND T1.transactionType != 'transfer' THEN -T1.amount ELSE 0 END) / 100.0 AS total_expenses " +
-        'FROM "Transaction" T1 ' +
-        "WHERE T1.status IN ('committed','reconciled') AND T1.description LIKE '%ACME PAYROLL%' " +
-        "AND strftime('%Y-%m', T1.date) = strftime('%Y-%m', date('now'))",
-    ],
-    [
-      'a grounded category filter, emoji spelling copied exactly [reconstructed]',
-      'How much did I spend on groceries this month?',
-      'SELECT SUM(-amount) / 100.0 AS total FROM "Transaction" ' +
-        "WHERE category = '🛒 Groceries' AND transactionType != 'transfer' AND parentTransactionId IS NULL",
-    ],
-    [
-      'a monthly trend [reconstructed]',
-      'What did my spending look like month by month?',
-      "SELECT strftime('%Y-%m', date) AS month, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total " +
-        'FROM "Transaction" WHERE transactionType != \'transfer\' AND parentTransactionId IS NULL GROUP BY month ORDER BY month',
-    ],
-  ]
+// The ticket's named canaries are sessions 6 and 9. Those rows are gone (see
+// the provenance note at the top), so these are the closest available
+// equivalent: plain transaction-level aggregates taken verbatim from the one
+// chat session prisma/dev.db still holds. Same role — if any current or future
+// guard starts rejecting these, an ordinary question has stopped working.
+//
+// One substitution, deliberate: the persisted vendor-filter query matched on
+// Shyam's real employer name. Replaced with a neutral literal. Nothing about
+// the query shape depends on the string.
+//
+// Module-scoped rather than local to the describe below, so a newly added guard
+// can be pointed at the same list from its own suite (see the account-name
+// guard's closure tests).
+const CANARIES: Array<[string, string, string]> = [
+  [
+    'total expenses this month [verbatim-db]',
+    'Is there any room for savings in my expenses?',
+    'SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses ' +
+      'FROM "Transaction" WHERE transactionType != \'transfer\' AND parentTransactionId IS NULL ' +
+      "AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) " +
+      "AND status IN ('committed','reconciled') LIMIT 200",
+  ],
+  [
+    'spending by category this month [verbatim-db]',
+    'Where can I cut down in my expenses?',
+    'SELECT category, SUM(amount) / 100.0 AS total_expenses FROM "Transaction" ' +
+      "WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL " +
+      "AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) " +
+      "AND status IN ('committed','reconciled') GROUP BY category ORDER BY total_expenses DESC LIMIT 200",
+  ],
+  [
+    'income and expenses split by transactionType [verbatim-db, vendor anonymised]',
+    "What's my income and spending this month?",
+    "SELECT SUM(CASE WHEN T1.amount > 0 AND T1.transactionType = 'credit' THEN T1.amount ELSE 0 END) / 100.0 AS total_income, " +
+      "SUM(CASE WHEN T1.amount < 0 AND T1.transactionType != 'transfer' THEN -T1.amount ELSE 0 END) / 100.0 AS total_expenses " +
+      'FROM "Transaction" T1 ' +
+      "WHERE T1.status IN ('committed','reconciled') AND T1.description LIKE '%ACME PAYROLL%' " +
+      "AND strftime('%Y-%m', T1.date) = strftime('%Y-%m', date('now'))",
+  ],
+  [
+    'a grounded category filter, emoji spelling copied exactly [reconstructed]',
+    'How much did I spend on groceries this month?',
+    'SELECT SUM(-amount) / 100.0 AS total FROM "Transaction" ' +
+      "WHERE category = '🛒 Groceries' AND transactionType != 'transfer' AND parentTransactionId IS NULL",
+  ],
+  [
+    'a monthly trend [reconstructed]',
+    'What did my spending look like month by month?',
+    "SELECT strftime('%Y-%m', date) AS month, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total " +
+      'FROM "Transaction" WHERE transactionType != \'transfer\' AND parentTransactionId IS NULL GROUP BY month ORDER BY month',
+  ],
+]
 
+describe('the guard chain never over-rejects an ordinary aggregate', () => {
   it.each(CANARIES)('%s passes every guard', (_label, question, sql) => {
     const outcome = runGuardChain(question, sql)
     expect(outcome, outcome ? `${outcome.guard}: ${outcome.detail}` : '').toBeNull()
@@ -410,6 +482,7 @@ describe('the guard chain never over-rejects an ordinary aggregate', () => {
     // no single guard objects, so no reordering of route.ts can change the answer.
     for (const [label, , sql] of CANARIES) {
       expect(unknownCategoryLiterals(sql, CATEGORIES), label).toEqual([])
+      expect(unknownAccountLiterals(sql, ACCOUNTS), label).toEqual([])
       expect(balanceScopeViolation(sql), label).toBeNull()
       expect(compoundSelectViolation(sql), label).toBeNull()
       expect(signBranchGuardViolation(sql), label).toBeNull()
@@ -624,23 +697,26 @@ describe('refusal reasons are distinguishable', () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Known gaps — two of the ticket's "must be declined" fixtures do not decline.
+// FORMERLY KNOWN GAPS — closed 2026-08-01.
 //
-// These use `it.fails`, which PASSES while the gap exists and turns RED the
-// moment the behaviour changes. That keeps CI green without pretending the
-// fixture is covered, and forces whoever closes the gap to come back here and
-// convert the test into a real assertion. Do not delete them to make the suite
-// tidy; they are the ticket's acceptance criteria, unmet.
+// These two arrived as `it.fails` tripwires: two of the ticket's "must be
+// declined" fixtures that did not decline. They are now plain `it` blocks
+// because the behaviour they describe is real. The comments are kept as written
+// so the shape of each bug survives its fix — the ticket's acceptance criteria,
+// now met.
 //
-// Both are @backend-engineer / @tech-lead work, not QA's to fix.
+// GAP 1 was closed by moving ADR-0010's enforcement point onto result-row keys
+// (lib/chatBalanceScope.ts § balanceScopeRowViolation), not by banning SELECT *
+// in the SQL text. GAP 2 was closed by lib/chatAccountVocabulary.ts, ADR-0008's
+// mechanism applied to Account.name.
 // ─────────────────────────────────────────────────────────────────────────────
-describe('KNOWN GAPS (tripwires — a failure here means the gap closed, update the test)', () => {
-  it.fails('GAP 1: `SELECT *` whose result rows carry openingBalance is not declined', () => {
+describe('closed gaps (were tripwires — keep them passing)', () => {
+  it('GAP 1: `SELECT *` whose result rows carry openingBalance is declined', () => {
     // The ticket calls this out explicitly: "text-matching the query alone won't
     // catch it". balanceScopeViolation reads the SQL string, and this string
-    // never contains the word — the column arrives via the star expansion.
-    // Nothing in the route inspects result-row KEYS, so openingBalance reaches
-    // narration and can be reported as a current balance.
+    // never contains the word — the column arrives via the star expansion. So
+    // the check that catches it is the one that reads result-row KEYS, which is
+    // the same thing narration reads.
     const sql = "SELECT * FROM Account WHERE type = 'liability'"
 
     // Proof the column really does arrive:
@@ -651,22 +727,171 @@ describe('KNOWN GAPS (tripwires — a failure here means the gap closed, update 
     db.close()
     expect(Object.keys(rows[0])).toContain('openingBalance')
 
-    // ...and this is what should happen, but does not:
-    expect(runGuardChain('show me my loan accounts', sql)).not.toBeNull()
+    // The pre-execution text checks still can't see it — that is the whole
+    // premise, and it must stay true or the fix is being credited to the wrong
+    // mechanism.
+    expect(balanceScopeViolation(sql)).toBeNull()
+
+    // ...and this is what should happen, and now does:
+    const outcome = runGuardChain('show me my loan accounts', sql, { rows })
+    expect(outcome).not.toBeNull()
+    expect(outcome!.guard).toBe('balance-scope-rows')
+    expect(outcome!.reason).toBe('out-of-scope')
+    expect(outcome!.detail).toBe('openingBalance')
+    // Legible, and it does not pretend the query never ran (ADR-0014).
+    expect(outcome!.message).toMatch(/openingBalance/)
+    expect(outcome!.message).toMatch(/dashboard/i)
   })
 
-  it.fails("GAP 2: Account.name LIKE '%credit card%' matching nothing is not declined", () => {
+  it("GAP 2: Account.name LIKE '%credit card%' matching nothing is declined", () => {
     // Session 10's predicate. ADR-0008's grounding was extended to account names
     // by the [chat-sql] 2 ticket's scope call, but the implementation shipped
-    // categories only — lib/chatCategoryVocabulary.ts says so in its header
-    // ("Scope is categories only"). So an account-name guess that matches no
-    // stored account still runs clean and returns an empty result, which is the
-    // exact false-"no data" shape ADR-0008 was written to stop.
+    // categories only — lib/chatCategoryVocabulary.ts said so in its header
+    // ("Scope is categories only"). An account-name guess that matches no stored
+    // account used to run clean and return an empty result, which is the exact
+    // false-"no data" shape ADR-0008 was written to stop.
     const sql =
       'SELECT a.name, SUM(t.amount) / 100.0 AS total FROM "Transaction" t ' +
       'JOIN Account a ON a.id = t.accountId ' +
       "WHERE a.name LIKE '%credit card%' GROUP BY a.name"
 
-    expect(runGuardChain('what did I put on the credit card?', sql)).not.toBeNull()
+    const outcome = runGuardChain('what did I put on the credit card?', sql)
+    expect(outcome).not.toBeNull()
+    expect(outcome!.guard).toBe('account-vocabulary')
+    expect(outcome!.reason).toBe('out-of-scope')
+    // Reported as written, wildcards and all — same as the category guard does.
+    // The refusal quotes what the model actually asked for, not a tidied version.
+    expect(outcome!.detail).toBe('%credit card%')
+    // Same bar as the category refusal: deny the empty result explicitly rather
+    // than let it read as "nothing was spent".
+    expect(outcome!.message).toMatch(/not the same as nothing having happened/i)
+    // And it must be a dead end no longer — the real account names are offered.
+    expect(outcome!.message).toContain('Mashreq Neo Visa')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The two closures, exercised beyond their single fixture. Each new guard is a
+// fresh chance to over-reject, and the canaries above only cover the shapes that
+// existed when they were written.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('GAP 1 closure — result-row balance scope', () => {
+  it('a star projection over a table with no sensitive column is left alone', () => {
+    // The reason this is a row check and not a SELECT * ban: "show me my recent
+    // transactions" is an ordinary question and an ordinary star projection.
+    const rows = [{ id: 1, date: '2026-07-02', amount: -12_000, category: '🛒 Groceries' }]
+    expect(runGuardChain('show me my recent transactions', 'SELECT * FROM "Transaction" LIMIT 20', { rows }))
+      .toBeNull()
+  })
+
+  it('an ordinary aggregate result set is left alone', () => {
+    expect(balanceScopeRowViolation([{ total: 260 }, { total: null }])).toBeNull()
+  })
+
+  it('an empty result set has no keys, so the check is a no-op', () => {
+    expect(balanceScopeRowViolation([])).toBeNull()
+  })
+
+  it('scans every row, not just the first, so a sparse first row is not a hole', () => {
+    // better-sqlite3 gives uniform keys, but that is the driver's property and
+    // not this guard's, and a guard with a silent hole is the failure mode the
+    // whole initiative keeps rediscovering.
+    const rows = [{ total: 1 }, { total: 2, openingBalance: -703_404 }]
+    expect(balanceScopeRowViolation(rows)).toEqual({
+      kind: 'result-opening-balance',
+      column: 'openingBalance',
+    })
+  })
+
+  it('a returned column claiming balance semantics is caught alongside openingBalance', () => {
+    // One scope decision, two enforcement points — the row check applies the
+    // same alias vocabulary ADR-0010 applies to the SQL text.
+    expect(balanceScopeRowViolation([{ account: 'Car loan', lastReconciledBalance: -703_404 }]))
+      .toEqual({ kind: 'result-balance-alias', column: 'lastReconciledBalance', word: 'balance' })
+  })
+
+  it('case variants of the column name are caught (OPENING_BALANCE_RE style)', () => {
+    for (const column of ['openingBalance', 'opening_balance', 'OPENINGBALANCE', 'a_opening_Balance']) {
+      expect(balanceScopeRowViolation([{ [column]: 0 }]), column).not.toBeNull()
+    }
+  })
+})
+
+describe('GAP 2 closure — account-name grounding', () => {
+  it('a grounded account name, copied exactly, passes', () => {
+    const sql =
+      'SELECT SUM(t.amount) / 100.0 AS total FROM "Transaction" t ' +
+      "JOIN Account a ON a.id = t.accountId WHERE a.name = 'ADCB Current'"
+    expect(runGuardChain('what went through my ADCB account?', sql)).toBeNull()
+  })
+
+  it('a LIKE fragment that really does occur in a stored name passes', () => {
+    const sql =
+      'SELECT SUM(t.amount) / 100.0 AS total FROM "Transaction" t ' +
+      "JOIN Account a ON a.id = t.accountId WHERE a.name LIKE '%NBD%'"
+    expect(runGuardChain('what went through NBD?', sql)).toBeNull()
+  })
+
+  it('a query joining Account but filtering on accountType is not judged', () => {
+    // Filtering on the type rather than the name is the correct way to ask a
+    // question about a class of account, and the prompt says so. Refusing it
+    // would be over-rejection of the shape we are asking the model to produce.
+    const sql =
+      'SELECT a.accountType, SUM(t.amount) / 100.0 AS total FROM "Transaction" t ' +
+      "JOIN Account a ON a.id = t.accountId WHERE a.accountType = 'credit' GROUP BY a.accountType"
+    expect(runGuardChain('what did I put on cards?', sql)).toBeNull()
+  })
+
+  it("Category.name is not mistaken for Account.name", () => {
+    // The reason the qualifier is resolved rather than assumed: `name` is not a
+    // distinctive column the way `category` is, and a literal that is a category
+    // name would be refused as a nonexistent account if this were sloppy.
+    const sql =
+      'SELECT c.name, COUNT(*) AS n FROM "Transaction" t ' +
+      "JOIN Category c ON c.name = t.category WHERE c.name = '✈️ Travel' GROUP BY c.name"
+    expect(runGuardChain('how many travel transactions?', sql)).toBeNull()
+  })
+
+  it('a bare `name` is judged when Account is the only table read', () => {
+    const sql = "SELECT id FROM Account WHERE name = 'Chase Sapphire'"
+    const outcome = runGuardChain('show me my Chase account', sql)
+    expect(outcome).not.toBeNull()
+    expect(outcome!.guard).toBe('account-vocabulary')
+    expect(outcome!.detail).toBe('Chase Sapphire')
+  })
+
+  it('a bare `name` in a joined query is ambiguous and deliberately not judged', () => {
+    // The chosen failure mode, stated: an unrecognised shape is not checked, the
+    // query runs, and a genuine miss still lands on ADR-0014's `no-data` refusal
+    // rather than a narrated zero. Guessing here would risk refusing a legitimate
+    // Category.name filter.
+    const sql =
+      'SELECT name FROM "Transaction" t JOIN Account ON Account.id = t.accountId ' +
+      "WHERE name = 'Chase Sapphire'"
+    expect(runGuardChain('show me my Chase account', sql)).toBeNull()
+  })
+
+  it('an IN list refuses on the members that are not stored', () => {
+    const sql =
+      'SELECT a.name, SUM(t.amount) / 100.0 AS total FROM "Transaction" t ' +
+      "JOIN Account a ON a.id = t.accountId WHERE a.name IN ('ADCB Current', 'Barclays Everyday') GROUP BY a.name"
+    const outcome = runGuardChain('split by account', sql)
+    expect(outcome).not.toBeNull()
+    expect(outcome!.detail).toBe('Barclays Everyday')
+  })
+
+  it('with no stored accounts, nothing is judged', () => {
+    const sql =
+      'SELECT SUM(t.amount) AS total FROM "Transaction" t ' +
+      "JOIN Account a ON a.id = t.accountId WHERE a.name = 'Anything'"
+    expect(runGuardChain('total on Anything', sql, { accounts: [] })).toBeNull()
+  })
+
+  it('the existing canaries are untouched by the account guard', () => {
+    // Order-independence again: no canary filters on an account name, so adding
+    // a guard that only looks at account-name predicates must change nothing.
+    for (const [label, , sql] of CANARIES) {
+      expect(unknownAccountLiterals(sql, ACCOUNTS), label).toEqual([])
+    }
   })
 })
