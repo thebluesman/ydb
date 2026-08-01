@@ -105,9 +105,30 @@ input-agnostic and single-purpose:
   `UNION ALL`, `INTERSECT` and `EXCEPT` are all rejected (ADR-0011 addendum); multi-metric answers use
   multiple aliased columns in one row.
 
-The last two share a root cause worth stating plainly: narration receives `JSON.stringify(rows)` and
-nothing else, so the column alias — written by the model at inference time — is the only thing carrying
-meaning, and it is a claim rather than a description. Both fixes police that claim.
+Three more were found by the 2026-07-30/08-01 fixture work rather than by a live session, which is the
+first time that has happened on this path:
+
+- **A sign-branching aggregate with no `transactionType` predicate, and a bare `SUM(amount)` over
+  transfer-pinned rows** (ADR-0016, detectors in `lib/chatMoneyGuards.ts`) — a transfer is two rows, so
+  a bare sign split counts the outgoing leg as spending and the incoming leg as income, and a sum over
+  transfers cancels to a confident zero. Refused as `unsupported-shape`. The other two money guards,
+  split-leg and reimbursement, get no detector: applicability depends on what the question meant, so
+  they stay prompt-only, held by a guard-matrix test over the prompt's worked examples.
+- **`SELECT *` star-expanding `Account.openingBalance` past the text checks** (ADR-0017) — the column
+  list of a star projection is not knowable from the query string, so the same balance-scope rules also
+  run on the keys of the rows that came back. This is the only guard in the pipeline that runs after
+  execution, and per ADR-0017 that exception should stay singular.
+- **A guessed account-name literal matching nothing** (ADR-0018) — ADR-0008's mechanism on
+  `Account.name`, the column ADR-0008 explicitly scoped out. The `Account` qualifier is resolved off
+  the statement's `FROM`/`JOIN` clauses rather than assumed, since `Category.name` also exists, and an
+  unrecognised table-source shape fails open to a non-check.
+
+The balance-alias (ADR-0010) and compound-SELECT (ADR-0011) fixes share a root cause worth stating
+plainly: narration receives `JSON.stringify(rows)` and nothing else, so the column alias — written by
+the model at inference time — is the only thing carrying meaning, and it is a claim rather than a
+description. Both fixes police that claim. ADR-0017 is the same rule reaching the labels the model did
+*not* write: a star projection's columns are named by the schema, and narration cannot tell the
+difference.
 
 These diagnoses came from `ChatMessage.sql`, which persists every generated query. It is the first
 place to look when a chat answer is wrong; ADR-0009 was written without it and misdiagnosed the bug.
@@ -173,7 +194,9 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   executes a `SELECT` before the model declines. Read-only and local, so it costs latency rather than
   safety. ADR-0015 answered this for the one class where post-hoc refusal was producing wrong numbers
   (balance / net worth); whether the rest of `X1`'s boundary moves pre-generation the same way is still
-  open, and ADR-0007's loop question below probably subsumes it.
+  open, and ADR-0007's loop question below probably subsumes it. ADR-0017 deliberately moves one guard
+  the *other* way — the star-expansion balance check can only run post-execution — so "everything
+  refuses pre-generation" is no longer the target state; "nothing narrates before it is judged" is.
 - **No code-computed balance path for chat, and it is now the priority.** ADR-0010 and ADR-0015 decline
   balance and net-worth questions rather than letting generated SQL assert a balance it cannot compute.
   Answering them properly means computing balances in code via `computeBalance` and handing the result
@@ -186,8 +209,15 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   a balance computed under a neutral alias in answer to a question that named no stock noun still
   reaches narration unchallenged. Closing it needs the `computeBalance` path above or an eval harness;
   neither exists.
-- **Account names have the same grounding gap as categories.** ADR-0008 covers `Transaction.category`
-  only. Whether a guessed account-name literal fails the same silent way has not been tested.
+- **How much of `accountNameScope`'s fail-open surface is real?** ADR-0018 closed the account-name
+  grounding gap this entry used to describe, but its `Account`-qualifier resolution is a regex over
+  `FROM`/`JOIN` and deliberately fails open: a CTE or an unusual join shape is silently not checked.
+  Nobody has measured which shapes the model actually produces, so the size of the remaining hole is
+  unknown. The eval harness above is what would answer it.
+- **ADR-0016's sign-branch detector is satisfied by a `transactionType` comparison anywhere in the
+  statement**, including one inside a subquery that does not govern the sign branch. Under-detects
+  rather than over-rejects, needs a real parser to close, and has not been seen live (ADR-0016
+  addendum). Left open rather than fixed.
 - **Can a transfer leg carry a spend category?** ADR-0016 left the three category-filtered worked
   examples without a `transactionType` guard, correctly under the rule's stated trigger (it fires on
   sign-branching), but if transfer legs ever carry a spend category then "how much did I spend on

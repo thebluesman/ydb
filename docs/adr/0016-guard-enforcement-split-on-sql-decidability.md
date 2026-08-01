@@ -95,3 +95,40 @@ question in `docs/architecture.md`, not guessed at here.
 **`@qa`:** the PR #32 questions stay regression cases. Added: a sign-branching query with no
 transactionType predicate is refused, and `SUM(amount)` over transfer-pinned rows is refused, while
 the transfer-volume few-shot itself still passes both.
+
+## Addendum (2026-08-01): "some transactionType predicate" means a comparison, not a mention
+
+Reviewing PR #35 — this ADR's own deferred detectors — `@backend-engineer` flagged that the
+implementation is stricter than § Decision reads literally. § Decision says the check "demands *some*
+transactionType predicate, not a specific one". The shipped detector accepts only an actual comparison
+(`=`, `==`, `!=`, `<>`, `IN`, `NOT IN`); a bare `GROUP BY transactionType`, a bare
+`SELECT transactionType`, and `transactionType IS NOT NULL` do not satisfy it.
+
+**The stricter reading is the correct one and stands.** "Not a specific one" was written to mean *not a
+specific transaction type* — the sentence's own stated purpose is "so the transfer-volume shape passes",
+i.e. so that `= 'transfer'` satisfies the check as readily as `!= 'transfer'`. It was never about the
+syntactic form. § Consequences already says so in the other direction: "a sign-branching query that
+legitimately wants transfers included must say `transactionType IN (…)` explicitly to pass" — naming a
+comparison, not a mention.
+
+The looser reading is also self-defeating, which settles it independently of authorial intent. `GROUP BY
+transactionType` and `IS NOT NULL` both leave every transfer leg inside the aggregate; the outgoing leg
+is still counted as spending and the incoming leg still as income. A check those forms satisfy would
+pass exactly the queries this detector exists to refuse, while reporting itself as enforced. That is
+worse than no detector, because it converts a known gap into an assumed cover.
+
+Same shape as ADR-0011's addendum, and recorded for the same reason: the decision is unchanged, only
+its stated extent was loose, because it was written from the failure that had been seen rather than
+from the arithmetic underneath it. A future implementer reading § Decision alone could reasonably have
+built the weaker check, and this addendum is what stops that.
+
+Two related calls in PR #35, confirmed rather than decided here, since both follow from "the figure is
+arithmetically dead" rather than from any new judgement: `SUM(-amount)` counts as bare (negating a pair
+that sums to zero still sums to zero), while `SUM(ABS(amount))` deliberately does not (doubled, but not
+dead); and `amount >= 0` / `<= 0` are sign branches while `= 0` / `!= 0` are not (the zero row is not
+what makes the split wrong).
+
+**Known residual, accepted.** The detector looks for a transactionType comparison anywhere in the
+statement rather than in the clause governing the sign branch, so a subquery carrying one satisfies it
+for an outer bare split. That under-detects rather than over-rejects, needs a real parser to close, and
+has not been seen live. Logged here rather than fixed.

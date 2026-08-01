@@ -55,6 +55,8 @@ and Shyam explicitly declares the trigger met (his call, not a timer).
 | Chat SQL category filters | Grounded in stored `Transaction.category` values; unmatched category fails loudly | `docs/adr/0008-chat-sql-category-vocabulary-grounding.md` |
 | Chat SQL and account balances | `openingBalance` off-limits to generated SQL; balance/net-worth questions declined, not guessed | `docs/adr/0009-balance-composition-out-of-scope-for-chat-sql.md` |
 | Chat SQL guard enforcement | Route-level detector only where a guard's applicability is decidable from the SQL alone (transfer guards); split-leg and reimbursement stay prompt-only, held consistent by a guard-matrix test over the worked examples | `docs/adr/0016-guard-enforcement-split-on-sql-decidability.md` |
+| Chat SQL balance scope, second enforcement point | Also checked on result-row keys after execution, before narration — the `SELECT *` star-expansion net; the only post-execution guard in the pipeline | `docs/adr/0017-balance-scope-enforced-on-result-row-keys.md` |
+| Chat SQL account-name filters | Grounded in stored `Account.name` values (ADR-0008's mechanism, second column); the `Account` qualifier is resolved off `FROM`/`JOIN`, and an unrecognised shape fails open | `docs/adr/0018-chat-sql-account-name-vocabulary-grounding.md` |
 
 ## Team (subagents)
 
