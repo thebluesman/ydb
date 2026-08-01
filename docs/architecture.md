@@ -106,7 +106,8 @@ input-agnostic and single-purpose:
   multiple aliased columns in one row.
 
 Three more were found by the 2026-07-30/08-01 fixture work rather than by a live session, which is the
-first time that has happened on this path:
+first time that has happened on this path. A fourth (ADR-0020) came out of implementation triage on
+the units ticket, before any code was written:
 
 - **A sign-branching aggregate with no `transactionType` predicate, and a bare `SUM(amount)` over
   transfer-pinned rows** (ADR-0016, detectors in `lib/chatMoneyGuards.ts`) — a transfer is two rows, so
@@ -116,12 +117,18 @@ first time that has happened on this path:
   they stay prompt-only, held by a guard-matrix test over the prompt's worked examples.
 - **`SELECT *` star-expanding `Account.openingBalance` past the text checks** (ADR-0017) — the column
   list of a star projection is not knowable from the query string, so the same balance-scope rules also
-  run on the keys of the rows that came back. This is the only guard in the pipeline that runs after
-  execution, and per ADR-0017 that exception should stay singular.
+  run on the keys of the rows that came back. This was the only guard in the pipeline that ran after
+  execution; ADR-0020 adds the second, and per ADR-0017 that is the signal to reconsider the phase
+  ordering under ADR-0012's loop rather than to add a third.
 - **A guessed account-name literal matching nothing** (ADR-0018) — ADR-0008's mechanism on
   `Account.name`, the column ADR-0008 explicitly scoped out. The `Account` qualifier is resolved off
   the statement's `FROM`/`JOIN` clauses rather than assumed, since `Category.name` also exists, and an
   unrecognised table-source shape fails open to a non-check.
+- **Raw integer cents narrated as currency units** (ADR-0020) — the SQL prompt's `/100.0` rule is
+  scoped to aggregates, so a row-level `Transaction.amount` or an `Account.creditLimit` reached
+  narration as raw cents under a prompt clause telling the narrator to "infer from context". Units are
+  a static property of schema columns, so the server classifies the projection and converts the values
+  before narration; an unresolvable projection is refused as `unsupported-shape` rather than guessed.
 
 The balance-alias (ADR-0010) and compound-SELECT (ADR-0011) fixes share a root cause worth stating
 plainly: narration receives `JSON.stringify(rows)` and nothing else, so the column alias — written by
@@ -242,6 +249,13 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
 
   The harness question stays open regardless: it is what would say how often the model writes the
   affected shapes, which is a different question from whether the resolver handles them.
+- **How often does the model write a projection ADR-0020's classifier cannot resolve?** ADR-0020 fails
+  *closed*, refusing CTEs, projection subqueries and stars over a CTE or a multi-table join as
+  `unsupported-shape`, on the reasoning that none of the SQL prompt's nine worked examples uses one and
+  the refusal rate should be near zero. That is an argument, not a measurement, and it is the opposite
+  posture from ADR-0018's fail-open on a similar resolution problem. The same `ChatMessage.sql` /
+  eval-harness work that would size ADR-0018's hole would size this one. If refusals turn out to be
+  common, the answer is to widen the classifier, not to fail open.
 - **ADR-0016's sign-branch detector is satisfied by a `transactionType` comparison anywhere in the
   statement**, including one inside a subquery that does not govern the sign branch. Under-detects
   rather than over-rejects, needs a real parser to close, and has not been seen live (ADR-0016
