@@ -51,22 +51,40 @@ export async function POST(
   if (target.linkedTransferId !== null && target.linkedTransferId !== txId) {
     return NextResponse.json({ error: 'target is already linked to another transaction' }, { status: 409 })
   }
-  // The two checks above only inspect OUTBOUND pointers. A third row may still
-  // point INBOUND at either side; pairing over it would silently orphan that
-  // row (A→B, then B→C leaves A dangling). The ADR-0021 trigger aborts this,
-  // but as a raw SQLite error — so catch it here and return a real 409.
-  const inboundOrphan = await prisma.transaction.findFirst({
-    where: {
-      linkedTransferId: { in: [txId, tgtId] },
-      id: { notIn: [txId, tgtId] },
-    },
+  // The two checks above only inspect OUTBOUND pointers, so a third row
+  // pointing INBOUND at either side survives them. Two trigger conditions cover
+  // that, and each is mirrored here so it returns a real 409 instead of a raw
+  // SQLite error surfacing as a 500:
+  //
+  //   ADR-0021 cond. 3 — someone still points at the SOURCE; pairing the source
+  //     away orphans them (A→B, then linking B→C leaves A dangling).
+  //   ADR-0022 cond. 4 — someone already claims the TARGET, one-sidedly, so the
+  //     target still reads NULL and looks unclaimed (A→C, then linking B→C).
+  //
+  // The exclusions match each trigger predicate's own `<> NEW."id"` exactly,
+  // rather than excluding both ids from both checks.
+  const inboundClaimants = await prisma.transaction.findMany({
+    where: { linkedTransferId: { in: [txId, tgtId] } },
     select: { id: true, linkedTransferId: true },
   })
-  if (inboundOrphan) {
-    const side = inboundOrphan.linkedTransferId === txId ? 'source' : 'target'
+  const orphanedBySource = inboundClaimants.find(
+    (r) => r.linkedTransferId === txId && r.id !== tgtId,
+  )
+  if (orphanedBySource) {
     return NextResponse.json(
       {
-        error: `cannot link: transaction ${inboundOrphan.id} still points at the ${side}, and linking would orphan it`,
+        error: `cannot link: transaction ${orphanedBySource.id} still points at the source, and linking would orphan it`,
+      },
+      { status: 409 },
+    )
+  }
+  const claimingTarget = inboundClaimants.find(
+    (r) => r.linkedTransferId === tgtId && r.id !== txId,
+  )
+  if (claimingTarget) {
+    return NextResponse.json(
+      {
+        error: `cannot link: transaction ${claimingTarget.id} already claims the target`,
       },
       { status: 409 },
     )

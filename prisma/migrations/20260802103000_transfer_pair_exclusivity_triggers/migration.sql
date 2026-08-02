@@ -1,6 +1,8 @@
 -- Hand-edited: Prisma cannot express triggers and SQLite has no
 -- ALTER TABLE ADD CONSTRAINT, so transfer-pair integrity is added by hand
--- (FOLLOWUPS §5, last item; design in ADR-0021).
+-- (FOLLOWUPS §5, last item; design in ADR-0021, extended by ADR-0022 —
+-- read both: the fourth condition below is ADR-0022's, and ADR-0021 is
+-- unedited).
 --
 -- Enforces pair EXCLUSIVITY, not literal symmetry. Writes of NULL are never
 -- checked: the FK is ON DELETE SET NULL and every write path nulls a
@@ -14,6 +16,8 @@
 -- Predicates run as negated SELECTs against dev.db before writing this
 -- (367 transactions, 44 linked = 22 clean pairs): self-link 0,
 -- counterpart-already-taken 0, abandoned-inbound-pointer 0, dangling FK 0.
+-- ADR-0022's fourth predicate re-measured against the same dev.db:
+-- duplicate-claim 0 (no two rows share a non-NULL linkedTransferId).
 --
 -- NOTE: a future Prisma RedefineTables migration on "Transaction" drops both
 -- of these triggers AND the amount-sign CHECK from
@@ -33,6 +37,12 @@ BEGIN
     WHEN EXISTS (SELECT 1 FROM "Transaction" WHERE "linkedTransferId" = NEW."id"
                  AND "id" <> NEW."linkedTransferId")
       THEN RAISE(ABORT, 'transfer link asymmetry: another transaction still points at this one')
+    -- ADR-0022: the three above all pass when two rows claim the same target
+    -- while that target is still NULL (A->C then B->C). Last, so the more
+    -- specific messages win wherever the conditions overlap.
+    WHEN EXISTS (SELECT 1 FROM "Transaction" WHERE "linkedTransferId" = NEW."linkedTransferId"
+                 AND "id" <> NEW."id")
+      THEN RAISE(ABORT, 'transfer link asymmetry: counterpart is already claimed by another transaction')
   END;
 END;
 
@@ -49,5 +59,11 @@ BEGIN
     WHEN EXISTS (SELECT 1 FROM "Transaction" WHERE "linkedTransferId" = NEW."id"
                  AND "id" <> NEW."linkedTransferId")
       THEN RAISE(ABORT, 'transfer link asymmetry: another transaction still points at this one')
+    -- ADR-0022: the three above all pass when two rows claim the same target
+    -- while that target is still NULL (A->C then B->C). Last, so the more
+    -- specific messages win wherever the conditions overlap.
+    WHEN EXISTS (SELECT 1 FROM "Transaction" WHERE "linkedTransferId" = NEW."linkedTransferId"
+                 AND "id" <> NEW."id")
+      THEN RAISE(ABORT, 'transfer link asymmetry: counterpart is already claimed by another transaction')
   END;
 END;

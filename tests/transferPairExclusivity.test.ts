@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 /**
  * ADR-0021: transfer-pair exclusivity is enforced by two SQLite triggers.
+ * ADR-0022 adds a fourth condition to each (class 5 below).
  *
  * `tests/transactionDeleteCascade.test.ts` next door is an in-memory `Map`
  * simulation of Prisma, which by construction cannot exercise a DB trigger.
@@ -82,6 +83,19 @@ function rowCount(): number {
   return (db.prepare(`SELECT COUNT(*) AS c FROM "Transaction"`).get() as { c: number }).c
 }
 
+/**
+ * The id the next INSERT will receive. Read off `sqlite_sequence` rather than
+ * derived from `rowCount()`: AUTOINCREMENT tracks a high-water mark, so the two
+ * diverge the moment a fixture deletes a row, and a row-count guess would go
+ * quietly wrong instead of failing.
+ */
+function nextInsertId(): number {
+  const row = db.prepare(`SELECT seq FROM sqlite_sequence WHERE name = 'Transaction'`).get() as
+    | { seq: number }
+    | undefined
+  return (row ? row.seq : 0) + 1
+}
+
 beforeEach(() => {
   db = new Database(':memory:')
   db.pragma('foreign_keys = ON')
@@ -92,7 +106,7 @@ beforeEach(() => {
 afterEach(() => db.close())
 
 describe('the migration installs both triggers', () => {
-  it('creates exactly the two ADR-0021 triggers on "Transaction"', () => {
+  it('creates exactly the two ADR-0021/0022 triggers on "Transaction"', () => {
     const names = db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name`)
       .all() as { name: string }[]
@@ -231,7 +245,7 @@ describe('violations are rejected', () => {
     // Predict the id the row is about to get, then point it at itself. This is
     // the case that reads as -1 (and so passes) under a BEFORE INSERT trigger.
     const { a, b } = fixture()
-    const nextId = rowCount() + 1
+    const nextId = nextInsertId()
     expect(() => insertLinked(4, 1000, nextId)).toThrow(/cannot be linked to itself/)
     expect(rowCount()).toBe(3)
     expectPairIntact(a, b)
@@ -264,6 +278,49 @@ describe('violations are rejected', () => {
     )
     expect(rowCount()).toBe(3)
     expectPairIntact(a, b)
+  })
+
+  // ADR-0022. The three ADR-0021 conditions all pass here: the target is still
+  // NULL (so it is not "already linked"), and nobody points at the writer (so
+  // nothing is being abandoned). Before the fourth condition both writes were
+  // accepted, resting at A→C, B→C, C NULL — a dead end no legal write repairs.
+  it('class 5 — two rows claiming the same still-NULL target on UPDATE', () => {
+    const a = insertRow(1, -1000)
+    const b = insertRow(2, -1000)
+    const c = insertRow(3, 1000)
+    link(a, c)
+    expect(() => link(b, c)).toThrow(/counterpart is already claimed by another transaction/)
+    // The abort lands on the second claimant; a one-sided pointer is legal, so
+    // A→C survives untouched.
+    expect(linkOf(a)).toBe(c)
+    expect(linkOf(b)).toBeNull()
+    expect(linkOf(c)).toBeNull()
+  })
+
+  it('class 5 — INSERT of a row claiming a still-NULL target another row claims', () => {
+    const a = insertRow(1, -1000)
+    const c = insertRow(3, 1000)
+    link(a, c)
+    expect(() => insertLinked(2, -1000, c)).toThrow(
+      /counterpart is already claimed by another transaction/,
+    )
+    expect(rowCount()).toBe(2)
+    expect(linkOf(a)).toBe(c)
+    expect(linkOf(c)).toBeNull()
+  })
+
+  it('class 5 is checked last — a more specific violation keeps its own message', () => {
+    // B is claimed by A *and* points at nothing; repointing B at C trips both
+    // condition 3 (abandons A) and condition 4 only if someone claims C. Give C
+    // a claimant too, so both fire and the ordering is observable.
+    const a = insertRow(1, -1000)
+    const b = insertRow(2, 1000)
+    const c = insertRow(3, 1000)
+    const d = insertRow(4, -1000)
+    link(a, b)
+    link(d, c)
+    expect(() => link(b, c)).toThrow(/another transaction still points at this one/)
+    expect(linkOf(b)).toBeNull()
   })
 
   it('an aborted write inside a transaction rolls the whole sequence back', () => {
