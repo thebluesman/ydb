@@ -37,21 +37,31 @@ statement represents one side. If the user imports both statements, both sides
 end up in the DB naturally. A "force two-sided" option at import time
 (`?autopair=1`) would let power-users opt in.
 
-## 5. DB-level integrity constraints — 2/3 SHIPPED (`6cb3e7e`)
+## 5. DB-level integrity constraints — 3/3 SHIPPED (`6cb3e7e`, PR #41)
 
 - ~~CHECK on `Transaction.amount` sign vs `transactionType`~~ — shipped.
 - ~~`onDelete: Cascade` for split legs instead of application-level cascade~~
   — shipped.
-- Enforce `linkedTransferId` symmetry via a trigger — designed and signed off
-  2026-08-02, not yet implemented. Integrity is currently maintained by
-  hand-written logic across **five** write paths in four files (the count of
-  four was wrong — `app/api/transactions/manual/route.ts` was missed),
-  including a delete-and-recreate re-pair branch in the transaction PATCH
-  handler. The enforced predicate is pair *exclusivity*, not literal symmetry:
-  see `docs/adr/0021-transfer-pair-exclusivity-enforced-by-db-trigger.md` for
-  the trigger design `@backend-engineer` implements against. Tracked as a
-  Notion ticket on the YDB Migration board: "Enforce linkedTransferId symmetry
-  at the DB level" (Phase: Other, Owner: @backend-engineer).
+- ~~Enforce `linkedTransferId` symmetry via a trigger~~ — shipped in PR #41 as
+  `prisma/migrations/20260802103000_transfer_pair_exclusivity_triggers`. Two
+  triggers (`AFTER INSERT`, `AFTER UPDATE OF "linkedTransferId"`), both guarded
+  by `WHEN NEW."linkedTransferId" IS NOT NULL` so writes of NULL and the
+  transient one-sided states inside a pairing transaction stay legal. The
+  enforced predicate is pair *exclusivity*, not literal symmetry — design in
+  `docs/adr/0021-transfer-pair-exclusivity-enforced-by-db-trigger.md`, plus a
+  fourth condition (a target may not be claimed by two rows at once) in
+  `docs/adr/0022-transfer-pair-trigger-rejects-a-second-claim-on-the-same-target.md`.
+  **Read both ADRs**: 0021 is unedited and does not mention the fourth
+  condition. The hand-written logic across the five app write paths stays in
+  place; the triggers are the backstop under it, and
+  `app/api/transactions/[id]/link/route.ts` pre-checks both inbound conditions
+  so they surface as 409s rather than raw SQLite 500s. Covered by
+  `tests/transferPairExclusivity.test.ts`.
+
+  Carried forward, not a regression: a future Prisma `RedefineTables` migration
+  on `"Transaction"` silently drops both triggers **and** the amount-sign CHECK
+  from `20260716201150`. Noted in `docs/architecture.md` and in the migration
+  header.
 
 ## 6. Category handling on splits
 
