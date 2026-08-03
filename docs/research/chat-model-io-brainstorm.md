@@ -91,7 +91,52 @@ implies Phase B (the loop itself) and/or Phase C (new code-computed tools beyond
 16. **Voice/tone variants** — blunt numbers vs. softer "coaching" framing — could be a user-configurable
     output style rather than one fixed narration voice.
 
+## Feasibility triage (2026-08-03)
+
+Grounded in what's actually true today: single-shot generate→narrate pipeline (no tool-calling loop
+yet), no `computeBalance`-backed chat path, read-only SQL guard is a hard invariant (`lib/prisma.ts`,
+AGENTS.md), no `Goal` model in the schema, categories are flat strings (ADR-0008).
+
+**Tier 1 — buildable now, no architecture change** (prompt/route tweaks, existing tools):
+- Inputs: Comparative (2, simple cases), Time-shifted/relative (12), Cross-account/holistic (13),
+  Vendor-specific (15, if payee is a distinct stored column).
+- Outputs: Table (3), Structured card (4), Confidence-qualified answer (5), Follow-up suggestions (8),
+  Cross-reference to ledger (10), Annotated transaction list (12), Narrative summary (13), Plain
+  refusal with reasoning (15), Voice/tone variants (16).
+
+**Tier 2 — needs Phase B (the tool-calling loop), no new backend computation:**
+- Inputs: Explanatory/meta (9), Free-form follow-up (11), Multi-entity comparison (18) — multi-step
+  inspection or session state, not new math.
+- Outputs: Chart/visualization (2), Comparison visualization (14), Show-your-work (6), Exportable CSV
+  (11) — new output tools the loop can call; capability-neutral, just new tool surface.
+
+**Tier 3 — needs Phase C (new code-computed tools, e.g. `computeBalance`-backed):**
+- Threshold/point-in-time balance retrospective (17) — matches `docs/architecture.md`'s existing "no
+  code-computed balance path, now the priority" line. Advisory/recommendation (6) mostly lands here too
+  (debt payoff needs real balances). Anomaly/pattern detection (5), Recurring/subscription detection
+  (16) need real detection algorithms, not SQL generation. Action proposal (output 9) is feasible
+  propose-only without touching the read-only guard, but only once a real detector backs it.
+
+**Tier 4 — blocked on a data-model gap, not just architecture phasing:**
+- Goal-tracking (7) — no `Goal` construct exists; schema/product decision before any engineering.
+- Category-hierarchy (14) — categories are flat strings (ADR-0008); grouping needs a taxonomy that
+  doesn't exist yet.
+
+**Tier 5 — blocked on a real product/architecture decision, not effort:**
+- Action-adjacent writes (10) — directly conflicts with the read-only posture, a canonical invariant.
+  Not "build it later," a "decide if this is ever wanted at all."
+
+**Tier 6 — methodology undefined, feasibility isn't the bottleneck:**
+- Projective/forecasting (3), What-if/scenario (4) — before any tool gets built, someone has to decide
+  what "projected savings" even means (trend window? excludes transfers? confidence interval?).
+  Building the wrong computation confidently is worse than not building it.
+
+**Suggested starting point (not yet decided by Shyam):** Tier 1 output-side items are the cheapest
+win — mostly frontend + narration tweaks. Tier 3's balance path is the highest-leverage single
+investment, since it unblocks the largest cluster of "real" questions (advisory, threshold, and
+indirectly forecasting once real balances exist).
+
 ## Status
 
-Batches 1 and 2 recorded 2026-08-03. Brainstorm concluded by Shyam after batch 2 — no further batches
-planned. Next step (prioritization/feasibility triage) not yet scheduled.
+Batches 1 and 2 recorded 2026-08-03. Brainstorm concluded by Shyam after batch 2. Feasibility triage
+added same day. Next step: Shyam to pick a starting tier/item — not yet decided.
