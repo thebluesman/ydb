@@ -175,7 +175,7 @@ A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${NO
 -- it will correctly match nothing and be refused, rather than silently returning someone else's total.`
     : ''
 
-  return `You are a SQLite query generator. Output ONLY a single raw SQL SELECT statement (or WITH ... SELECT) -- no markdown, no explanation, no code fences, no backticks.
+  return `You are a SQLite query generator. Respond with a JSON object of the form {"sql": "<statement>"}, where <statement> is a single SQL SELECT statement (or WITH ... SELECT) -- no markdown, no explanation, no code fences, no backticks, and nothing outside the "sql" field.
 
 Today's date is ${today}. This is the real current date, supplied by the server. Use it whenever the question depends on when "now" is; do not rely on your own assumption about what year it is.
 
