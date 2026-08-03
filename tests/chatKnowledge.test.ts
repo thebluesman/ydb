@@ -141,11 +141,15 @@ describe('loadKnowledgeSnippets — degradation', () => {
 })
 
 describe('buildNarrationSystemPrompt', () => {
-  const PRE_INJECTION_PROMPT =
-    `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. Monetary values in the data may already be dollars (from SUM(amount)/100.0) or raw cents (from raw amount columns) — infer from context and always present them in AED without any other currency symbols or conversions.`
+  // ADR-0020: units are now decided server-side before rows reach this prompt,
+  // so the old "may already be dollars ... infer from context" hedge is gone —
+  // this is no longer byte-for-byte the pre-ADR-0020 prompt, deliberately.
+  const NO_KNOWLEDGE_PROMPT =
+    `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in AED currency units, never raw cents — present them directly without any other currency symbols or conversions.`
 
-  it('with no knowledge block, is byte-for-byte the pre-injection prompt', () => {
-    expect(buildNarrationSystemPrompt('AED', '')).toBe(PRE_INJECTION_PROMPT)
+  it('with no knowledge block, states units are already normalized (ADR-0020), with no inference clause', () => {
+    expect(buildNarrationSystemPrompt('AED', '')).toBe(NO_KNOWLEDGE_PROMPT)
+    expect(buildNarrationSystemPrompt('AED', '')).not.toMatch(/infer from context/i)
   })
 
   it('assembles persona → precedence line → knowledge → operative rules', () => {
@@ -166,7 +170,7 @@ describe('buildNarrationSystemPrompt', () => {
   })
 
   it('honours the base currency', () => {
-    expect(buildNarrationSystemPrompt('INR', 'K')).toContain('present them in INR')
+    expect(buildNarrationSystemPrompt('INR', 'K')).toContain('already in INR currency units')
   })
 
   it('carries every active P0 snippet body into the assembled prompt', () => {
