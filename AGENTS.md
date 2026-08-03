@@ -58,6 +58,7 @@ and Shyam explicitly declares the trigger met (his call, not a timer).
 | Chat SQL balance scope, second enforcement point | Also checked on result-row keys after execution, before narration — the `SELECT *` star-expansion net; the only post-execution guard in the pipeline | `docs/adr/0017-balance-scope-enforced-on-result-row-keys.md` |
 | Chat SQL transfer exclusion | Triggers on any spending/income/net-flow aggregate, not just sign-branching ones — category-filtered spend needs it too, because transfer legs carry real spend categories (loan repayments); stays prompt-only | `docs/adr/0019-transfer-exclusion-triggers-on-the-aggregate-not-the-sign-branch.md` |
 | Chat SQL account-name filters | Grounded in stored `Account.name` values (ADR-0008's mechanism, second column); the `Account` qualifier is resolved off `FROM`/`JOIN`, and an unrecognised shape fails open | `docs/adr/0018-chat-sql-account-name-vocabulary-grounding.md` |
+| Transfer-pair integrity | Enforced by two DB triggers on `"Transaction"` for pair *exclusivity* (no self-link, no stealing a taken counterpart, no orphaned inbound pointer, no second claim on a target) — not literal symmetry; hand-written logic across five app write paths stays in place as the primary story, triggers are the backstop | `docs/adr/0021-transfer-pair-exclusivity-enforced-by-db-trigger.md`, `docs/adr/0022-transfer-pair-trigger-rejects-a-second-claim-on-the-same-target.md` |
 
 ## Team (subagents)
 
