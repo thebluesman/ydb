@@ -47,6 +47,38 @@ import { applyMoneyUnits, moneyUnitsPlan } from '@/lib/chatMoneyUnits'
 // caller can distinguish a transport failure (503) from a bad query (422).
 class OllamaUnavailable extends Error {}
 
+// [chat-perf] JSON-schema constraint for Ollama's `format` parameter, so the
+// model is grammar-constrained to emit `{"sql": "..."}` rather than markdown
+// fences or prose around a query. Same technique `app/api/ollama/route.ts`'s
+// `EXTRACTION_FORMAT` already validated in this codebase for a different
+// generation task, applied here to eliminate the markdown-fence-stripping
+// hack for the common case — a whole class of "the model wrapped it in
+// prose" failures becomes an impossible output instead of a runtime retry.
+// Verified live against qwen2.5:32b + this repo's real prompt before
+// shipping: the model reliably returns clean, correctly-escaped JSON, no
+// prose, no fences, across every worked-example question shape.
+const SQL_FORMAT = {
+  type: 'object',
+  properties: { sql: { type: 'string' } },
+  required: ['sql'],
+} as const
+
+// The constrained format is the expected path, not a guarantee — a model
+// that doesn't support structured output, or an Ollama version where the
+// parameter shape has changed again (this API has before), would otherwise
+// hard-fail the turn. Falls back to the pre-format markdown-fence-stripping
+// treatment of the raw text, same posture as EXTRACTION_FORMAT's own comment:
+// the older path remains the permanent fallback regardless.
+function extractSql(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed.sql === 'string') return parsed.sql.trim()
+  } catch {
+    // Not JSON — the model ignored the format constraint. Fall through.
+  }
+  return raw.replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '').trim()
+}
+
 // Generate a SQL statement from a prompt via Ollama (non-streaming, temp 0).
 // Cleans markdown fences and quotes bare Transaction references. Shared by the
 // initial generation and the one-shot repair retry.
@@ -66,6 +98,7 @@ async function generateSql(
         model,
         system,
         prompt,
+        format: SQL_FORMAT,
         stream: false,
         keep_alive: OLLAMA_KEEP_ALIVE,
         options: { temperature: 0, num_ctx: SQL_NUM_CTX },
@@ -79,7 +112,7 @@ async function generateSql(
 
   const json = await res.json()
   const rawSql = (json.response as string ?? '').trim()
-  let sql = rawSql.replace(/^```[\w]*\n?/i, '').replace(/\n?```$/i, '').trim()
+  let sql = extractSql(rawSql)
   sql = sql.replace(/\bFROM\s+Transaction\b/gi, 'FROM "Transaction"')
   sql = sql.replace(/\bJOIN\s+Transaction\b/gi, 'JOIN "Transaction"')
   return sql
@@ -527,7 +560,8 @@ export async function POST(request: Request) {
     const repairPrompt =
       `${sqlPrompt}\n\nYou previously generated this SQLite query:\n${sql}\n\n` +
       `Executing it failed with this error:\n${firstMsg}\n\n` +
-      `Return a corrected SQLite SELECT (or WITH ... SELECT) that fixes the error. Output only the SQL.`
+      `Return a corrected SQLite SELECT (or WITH ... SELECT) that fixes the error, ` +
+      `as a JSON object of the form {"sql": "<statement>"}.`
 
     let repaired: string
     try {
