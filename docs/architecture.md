@@ -72,15 +72,21 @@ no route that feeds narration output back into SQL.
 
 ### Chat wire format
 
-`POST /api/chat` answers with NDJSON on a 200 — one JSON object per line, four frame types live
+`POST /api/chat` answers with NDJSON on a 200 — one JSON object per line, five frame types live
 today:
 
 | Frame | Shape | Meaning |
 |---|---|---|
 | `sql` | `{ type: 'sql', sql }` | The query that ran. Always first when narration follows. |
-| `result` | `{ type: 'result', present, currency, columns, rows, truncated }` | The result set, rendered structurally rather than as prose (ADR-0023). Emitted between `sql` and the first `token`, at most once per turn. |
+| `result` | `{ type: 'result', present, currency, columns, rows, truncated }` | The result set, rendered structurally rather than as prose (ADR-0023). At most once per turn. |
+| `suggestions` | `{ type: 'suggestions', questions: [{ text, template }] }` | Up to three route-templated follow-up questions (ADR-0024). At most once per turn; omitted entirely when no template's preconditions hold. |
 | `token` | `{ type: 'token', response }` | A narration chunk. |
-| `no-answer` | `{ type: 'no-answer', reason, message, sql? }` | A refusal (ADR-0014). |
+| `no-answer` | `{ type: 'no-answer', reason, message, sql?, questions? }` | A refusal (ADR-0014), optionally carrying ADR-0024 suggestions inline. |
+
+**Frame order is `sql`, `result`, `suggestions`, then `token`s — the token stream is always last**
+(ADR-0024). Everything after the prose begins is prose, so the client never resumes parsing once it
+starts rendering escaped text. Adding another non-prose frame is cheap; adding a post-prose one is a
+decision.
 
 The `result` frame (ADR-0023) is one contract behind three Tier-1 output shapes from the
 `[chat-model]` triage — table, stat card, annotated transaction list — distinguished only by a
@@ -89,6 +95,31 @@ emits. It carries the same `rows` narration sees, after ADR-0017's row-key check
 unit conversion and under the same `NARRATION_ROW_CAP`, so it adds no new SQL surface and no second
 row path. It is emitted between `sql` and the first `token`, at most once per turn, and never
 alongside a `no-answer` or an HTTP error.
+
+The `suggestions` frame (ADR-0024) carries follow-up questions the route composes from a closed
+template set. No model writes them: a suggestion is clickable, so it is an input path into the SQL
+prompt, and text a model wrote from third-party-controlled rows is not one this app hands the user to
+click. Slot values are limited to date ranges the route computed and to category/account literals
+already inside ADR-0008/ADR-0018's injected vocabulary, so no new taint path opens. Every template
+must produce a question the pipeline can actually answer — no balance questions (ADR-0015), no
+compound selects (ADR-0011) — and an unresolvable query shape omits the frame rather than guessing.
+
+Two sibling `[chat-model]` Tier 1 outputs need no wire change at all, recorded here rather than as
+ADRs because neither is a decision:
+
+- **Cross-reference to ledger/dashboard (output 10) is frontend-only.** The client builds the deep
+  link from the `result` frame's `rows` — a `date` column links to the ledger filtered to that range,
+  a `category` column to that category, an `id` column to that transaction — and from nothing else.
+  It must not parse the `sql` frame to build a link: that would be a second, divergent implementation
+  of the filter semantics the guards enforce, and a link that covers a different set than the number
+  above it is ADR-0010's "a label is a claim" failure wearing a URL. If the rows don't carry the
+  dimension, there is no link.
+- **Narrative summary over a period (output 13) is a narration-prompt variant.** It is prose in the
+  existing `token` stream, sitting beside PR 2's narration-voice setting rather than beside the frame
+  contract. One constraint: a monthly recap is not a licence to raise `NARRATION_ROW_CAP`. A recap
+  wants grouped aggregates — by month, by category — which is a SQL-shape question, not a
+  narration-length one. Feeding the narrator more raw rows to make the paragraph richer would undo
+  ADR-0023's one-row-set-one-cap property.
 
 `no-answer` reasons are `out-of-scope`, `no-data`, `unsupported-shape`, `budget-exhausted`
 (`lib/chatNonAnswer.ts` is the single definition; adding one is a line there plus a headline). Its
