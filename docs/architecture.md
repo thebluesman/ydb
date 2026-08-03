@@ -72,13 +72,23 @@ no route that feeds narration output back into SQL.
 
 ### Chat wire format
 
-`POST /api/chat` answers with NDJSON on a 200 — one JSON object per line, three frame types:
+`POST /api/chat` answers with NDJSON on a 200 — one JSON object per line, three frame types live
+today and a fourth designed:
 
 | Frame | Shape | Meaning |
 |---|---|---|
 | `sql` | `{ type: 'sql', sql }` | The query that ran. Always first when narration follows. |
+| `result` | `{ type: 'result', present, currency, columns, rows, truncated }` | The result set, rendered structurally rather than as prose (ADR-0023). **Designed, not yet implemented.** |
 | `token` | `{ type: 'token', response }` | A narration chunk. |
 | `no-answer` | `{ type: 'no-answer', reason, message, sql? }` | A refusal (ADR-0014). |
+
+The `result` frame (ADR-0023) is one contract behind three Tier-1 output shapes from the
+`[chat-model]` triage — table, stat card, annotated transaction list — distinguished only by a
+`present` hint the **route** chooses from the returned rows, never by a marker the narration model
+emits. It carries the same `rows` narration sees, after ADR-0017's row-key check and ADR-0020's
+unit conversion and under the same `NARRATION_ROW_CAP`, so it adds no new SQL surface and no second
+row path. It is emitted between `sql` and the first `token`, at most once per turn, and never
+alongside a `no-answer` or an HTTP error.
 
 `no-answer` reasons are `out-of-scope`, `no-data`, `unsupported-shape`, `budget-exhausted`
 (`lib/chatNonAnswer.ts` is the single definition; adding one is a line there plus a headline). Its
@@ -311,6 +321,13 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   cap is 2,000 rows of context, which the single-shot path could never produce. `NARRATION_ROW_CAP` is
   20 today; what the equivalent whole-turn ceiling should be is unmeasured and depends on Phase B's
   real prompt sizes.
+- **Structured chat output has two questions ADR-0023 deliberately left open.** (1) Whether a `result`
+  frame's display cap may exceed `NARRATION_ROW_CAP` (20) — ADR-0023 ties them together so the table
+  can never show rows the sentence above it was not written from, but an audit list is exactly the case
+  that wants more rows. (2) Where structured output persists: `ChatMessage` stores `text`/`sql`/
+  `nonAnswerReason` and no rows, so a table vanishes on reload. Adding a column is its own ADR; the one
+  constraint ADR-0023 fixes in advance is that a persisted frame is stored verbatim and never rebuilt by
+  re-executing `ChatMessage.sql`, which would be a row path reaching the client without the guard chain.
 - **`num_ctx` is set on the two chat calls and nowhere else.** Ticket 4 resolved it for narration
   (`NARRATION_NUM_CTX` = 16,384) and the SQL call followed (`SQL_NUM_CTX`), both in
   `app/api/chat/route.ts`. The extraction path (`app/api/ollama/route.ts`) still runs at Ollama's
