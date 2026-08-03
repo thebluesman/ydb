@@ -72,13 +72,13 @@ no route that feeds narration output back into SQL.
 
 ### Chat wire format
 
-`POST /api/chat` answers with NDJSON on a 200 — one JSON object per line, three frame types live
-today and a fourth designed:
+`POST /api/chat` answers with NDJSON on a 200 — one JSON object per line, four frame types live
+today:
 
 | Frame | Shape | Meaning |
 |---|---|---|
 | `sql` | `{ type: 'sql', sql }` | The query that ran. Always first when narration follows. |
-| `result` | `{ type: 'result', present, currency, columns, rows, truncated }` | The result set, rendered structurally rather than as prose (ADR-0023). **Designed, not yet implemented.** |
+| `result` | `{ type: 'result', present, currency, columns, rows, truncated }` | The result set, rendered structurally rather than as prose (ADR-0023). Emitted between `sql` and the first `token`, at most once per turn. |
 | `token` | `{ type: 'token', response }` | A narration chunk. |
 | `no-answer` | `{ type: 'no-answer', reason, message, sql? }` | A refusal (ADR-0014). |
 

@@ -42,6 +42,7 @@ import {
   transferSumViolation,
 } from '@/lib/chatMoneyGuards'
 import { applyMoneyUnits, moneyUnitsPlan } from '@/lib/chatMoneyUnits'
+import { buildResultFrame } from '@/lib/chatResultFrame'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -731,6 +732,25 @@ export async function POST(request: Request) {
       `${dbTruncated ? ' (capped by the server)' : ''}; only the first ${Math.min(NARRATION_ROW_CAP, rows.length)} are shown above.`
     : ''
 
+  // ADR-0023. The `result` frame, built here from the SAME `rows` binding
+  // narration is about to be handed — post-ADR-0017 row-key check,
+  // post-`applyMoneyUnits`, post-no-data, under the same NARRATION_ROW_CAP —
+  // never from a copy taken earlier. `present` is chosen by this route from
+  // the returned rows, deliberately not by a marker in the narration stream.
+  //
+  // Its truncation summary is derived from the same two flags as
+  // `truncationNote` above rather than recomputed, so the table and the
+  // sentence can never disagree about how much was shown. `dbCapped` means the
+  // read-only driver cut the result upstream, so `total` is a floor.
+  const resultFrame = buildResultFrame({
+    rows: narrationRows,
+    sql,
+    currency: baseCurrency,
+    truncated: (narrationTruncated || dbTruncated)
+      ? { shown: narrationRows.length, total: rows.length, dbCapped: dbTruncated }
+      : null,
+  })
+
   // Knowledge injection (ADR-0007): narration prompt only, never the SQL
   // prompt. Read fresh off disk each turn; the loader never throws, so a
   // missing or unreadable docs/knowledge/ just means no block.
@@ -776,6 +796,11 @@ export async function POST(request: Request) {
       const emit = (obj: object) => controller.enqueue(enc.encode(JSON.stringify(obj) + '\n'))
 
       emit({ type: 'sql', sql })
+      // ADR-0023's frame order: `sql`, then exactly one `result`, then tokens.
+      // Emitted only on this path, which is reached only after narration has
+      // returned OK — so a `no-answer` still arrives alone and a transport
+      // fault is still an HTTP status beside no data (ADR-0014).
+      emit(resultFrame)
 
       const reader = narrateBody.getReader()
       const dec = new TextDecoder()
