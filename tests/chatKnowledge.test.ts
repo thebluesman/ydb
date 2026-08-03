@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildKnowledgeBlock,
   buildNarrationSystemPrompt,
+  CONFIDENCE_RULE,
   KNOWLEDGE_DIR,
   KNOWLEDGE_PRECEDENCE_LINE,
   loadKnowledgeSnippets,
@@ -144,8 +145,10 @@ describe('buildNarrationSystemPrompt', () => {
   // ADR-0020: units are now decided server-side before rows reach this prompt,
   // so the old "may already be dollars ... infer from context" hedge is gone —
   // this is no longer byte-for-byte the pre-ADR-0020 prompt, deliberately.
+  //
+  // The trailing sentence is [chat-model] output 5's standing confidence rule.
   const NO_KNOWLEDGE_PROMPT =
-    `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in AED currency units, never raw cents — present them directly without any other currency symbols or conversions.`
+    `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in AED currency units, never raw cents — present them directly without any other currency symbols or conversions. ${CONFIDENCE_RULE}`
 
   it('with no knowledge block, states units are already normalized (ADR-0020), with no inference clause', () => {
     expect(buildNarrationSystemPrompt('AED', '')).toBe(NO_KNOWLEDGE_PROMPT)
@@ -166,7 +169,40 @@ describe('buildNarrationSystemPrompt', () => {
 
   it('keeps the operative rules last, so front-truncation loses knowledge before instructions', () => {
     const prompt = buildNarrationSystemPrompt('AED', 'KNOWLEDGE-BODY')
-    expect(prompt.endsWith('without any other currency symbols or conversions.')).toBe(true)
+    expect(prompt).toContain('without any other currency symbols or conversions.')
+    expect(prompt.endsWith(CONFIDENCE_RULE)).toBe(true)
+  })
+
+  // [chat-model] output 5. The rule has to carry BOTH branches: the no-caveat
+  // branch is what stops "hedge when appropriate" turning into hedging on every
+  // answer, which is the failure this feature was scoped against.
+  it('states the no-caveat branch as flatly as the caveat branch', () => {
+    expect(CONFIDENCE_RULE).toMatch(/if no caveat is stated/i)
+    expect(CONFIDENCE_RULE).toMatch(/do not hedge/i)
+  })
+
+  // [chat-model] output 16. The voice setting moves the persona line and
+  // nothing else — the operative rules, including the units rule and the
+  // confidence rule, are identical under both styles.
+  it('swaps only the persona line between voices', () => {
+    const direct = buildNarrationSystemPrompt('AED', 'KNOWLEDGE-BODY', 'direct')
+    const coaching = buildNarrationSystemPrompt('AED', 'KNOWLEDGE-BODY', 'coaching')
+    expect(direct).toBe(buildNarrationSystemPrompt('AED', 'KNOWLEDGE-BODY'))
+    expect(direct).not.toBe(coaching)
+    expect(coaching).toContain('supportive financial coach')
+    expect(coaching).not.toContain('You are a helpful financial assistant.')
+    for (const prompt of [direct, coaching]) {
+      expect(prompt).toContain('already in AED currency units')
+      expect(prompt.endsWith(CONFIDENCE_RULE)).toBe(true)
+    }
+  })
+
+  // The coaching voice must not become a licence to reshape a figure. A model
+  // told only "be supportive" will round a bad month down; the persona carries
+  // its own prohibition so the softening stays in the framing.
+  it('forbids the coaching voice from altering any figure', () => {
+    const coaching = buildNarrationSystemPrompt('AED', '', 'coaching')
+    expect(coaching).toMatch(/never soften, round, omit or editorialise a figure/i)
   })
 
   it('honours the base currency', () => {

@@ -4,6 +4,13 @@ import { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Select, useToast } from '@/app/_components/ui'
 import { ROLE_META, annotateModel, LLM_DEFAULTS, type LlmRole } from '@/lib/llm-models'
+import {
+  DEFAULT_NARRATION_STYLE,
+  NARRATION_STYLES,
+  NARRATION_STYLE_META,
+  NARRATION_STYLE_SETTING_KEY,
+  resolveNarrationStyle,
+} from '@/lib/narrationStyle'
 
 type Setting = { key: string; value: string }
 type HealthState =
@@ -38,6 +45,9 @@ export function ModelSettings({ initialSettings }: { initialSettings: Setting[] 
     sqlModel: settingValue('sqlModel') || legacyChatModel,
     narrationModel: settingValue('narrationModel') || legacyChatModel,
     ollamaUrl: settingValue('ollamaUrl'),
+    // Resolved rather than read raw, so an unrecognised stored value shows the
+    // style the server will actually use instead of an empty picker.
+    [NARRATION_STYLE_SETTING_KEY]: resolveNarrationStyle(settingValue(NARRATION_STYLE_SETTING_KEY)),
   })
   const [advanced, setAdvanced] = useState(false)
   const [health, setHealth] = useState<HealthState>({ status: 'idle' })
@@ -136,6 +146,37 @@ export function ModelSettings({ initialSettings }: { initialSettings: Setting[] 
       {roleCard('extraction')}
       {roleCard('sql')}
       {roleCard('narration')}
+
+      {/* [chat-model] output 16. Sits with the narration model because it is the
+          same call being configured — which model writes the answer, and in what
+          voice — but outside the Advanced disclosure: it is a taste preference,
+          not a knob that can break a turn. Two fixed options; see
+          lib/narrationStyle.ts for why this is not a freeform field. */}
+      <div className="space-y-1.5">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-sm font-medium" style={{ color: 'var(--tx-primary)' }}>Narration voice</span>
+          <span className="text-xs" style={{ color: 'var(--tx-secondary)' }}>
+            {NARRATION_STYLE_META[resolveNarrationStyle(values[NARRATION_STYLE_SETTING_KEY])].label}
+            {!settingValue(NARRATION_STYLE_SETTING_KEY) && ' (default)'}
+          </span>
+        </div>
+        <p className="text-xs" style={{ color: 'var(--tx-tertiary)' }}>
+          How the answer is worded. The figures are identical either way — only the framing around them changes.
+        </p>
+        <div className="pt-1">
+          <Select
+            value={resolveNarrationStyle(values[NARRATION_STYLE_SETTING_KEY])}
+            onValueChange={(v) => save(NARRATION_STYLE_SETTING_KEY, resolveNarrationStyle(v))}
+            options={NARRATION_STYLES.map((style) => ({
+              value: style,
+              label: `${NARRATION_STYLE_META[style].label} — ${NARRATION_STYLE_META[style].description}`
+                + (style === DEFAULT_NARRATION_STYLE ? ' (default)' : ''),
+            }))}
+            ariaLabel="Narration voice selection"
+            size="sm"
+          />
+        </div>
+      </div>
 
       <button
         type="button"

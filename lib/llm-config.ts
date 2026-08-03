@@ -1,5 +1,11 @@
 import { prisma } from '@/lib/prisma'
 import { LLM_DEFAULTS } from '@/lib/llm-models'
+import {
+  DEFAULT_NARRATION_STYLE,
+  NARRATION_STYLE_SETTING_KEY,
+  resolveNarrationStyle,
+  type NarrationStyle,
+} from '@/lib/narrationStyle'
 
 export { LLM_DEFAULTS }
 
@@ -8,6 +14,7 @@ export const LLM_SETTING_KEYS = [
   'extractionModel',
   'sqlModel',
   'narrationModel',
+  NARRATION_STYLE_SETTING_KEY,
 ] as const
 
 /**
@@ -32,6 +39,12 @@ export type LlmConfig = {
   sqlModel: string
   /** Narrates the result rows: streaming, and what the user actually feels. */
   narrationModel: string
+  /**
+   * The narration voice ([chat-model] output 16). Resolved to a member of the
+   * closed set here — never a raw string — so nothing outside
+   * lib/narrationStyle.ts can put arbitrary text into the system prompt.
+   */
+  narrationStyle: NarrationStyle
 }
 
 /**
@@ -75,5 +88,14 @@ export async function getLlmConfig(): Promise<LlmConfig> {
     narrationModel:
       fromSetting('narrationModel') ?? legacyChatModel ?? fromEnv('NARRATION_MODEL')
       ?? fromEnv('CHAT_MODEL') ?? LLM_DEFAULTS.narrationModel,
+    // Same Setting → env → shipped-default ladder as the models above, with the
+    // extra step that every tier is validated rather than trusted: an
+    // unrecognised value at any tier falls through to `direct` instead of
+    // reaching the prompt. Unset and misspelt therefore behave identically,
+    // which is the safe direction — the alternative is a typo in a Setting row
+    // silently rewriting the system prompt's first line.
+    narrationStyle: resolveNarrationStyle(
+      fromSetting(NARRATION_STYLE_SETTING_KEY) ?? fromEnv('NARRATION_STYLE') ?? DEFAULT_NARRATION_STYLE,
+    ),
   }
 }
