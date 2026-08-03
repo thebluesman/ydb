@@ -70,6 +70,31 @@ const FORBIDDEN_IDENTIFIERS = [
   'sqlite_sequence',
 ]
 
+// A result-column or table ALIAS the model names after `AS` is a label, not an
+// identifier reference — `SUM(amount) AS budget` never reads the Budget table,
+// and `FROM "Transaction" AS setting` never reads the Setting table. Matching
+// FORBIDDEN_IDENTIFIERS as bare tokens anywhere in the SQL can't tell an alias
+// target from a real reference, so a query that only ever touches Transaction
+// got rejected purely for choosing an unlucky output column name ([chat-bug]
+// budget/setting false positive). Masked out before the identifier scan runs,
+// same quoting styles ADR-0010's alias detector recognises
+// (`lib/chatBalanceScope.ts`'s ALIAS_RE) — bare, "double", `backtick`, [bracket]
+// and 'single' quoted, so the model can name a column anything without
+// tripping this guard. What precedes `AS` is left untouched: `FROM Budget AS b`
+// still has "Budget" itself unmasked and still gets rejected, since that is a
+// genuine table reference, not a label.
+const ALIAS_DEF_RE = /\bAS\s+(?:"([^"]*)"|`([^`]*)`|\[([^\]]*)\]|'([^']*)'|([A-Za-z_][A-Za-z0-9_]*))/gi
+
+function maskAliasDefinitions(sql: string): string {
+  return sql.replace(ALIAS_DEF_RE, (_match, dq, bt, br, sq, bare) => {
+    if (dq !== undefined) return `AS "${'_'.repeat(dq.length)}"`
+    if (bt !== undefined) return `AS \`${'_'.repeat(bt.length)}\``
+    if (br !== undefined) return `AS [${'_'.repeat(br.length)}]`
+    if (sq !== undefined) return `AS '${'_'.repeat(sq.length)}'`
+    return `AS ${'_'.repeat((bare as string).length)}`
+  })
+}
+
 // Strip string literals ('...') and comments (-- ..., /* ... */) before
 // inspecting a SQL string. Avoids matching forbidden names that appear
 // inside user-visible description text or commentary.
@@ -133,7 +158,7 @@ export function executeReadonlyQuery(sql: string): ReadonlyQueryResult {
     throw new ReadonlyQueryError('Only SELECT or WITH ... SELECT statements are allowed')
   }
 
-  const sanitized = stripLiteralsAndComments(trimmed).toLowerCase()
+  const sanitized = stripLiteralsAndComments(maskAliasDefinitions(trimmed)).toLowerCase()
   for (const id of FORBIDDEN_IDENTIFIERS) {
     // Word-boundary match: reject `setting` as a standalone token but allow
     // `settings_import`, `xyz_setting_tbl`, etc. Quoted identifiers like
