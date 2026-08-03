@@ -55,6 +55,65 @@ export function mostRecentMonthYm(now: Date, month: number): string {
   return `${resolvedYear}-${String(month).padStart(2, '0')}`
 }
 
+// ── Quarter arithmetic ───────────────────────────────────────────────────────
+//
+// Why this exists at all, and why it is here rather than left to SQLite:
+// "this quarter" and "the same quarter last year" have no `date('now', ...)`
+// modifier. SQLite can do "start of month" and "-12 months"; it cannot do
+// "start of quarter". The model's alternatives are both bad — `strftime('%m')`
+// arithmetic it gets wrong under pressure, or a quarter boundary recalled from
+// training data, which is the exact failure `mostRecentMonthYm` was written to
+// stop one granularity down. So the server computes the boundaries and hands
+// the model literals, on the same terms as the rest of this file: pure, UTC,
+// derived from `now`, never from the model's sense of the present.
+
+/** A calendar quarter. `quarter` is 1-4. */
+export type Quarter = { year: number; quarter: number }
+
+/** The quarter `now` falls in, UTC. */
+export function quarterOf(now: Date): Quarter {
+  return { year: now.getUTCFullYear(), quarter: Math.floor(now.getUTCMonth() / 3) + 1 }
+}
+
+/**
+ * `q` moved by `delta` quarters, negative for backwards.
+ *
+ * Done on an absolute quarter index rather than by decrementing and fixing up,
+ * so a year boundary is not a special case and `-4` (the year-over-year shift)
+ * is the same code path as `-1`. `Math.floor` rather than truncation, so it
+ * stays correct for years before 0 — irrelevant to this ledger, but a division
+ * that is only right for positive inputs is a trap for the next caller.
+ */
+export function shiftQuarters(q: Quarter, delta: number): Quarter {
+  const index = q.year * 4 + (q.quarter - 1) + delta
+  return { year: Math.floor(index / 4), quarter: (((index % 4) + 4) % 4) + 1 }
+}
+
+/**
+ * The half-open date range of a quarter, as `YYYY-MM-DD` literals.
+ *
+ * Half-open (`>= start AND < endExclusive`) deliberately, because
+ * `Transaction.date` is an ISO *datetime* string. A closed range written against
+ * a calendar date — `<= '2026-09-30'` — drops every row on the last day of the
+ * quarter, since '2026-09-30 00:00:00.000' sorts after '2026-09-30' as a string.
+ * That is a silent undercount, not an error, so the prompt teaches the half-open
+ * form and this returns the boundaries in exactly that shape.
+ */
+export function quarterRange(q: Quarter): { start: string; endExclusive: string } {
+  const startMonth = (q.quarter - 1) * 3 + 1
+  const next = shiftQuarters(q, 1)
+  const nextMonth = (next.quarter - 1) * 3 + 1
+  return {
+    start: `${q.year}-${String(startMonth).padStart(2, '0')}-01`,
+    endExclusive: `${next.year}-${String(nextMonth).padStart(2, '0')}-01`,
+  }
+}
+
+/** Human-readable quarter label for the prompt's prose, e.g. `Q3 2026`. */
+export function quarterLabel(q: Quarter): string {
+  return `Q${q.quarter} ${q.year}`
+}
+
 /**
  * A category literal for a worked example, drawn from the real vocabulary.
  *
@@ -136,6 +195,13 @@ export function buildSqlSystemPrompt(
   // is: a hardcoded literal here would teach the model a stale year the moment
   // the calendar moved past it.
   const june = mostRecentMonthYm(now, 6)
+  // Quarter boundaries, computed for the same reason the date is: SQLite has no
+  // "start of quarter" modifier, so without these the model either does month
+  // arithmetic by hand or recalls a boundary from training data.
+  const thisQuarter = quarterOf(now)
+  const lastYearQuarter = shiftQuarters(thisQuarter, -4)
+  const thisQ = quarterRange(thisQuarter)
+  const lastYearQ = quarterRange(lastYearQuarter)
 
   const vocabularyBlock = buildCategoryVocabularyBlock(categories)
   // Empty vocabulary (a ledger with nothing categorised) renders no block and
@@ -211,6 +277,14 @@ One row, one column per figure -- never a compound SELECT:
 - A question asking for several figures is answered with several aliased columns in ONE row, using conditional aggregates. See the multi-figure example below.
 - The server rejects any query containing a compound SELECT outright rather than running it.
 
+Comparing two periods:
+- A comparison -- "how does this month compare to last", "am I spending more on ${groceries.word} than usual", "this quarter versus the same quarter last year" -- is answered by ONE row with one aliased column per period, using a conditional aggregate per period: SUM(CASE WHEN <period test> THEN -amount ELSE 0 END) / 100.0 AS this_month, SUM(CASE WHEN <other period test> THEN -amount ELSE 0 END) / 100.0 AS last_month. Never two queries, and never a compound SELECT -- see the rule above.
+- The period test goes INSIDE the CASE, never in the WHERE clause alone. The WHERE clause must span EVERY period being compared, because it filters the rows both columns are computed from. A WHERE pinned to one period is the commonest way this goes wrong: the other column then sums an empty set and reports a confident 0.00 for a period with real spending in it, and the query looks entirely reasonable.
+- Alias each column after the period it covers -- this_month, last_month, this_quarter, same_quarter_last_year. The column name is all the narrator sees, so an unlabelled or misordered pair is reported as a comparison of the wrong two things.
+- Every money column in the projection must be divided by 100.0 in the SELECT list, comparison columns included. An average over N periods is written SUM(...) / 100.0 / N, with the / 100.0 FIRST: the server reads the projection to decide which values are still raw cents, and a figure it cannot resolve is refused rather than narrated.
+- Do NOT compute the difference, ratio or percentage change yourself. Return the two figures; the comparison is made from them downstream.
+- All the usual guards apply to a comparison exactly as they do to a single-period aggregate: it is a spending or income figure, so it excludes transfers, split parents and reimbursed pairs.
+
 Balances are out of scope:
 - SUM(amount) over an account is the NET FLOW across whatever period the query filters to -- money in minus money out for those dates. It is never that account's balance, and it is never the amount owed on a liability.
 - Account balances, net worth and amounts outstanding are NOT derivable in SQL here. A balance is the account's opening balance combined with every transaction over its whole life under the sign rule for its account type; that arithmetic lives in application code, not in this query. If the question asks for a balance, net worth, how much is owed, how much is left, or anything that needs one, do NOT approximate it with a sum -- answer the flow question you can answer, or return the closest transaction-level aggregate.
@@ -223,6 +297,10 @@ Date rules:
 - For a month named WITHOUT a year -- "in June", "what about March?" -- resolve it to the most recent occurrence of that month that is not in the future, counting the current month as having occurred, and write it as a literal 'YYYY-MM'. Today is ${today}, so "June" means '${june}'. A month later in the calendar than the current month belongs to the previous year.
 - Never emit a year you were not given or did not derive from today's date (${today}). If a question needs a year that cannot be derived that way, prefer a relative date('now', ...) expression over guessing one.
 - A bare year ("in 2024") or an explicit month and year ("June 2024") is already unambiguous -- use it as written.
+- Quarters: SQLite has NO "start of quarter" modifier, so do not try to build one out of date('now', ...) and do not derive quarter boundaries by arithmetic on strftime('%m', date). The server supplies them. Today is ${today}, so the current quarter is ${quarterLabel(thisQuarter)}: date >= '${thisQ.start}' AND date < '${thisQ.endExclusive}'. The same quarter one year earlier is ${quarterLabel(lastYearQuarter)}: date >= '${lastYearQ.start}' AND date < '${lastYearQ.endExclusive}'. "Last quarter" is the three months before '${thisQ.start}'.
+- Write EVERY date range against the date column as half-open -- date >= '<start>' AND date < '<day after the end>'. Transaction.date is a datetime string, so a closed range against a calendar date (date <= '${lastYearQ.endExclusive}') silently drops every row on that final day, because '${lastYearQ.endExclusive} 00:00:00.000' sorts after '${lastYearQ.endExclusive}'. An undercount, with nothing in the result to show for it.
+- Same period one year earlier: for a MONTH, compare against strftime('%Y-%m', date('now','-12 months')) -- resolved by SQLite at execution time, so it stays correct. For a QUARTER, use the literal range given above. Do not shift a year by editing the year digits of a literal you were not given.
+- If a question is anchored to something the ledger does not record -- "the week before my paycheck hits", "since I started my new job" -- do NOT invent the anchor date and do not infer it from the data. There is no stored payday, and a guessed one produces a precisely-bounded window over the wrong dates. Answer the nearest calendar-anchored question you can state exactly, or return no usable window rather than a fabricated one.
 
 Recap questions:
 - A question asking for a RECAP, summary or overview of a period -- "give me a monthly recap", "summarise my spending this quarter", "how did last month go" -- is asking about the shape of that period, not for one number. Answer it with a GROUPED AGGREGATE over the period: category totals (GROUP BY category ORDER BY total ASC/DESC), or month totals within a longer window (GROUP BY strftime('%Y-%m', date)). The top-spending-categories example below is the shape to copy.
@@ -275,6 +353,35 @@ A: SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_exp
 
 Q: What's my total income and total expenses this year?
 A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')
+
+Q: How does my spending this month compare to last month?
+A: SELECT SUM(CASE WHEN strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) THEN -amount ELSE 0 END) / 100.0 AS this_month, SUM(CASE WHEN strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) THEN -amount ELSE 0 END) / 100.0 AS last_month FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND date >= date('now','start of month','-1 month') AND status IN ('committed','reconciled')
+-- Two periods, two aliased columns, ONE row. The period test is inside each CASE; the WHERE clause
+-- covers BOTH months, so both columns are computed from rows that are actually present. Pin the WHERE
+-- to one month and the other column reports 0.00 for a month that had spending in it.
+
+Q: Am I spending more on ${groceries.word} than usual?
+A: SELECT SUM(CASE WHEN date >= date('now','start of month') THEN -amount ELSE 0 END) / 100.0 AS this_month, SUM(CASE WHEN date < date('now','start of month') THEN -amount ELSE 0 END) / 100.0 / 6 AS average_prior_month FROM "Transaction" WHERE category = '${groceries.literal.replace(/'/g, "''")}' AND amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND date >= date('now','start of month','-6 months') AND status IN ('committed','reconciled')
+-- "Than usual" is a comparison against an average, so it is still two columns in one row. The divisor
+-- must match the window the WHERE clause opens: six whole months before this one, so / 6. Write the
+-- / 100.0 BEFORE the / 6 -- the server reads the projection to decide which figures are still in cents.
+-- Do NOT reach for a subquery or a WITH to average the monthly totals: the server cannot resolve the
+-- units of a CTE projection and refuses the query outright.
+
+Q: How am I doing this quarter compared with the same quarter last year?
+A: SELECT SUM(CASE WHEN date >= '${thisQ.start}' AND date < '${thisQ.endExclusive}' THEN -amount ELSE 0 END) / 100.0 AS this_quarter, SUM(CASE WHEN date >= '${lastYearQ.start}' AND date < '${lastYearQ.endExclusive}' THEN -amount ELSE 0 END) / 100.0 AS same_quarter_last_year FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND date >= '${lastYearQ.start}' AND date < '${thisQ.endExclusive}' AND status IN ('committed','reconciled')
+-- The quarter boundaries are the literals supplied in the date rules above, not boundaries you worked
+-- out or remembered. Both ranges are half-open (>= start, < the first day of the next quarter), and the
+-- WHERE clause spans from the start of the EARLIER quarter to the end of the later one so both columns
+-- see their rows.
+
+Q: Across all my accounts, where is my money actually going this month?
+A: SELECT category, SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total_spent DESC LIMIT 20
+-- "Across all my accounts" names NO account, so this filters on none and does not join Account at all.
+-- Naming accounts in the question is not the same as naming ONE account: a question that spans the
+-- whole ledger is answered by leaving the account filter out, never by picking a plausible account or
+-- by grouping per account when the question asked where the money went. Only join Account when the
+-- question names a specific account -- see the account-filtered example above.
 
 Q: How much did I move between my accounts this year?
 A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total FROM "Transaction" WHERE transactionType = 'transfer' AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')

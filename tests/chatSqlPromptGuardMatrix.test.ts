@@ -118,18 +118,19 @@ describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', 
   // bound — which is the drift this matrix exists to catch, arriving through the
   // matrix itself. Adding a row now forces a deliberate count.
   //
-  // Two of the three are static (groceries, travel); the third is the ADR-0008
+  // Three of the four are static (groceries, travel, and the "than usual"
+  // comparative added by [chat-model] PR 4); the fourth is the ADR-0008
   // no-matching-category example, which only renders when there is a vocabulary
   // for a category to fail to correspond to. The account vocabulary adds an
   // Account-join example that filters on `a.name`, not on category, so it does
   // not move this count.
   const prompts = [
-    { label: 'no stored vocabulary', prompt: buildSqlSystemPrompt(NOW), categoryFiltered: 2 },
-    { label: 'with stored vocabulary', prompt: buildSqlSystemPrompt(NOW, CATEGORIES), categoryFiltered: 3 },
+    { label: 'no stored vocabulary', prompt: buildSqlSystemPrompt(NOW), categoryFiltered: 3 },
+    { label: 'with stored vocabulary', prompt: buildSqlSystemPrompt(NOW, CATEGORIES), categoryFiltered: 4 },
     {
       label: 'with stored category and account vocabulary',
       prompt: buildSqlSystemPrompt(NOW, CATEGORIES, ACCOUNTS),
-      categoryFiltered: 3,
+      categoryFiltered: 4,
     },
   ]
 
