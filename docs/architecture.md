@@ -204,14 +204,27 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
 
 - None outstanding for Phase 1. The Phase 1→2 gate itself (ADR-0002) is the next thing that needs a
   decision, and it needs real usage data before it can be answered.
-- **No eval harness exists for the chat/SQL path — now the single most blocking gap.** ADR-0006 rejects
-  hosted inference partly on the grounds that local-model quality has never been measured, so any
-  future argument to revisit it needs a harness first. ADR-0007 leans on the same gap: no harness means
-  no way to justify a retrieval layer over the flat P0 injection. ADR-0013 adds two more — it gates
-  Phase B on Phase A's verdict data, and it is why `qwen3.6:latest` (installed, reports `thinking` and
-  `tools`, 262k context) has not been tried as the chat model despite being free to evaluate. Four
-  decisions now wait on this. Still unowned; ADR-0013's Phase A produces it as a side effect, which is
-  the current best argument for doing Phase A first.
+- **A golden-query eval harness exists now** (`[chat-eval]`, `scripts/evalChatSql.ts` +
+  `scripts/chatEval/`, shipped 2026-08-03) — this entry previously read "no eval harness exists ... the
+  single most blocking gap." It runs ~22 natural-language questions against a small fixture ledger
+  through the real prompt and real guard chain, on a real Ollama call, and reports pass/fail against a
+  ground-truth SQL query per question (not a string match). Baseline run against `qwen2.5:32b`:
+  **20/22 (90.9%)**. Two genuine findings, not harness bugs, neither fixed yet — full detail in
+  `scripts/chatEval/README.md`: (1) a bare "total income" question drops the reimbursement-settlement
+  exclusion that the paired income-and-expenses worked example correctly teaches, over-reporting by the
+  settlement amount; (2) a transfer-category question ("how much did I pay on my car loan") sometimes
+  combines an account-name filter with the category filter, and since a transfer's category lives on
+  only one leg (ADR-0019) that intersection can be empty — open whether this is a model-reasoning gap or
+  a fixture question inviting an over-constrained reading.
+  **What this unblocks:** ADR-0006's hosted-inference rejection can now be argued from measured data
+  rather than absence of measurement (though 20/22 on one model isn't yet grounds to revisit it). ADR-0007
+  can be evaluated for whether a retrieval layer beats the flat P0 injection. ADR-0013's Phase B gate
+  and the untried `qwen3.6:latest` comparison both have a harness to run against, though nobody has run
+  either comparison yet — the harness existing is not the same as the four decisions being answered.
+  **Known limitation, stated in the harness's own README:** it reimplements route.ts's guard order as a
+  thin driver calling the same guard functions live from `lib/`, not the route handler itself (which
+  would require pointing at `prisma/dev.db`'s hardcoded path, exactly what this harness must not risk
+  touching) — guard *logic* cannot drift out of sync, guard *order* or a newly-added guard could.
 - **Refusal happens after the query runs — except for balance questions.** The boundary snippet `X1`
   lives in the narration prompt (ADR-0007), so a generally out-of-scope question still generates and
   executes a `SELECT` before the model declines. Read-only and local, so it costs latency rather than
