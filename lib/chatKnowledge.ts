@@ -1,5 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import {
+  DEFAULT_NARRATION_STYLE,
+  NARRATION_STYLE_PERSONA,
+  type NarrationStyle,
+} from './narrationStyle'
 
 // Loader for the chat knowledge snippets in `docs/knowledge/`, injected into
 // the NARRATION prompt only (never SQL generation) per ADR-0007.
@@ -161,6 +166,19 @@ export const KNOWLEDGE_PRECEDENCE_LINE =
   'and you must not assert anything the returned rows do not support.'
 
 /**
+ * The standing confidence rule ([chat-model] output 5), last sentence of the
+ * operative rules. Two branches, and the second is the load-bearing one: with
+ * no caveat named for this turn, the answer is fully scoped and must be stated
+ * flatly. Vague hedging on a figure that IS certain was rejected outright when
+ * this was scoped, so "when in doubt, hedge" is exactly the wrong default and
+ * is written out of the prompt rather than left unsaid.
+ */
+export const CONFIDENCE_RULE =
+  'If a caveat is stated with the data below, state the figure first and then work that caveat ' +
+  'into your answer once, briefly. If no caveat is stated, the answer is fully scoped: give it ' +
+  'plainly, and do not hedge, qualify, estimate, or speculate about data you were not given.'
+
+/**
  * Assemble the narration system prompt.
  *
  * Order is load-bearing, not cosmetic: persona → precedence line → knowledge
@@ -171,15 +189,29 @@ export const KNOWLEDGE_PRECEDENCE_LINE =
  * With an empty knowledge block this returns the exact prompt string the route
  * used before knowledge injection existed.
  */
-export function buildNarrationSystemPrompt(baseCurrency: string, knowledgeBlock: string): string {
-  const persona = 'You are a helpful financial assistant.'
+export function buildNarrationSystemPrompt(
+  baseCurrency: string,
+  knowledgeBlock: string,
+  style: NarrationStyle = DEFAULT_NARRATION_STYLE,
+): string {
+  // [chat-model] output 16. The persona line is the one thing the voice setting
+  // moves; `direct` is the pre-setting sentence byte-for-byte, so an install
+  // that never opens the picker gets exactly the prompt it got before.
+  const persona = NARRATION_STYLE_PERSONA[style]
 
   // ADR-0020: units are decided server-side (lib/chatMoneyUnits.ts) before rows
   // ever reach this prompt, not inferred by the model. The inference clause
   // this comment used to sit above is deleted, not softened — a hedge here
   // would just relocate the wrong-number risk back onto model judgement.
+  //
+  // CONFIDENCE_RULE follows the same logic one step further ([chat-model]
+  // output 5): whether a caveat is warranted is decided in lib/chatHedge.ts and
+  // stated in the turn's prompt, so what lives here is the standing rule for
+  // both branches — and the branch that matters most is the second one, which
+  // forbids the free-floating hedging a "qualify when appropriate" instruction
+  // would otherwise produce on every answer.
   const operativeRules =
-    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions.`
+    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions. ${CONFIDENCE_RULE}`
 
   if (!knowledgeBlock) return `${persona} ${operativeRules}`
 

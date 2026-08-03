@@ -43,6 +43,7 @@ import {
 } from '@/lib/chatMoneyGuards'
 import { applyMoneyUnits, moneyUnitsPlan } from '@/lib/chatMoneyUnits'
 import { buildResultFrame } from '@/lib/chatResultFrame'
+import { hedgeGrounds, hedgeInstruction } from '@/lib/chatHedge'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -359,7 +360,7 @@ export async function POST(request: Request) {
     throw e
   }
 
-  const { ollamaUrl, sqlModel, narrationModel } = await getLlmConfig()
+  const { ollamaUrl, sqlModel, narrationModel, narrationStyle } = await getLlmConfig()
   const signal = ollamaSignal(request.signal)
 
   const trimmedHistory = trimHistory(history)
@@ -751,6 +752,21 @@ export async function POST(request: Request) {
       : null,
   })
 
+  // [chat-model] output 5. Whether this answer rests on something the reader
+  // can't see is decided here, from the same rows/sql/truncation state
+  // narration is about to be handed — not left to the model, which given a
+  // standing "hedge when appropriate" instruction hedges everything.
+  //
+  // Empty is the normal outcome. When it is empty nothing is appended, and the
+  // system prompt's standing rule tells the model to answer flatly.
+  const hedgeNote = hedgeInstruction(hedgeGrounds({
+    question,
+    sql,
+    rows: narrationRows as Record<string, unknown>[],
+    truncated: narrationTruncated || dbTruncated,
+    today: new Date(),
+  }))
+
   // Knowledge injection (ADR-0007): narration prompt only, never the SQL
   // prompt. Read fresh off disk each turn; the loader never throws, so a
   // missing or unreadable docs/knowledge/ just means no block.
@@ -764,10 +780,14 @@ export async function POST(request: Request) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: narrationModel,
-        system: buildNarrationSystemPrompt(baseCurrency, knowledgeBlock),
+        system: buildNarrationSystemPrompt(baseCurrency, knowledgeBlock, narrationStyle),
+        // The caveat goes AFTER the closing data marker, never inside it:
+        // everything between the markers is declared verbatim query data that
+        // must not be read as instruction (see NARRATION_DATA_BOUNDARY), and an
+        // instruction smuggled in there would undercut exactly that claim.
         prompt: `${priorContext}User: ${question}\n\n${NARRATION_DATA_BOUNDARY}\n\n`
           + `${NARRATION_DATA_OPEN}\n${JSON.stringify(narrationRows, null, 2)}\n${NARRATION_DATA_CLOSE}`
-          + truncationNote,
+          + truncationNote + hedgeNote,
         stream: true,
         keep_alive: OLLAMA_KEEP_ALIVE,
         options: { num_ctx: NARRATION_NUM_CTX },
