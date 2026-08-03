@@ -174,12 +174,12 @@ export const KNOWLEDGE_PRECEDENCE_LINE =
 export function buildNarrationSystemPrompt(baseCurrency: string, knowledgeBlock: string): string {
   const persona = 'You are a helpful financial assistant.'
 
-  // NOTE: the cents-vs-dollars clause below is owned by the open
-  // "[chat-bug] Make cents-vs-dollars units deterministic in narration"
-  // ticket, which had not landed when this shipped. Left byte-for-byte
-  // untouched so a determinism regression stays attributable to one change.
+  // ADR-0020: units are decided server-side (lib/chatMoneyUnits.ts) before rows
+  // ever reach this prompt, not inferred by the model. The inference clause
+  // this comment used to sit above is deleted, not softened — a hedge here
+  // would just relocate the wrong-number risk back onto model judgement.
   const operativeRules =
-    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. Monetary values in the data may already be dollars (from SUM(amount)/100.0) or raw cents (from raw amount columns) — infer from context and always present them in ${baseCurrency} without any other currency symbols or conversions.`
+    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions.`
 
   if (!knowledgeBlock) return `${persona} ${operativeRules}`
 

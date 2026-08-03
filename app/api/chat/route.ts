@@ -41,6 +41,7 @@ import {
   transferSumMessage,
   transferSumViolation,
 } from '@/lib/chatMoneyGuards'
+import { applyMoneyUnits, moneyUnitsPlan } from '@/lib/chatMoneyUnits'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -490,6 +491,26 @@ export async function POST(request: Request) {
     return nonAnswerResponse(nonAnswerFrame('unsupported-shape', transferSumMessage(transferSumFirst), sql))
   }
 
+  // ADR-0020. Units are a static type property of named schema columns
+  // (Transaction.amount, Account.creditLimit are always cents), so whether a
+  // projection item needs dividing by 100 before narration is decidable from
+  // the SQL text alone — same line ADR-0016 draws for a route-level detector.
+  // A projection this can't resolve (a CTE, an ambiguous star, a money
+  // expression with no /100 in a shape rule (a) doesn't recognise) is refused
+  // rather than narrated with a guessed unit, on the same fail-closed logic as
+  // every check above it: this SQL runs cleanly, there is no SQLite error, and
+  // failing open here would manufacture a confident wrong number under a
+  // narration prompt that no longer hedges on units.
+  if (moneyUnitsPlan(sql).kind === 'refuse') {
+    return nonAnswerResponse(nonAnswerFrame(
+      'unsupported-shape',
+      "I couldn't tell whether a figure in that query is in cents or already converted, so I didn't " +
+        'run it. Asking for one aggregate at a time, without combining several into a derived figure, ' +
+        'usually resolves this.',
+      sql,
+    ))
+  }
+
   // Execute the SQL on a read-only connection to prevent mutations. On a SQLite
   // error, give the model exactly ONE repair round-trip (feed it the failed SQL
   // and the error) before surfacing the failure — models frequently mis-name a
@@ -595,6 +616,19 @@ export async function POST(request: Request) {
       ))
     }
 
+    // And ADR-0020's, independently of the first pass, same reason as every
+    // other guard duplicated here: a repair pass is free to restructure the
+    // projection on its way past a syntax fix.
+    if (moneyUnitsPlan(repaired).kind === 'refuse') {
+      return nonAnswerResponse(nonAnswerFrame(
+        'unsupported-shape',
+        "I couldn't tell whether a figure in that query is in cents or already converted, so I didn't " +
+          'run it. Asking for one aggregate at a time, without combining several into a derived figure, ' +
+          'usually resolves this.',
+        repaired,
+      ))
+    }
+
     try {
       const result = executeReadonlyQuery(repaired)
       rows = result.rows
@@ -625,6 +659,15 @@ export async function POST(request: Request) {
   if (scopeRows) {
     return nonAnswerResponse(nonAnswerFrame('out-of-scope', balanceScopeRowMessage(scopeRows), sql))
   }
+
+  // ADR-0020's other half: the refusal decision above already ran pre-execution
+  // on whichever SQL was about to run, so recomputing the plan here for the
+  // final `sql` is guaranteed 'ok' — this call only ever produces `convertKeys`
+  // to apply. Placed once here rather than duplicated per execution branch, the
+  // same reasoning as `balanceScopeRowViolation` just above: no second call
+  // site to drift, and dividing a NULL aggregate by 100 is still NULL, so
+  // running this before or after the no-data check below is equivalent.
+  rows = applyMoneyUnits(rows, moneyUnitsPlan(sql))
 
   // A clean run that matched nothing is a non-answer, and it never reaches
   // narration (ADR-0014). Narrating `[{"total": null}]` is what produced "you

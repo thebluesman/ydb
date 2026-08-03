@@ -134,11 +134,17 @@ the units ticket, before any code was written:
   `Account.name`, the column ADR-0008 explicitly scoped out. The `Account` qualifier is resolved off
   the statement's `FROM`/`JOIN` clauses rather than assumed, since `Category.name` also exists, and an
   unrecognised table-source shape fails open to a non-check.
-- **Raw integer cents narrated as currency units** (ADR-0020) — the SQL prompt's `/100.0` rule is
-  scoped to aggregates, so a row-level `Transaction.amount` or an `Account.creditLimit` reached
-  narration as raw cents under a prompt clause telling the narrator to "infer from context". Units are
-  a static property of schema columns, so the server classifies the projection and converts the values
-  before narration; an unresolvable projection is refused as `unsupported-shape` rather than guessed.
+- **Raw integer cents narrated as currency units** (ADR-0020, implemented `lib/chatMoneyUnits.ts`) —
+  the SQL prompt's `/100.0` rule is scoped to aggregates, so a row-level `Transaction.amount` or an
+  `Account.creditLimit` reached narration as raw cents under a prompt clause telling the narrator to
+  "infer from context". Units are a static property of schema columns, so the server classifies the
+  final `SELECT`'s projection list and divides the resolved values before narration; a projection it
+  can't resolve (a CTE, an ambiguous star, a money expression with no `/100` in a shape it recognises)
+  is refused as `unsupported-shape` rather than guessed. **Explicitly not an arithmetic-correctness
+  check** — a projection that already contains `/100` is trusted as converted even if the surrounding
+  expression computes the wrong number (misplaced or redundant unit conversion inside a derived ratio,
+  live-reproduced during the `[chat-bug]` derived-values re-scoping, 2026-08-03). That is a correctness
+  question the units classifier cannot and does not try to answer; only the eval harness below can.
 
 The balance-alias (ADR-0010) and compound-SELECT (ADR-0011) fixes share a root cause worth stating
 plainly: narration receives `JSON.stringify(rows)` and nothing else, so the column alias — written by
@@ -239,23 +245,24 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
      (`"Transaction".accountId = Account.id`) with no worked example, while categories got three.
      Few-shot shape beats prose (ADR-0008), so the model had no shape to imitate for the one construct
      this guard reads. An aliased worked example was added — no ADR, it implements ADR-0018.
-  2. *A bug in the resolver, still open.* The fail-open surface is **not** the exotic shapes ADR-0018
-     described as "a CTE or an unusual join form" — it is the plainest join the model can write.
-     `TABLE_SOURCE_RE` in `lib/chatAccountVocabulary.ts` gives the alias slot an unconditional
-     `\s+identifier` match, so on an **unaliased** source the alias slot consumes the following
-     `JOIN`/`FROM` keyword itself. `NOT_AN_ALIAS` correctly declines to bind it as an alias, but the
-     regex's `lastIndex` has already advanced past it, so the *next* table source is never matched at
-     all. Two distinct symptoms, both pinned as tripwires in
-     `tests/chatSqlPromptAccountJoinExample.test.ts` (six shapes plus two aliased controls):
-     `FROM "Transaction" JOIN Account …` silently registers no `Account` qualifier and is not checked
-     (fail-open); `FROM Account JOIN "Transaction" …` loses the second table, so `tables.size === 1`
-     and `bareNameIsAccount` wrongly returns true, refusing a bare `name` that belongs to the other
-     table (false ADR-0014 refusal). A third shape fails by a different mechanism: comma joins
-     (`FROM "Transaction", Account`) are missed regardless of aliasing, because the regex anchors on
-     `FROM`/`JOIN` only and `,` is not a source-introducing token. Aliasing every source hides all
-     three, which is why the PR #38 example is aliased — a workaround, not the fix. Scoped as a
-     `@backend-engineer` bug ticket; no ADR, this is a defect in a guard's detection logic, not a
-     change to what ADR-0018 decided to check.
+  2. *A bug in the resolver, fixed 2026-08-03 ([chat-sql] 9, PR #42).* The fail-open surface was **not**
+     the exotic shapes ADR-0018 described as "a CTE or an unusual join form" — it was the plainest join
+     the model can write. `TABLE_SOURCE_RE` in `lib/chatAccountVocabulary.ts` gave the alias slot an
+     unconditional `\s+identifier` match, so on an **unaliased** source the alias slot consumed the
+     following `JOIN`/`FROM` keyword itself. `NOT_AN_ALIAS` correctly declined to bind it as an alias,
+     but the regex's `lastIndex` had already advanced past it, so the *next* table source was never
+     matched at all. Two distinct symptoms, both pinned as tripwires in
+     `tests/chatSqlPromptAccountJoinExample.test.ts` (six shapes plus two aliased controls), now flipped
+     to passing assertions: `FROM "Transaction" JOIN Account …` used to silently register no `Account`
+     qualifier and go unchecked (fail-open); `FROM Account JOIN "Transaction" …` used to lose the second
+     table, so `tables.size === 1` and `bareNameIsAccount` wrongly returned true, refusing a bare `name`
+     that belonged to the other table (false ADR-0014 refusal). Fixed with a negative lookahead
+     excluding JOIN and its modifiers (LEFT/RIGHT/INNER/OUTER/CROSS/NATURAL/FULL) from the alias slot,
+     so the keyword is left for the next `matchAll` iteration instead of being consumed. **Still open,
+     a distinct and unrelated limitation:** comma joins (`FROM "Transaction", Account`) are still missed
+     regardless of aliasing, because the regex anchors on `FROM`/`JOIN` only and `,` is not a
+     source-introducing token — not touched by this fix, pinned as its own tripwire. `lib/chatMoneyUnits.ts`
+     (ADR-0020) reuses this same fixed idiom rather than the pre-fix one, so it does not inherit the bug.
 
   The harness question stays open regardless: it is what would say how often the model writes the
   affected shapes, which is a different question from whether the resolver handles them.
