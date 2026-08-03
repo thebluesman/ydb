@@ -44,7 +44,7 @@ vi.mock('@/lib/llm-config', () => ({
 }))
 
 const { POST } = await import('@/app/api/chat/route')
-const { CONFIDENCE_RULE } = await import('@/lib/chatKnowledge')
+const { CONFIDENCE_RULE, RECAP_RULE } = await import('@/lib/chatKnowledge')
 
 type Payload = { model: string; stream: boolean; system?: string; prompt?: string }
 let payloads: Payload[] = []
@@ -123,7 +123,7 @@ describe('POST /api/chat — narration voice (output 16)', () => {
     const coaching = narration().system!
     for (const system of [direct, coaching]) {
       expect(system).toContain('already in AED currency units')
-      expect(system.endsWith(CONFIDENCE_RULE)).toBe(true)
+      expect(system.endsWith(RECAP_RULE)).toBe(true)
     }
   })
 

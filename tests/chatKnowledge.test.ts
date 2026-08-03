@@ -6,6 +6,7 @@ import {
   buildKnowledgeBlock,
   buildNarrationSystemPrompt,
   CONFIDENCE_RULE,
+  RECAP_RULE,
   KNOWLEDGE_DIR,
   KNOWLEDGE_PRECEDENCE_LINE,
   loadKnowledgeSnippets,
@@ -146,9 +147,11 @@ describe('buildNarrationSystemPrompt', () => {
   // so the old "may already be dollars ... infer from context" hedge is gone —
   // this is no longer byte-for-byte the pre-ADR-0020 prompt, deliberately.
   //
-  // The trailing sentence is [chat-model] output 5's standing confidence rule.
+  // The two trailing sentences are the standing rules with a per-turn switch
+  // decided server-side: [chat-model] output 5's confidence rule, then output
+  // 13's recap rule (lib/chatHedge.ts and lib/chatRecap.ts respectively).
   const NO_KNOWLEDGE_PROMPT =
-    `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in AED currency units, never raw cents — present them directly without any other currency symbols or conversions. ${CONFIDENCE_RULE}`
+    `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in AED currency units, never raw cents — present them directly without any other currency symbols or conversions. ${CONFIDENCE_RULE} ${RECAP_RULE}`
 
   it('with no knowledge block, states units are already normalized (ADR-0020), with no inference clause', () => {
     expect(buildNarrationSystemPrompt('AED', '')).toBe(NO_KNOWLEDGE_PROMPT)
@@ -170,7 +173,7 @@ describe('buildNarrationSystemPrompt', () => {
   it('keeps the operative rules last, so front-truncation loses knowledge before instructions', () => {
     const prompt = buildNarrationSystemPrompt('AED', 'KNOWLEDGE-BODY')
     expect(prompt).toContain('without any other currency symbols or conversions.')
-    expect(prompt.endsWith(CONFIDENCE_RULE)).toBe(true)
+    expect(prompt.endsWith(RECAP_RULE)).toBe(true)
   })
 
   // [chat-model] output 5. The rule has to carry BOTH branches: the no-caveat
@@ -193,7 +196,7 @@ describe('buildNarrationSystemPrompt', () => {
     expect(coaching).not.toContain('You are a helpful financial assistant.')
     for (const prompt of [direct, coaching]) {
       expect(prompt).toContain('already in AED currency units')
-      expect(prompt.endsWith(CONFIDENCE_RULE)).toBe(true)
+      expect(prompt.endsWith(RECAP_RULE)).toBe(true)
     }
   })
 

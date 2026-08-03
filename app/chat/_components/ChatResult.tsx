@@ -1,8 +1,11 @@
 'use client'
 
+import Link from 'next/link'
+import { ArrowUpRight } from 'lucide-react'
 import { fmtMoney } from '@/lib/money'
 import { formatDate } from '@/lib/format'
 import type { ResultColumn, ResultFrame } from '@/lib/chatResultFrame'
+import { ledgerLinkForRow } from '@/lib/chatLedgerLink'
 
 /**
  * ADR-0023's `result` frame, rendered. Three presentations of one contract:
@@ -46,6 +49,35 @@ const labelStyle: React.CSSProperties = {
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
   color: 'var(--tx-secondary)',
+}
+
+/**
+ * Cross-reference to the ledger ([chat-model] output 10).
+ *
+ * Built strictly from this row's own values via `lib/chatLedgerLink.ts`, never
+ * by re-reading the `sql` frame's filters — see that module's header for why
+ * (a link covering a different set than the number above it is ADR-0010's "a
+ * label is a claim" failure wearing a URL). A row carrying no dimension the
+ * ledger can filter on renders nothing at all rather than a widened guess.
+ */
+function LedgerLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      title={label}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '2px',
+        color: 'var(--tx-secondary)',
+        textDecoration: 'none',
+        flexShrink: 0,
+      }}
+    >
+      <ArrowUpRight size={13} strokeWidth={2} aria-hidden />
+    </Link>
+  )
 }
 
 function TruncationNote({ truncated }: { truncated: NonNullable<ResultFrame['truncated']> }) {
@@ -98,6 +130,7 @@ export function ChatResult({ result }: { result: ResultFrame }) {
               ...(descCol ? [formatValue(row[dateCol.key], dateCol, currency)] : []),
               ...restCols.map((c) => `${c.label}: ${formatValue(row[c.key], c, currency)}`),
             ]
+            const href = ledgerLinkForRow(row, columns)
             return (
             <li key={i} style={{
               display: 'flex',
@@ -116,12 +149,16 @@ export function ChatResult({ result }: { result: ResultFrame }) {
                 )}
               </div>
               <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
                 whiteSpace: 'nowrap',
                 fontVariantNumeric: 'tabular-nums',
                 color: 'var(--tx-primary)',
                 fontWeight: 500,
               }}>
                 {formatValue(row[amountCol.key], amountCol, currency)}
+                {href && <LedgerLink href={href} label="Open this day in the ledger" />}
               </div>
             </li>
             )
@@ -131,6 +168,12 @@ export function ChatResult({ result }: { result: ResultFrame }) {
       </div>
     )
   }
+
+  // The link column exists only when at least one row can actually produce a
+  // link, so a result with no ledger-filterable dimension keeps exactly the
+  // table it had before this feature — no empty trailing column.
+  const rowLinks = rows.map((row) => ledgerLinkForRow(row, columns))
+  const anyLink = rowLinks.some((href) => href !== null)
 
   return (
     <div style={panelStyle}>
@@ -151,6 +194,11 @@ export function ChatResult({ result }: { result: ResultFrame }) {
                   {c.label}
                 </th>
               ))}
+              {anyLink && (
+                <th style={{ ...labelStyle, padding: '8px 12px', borderBottom: '1px solid var(--border-warm)', width: '1%' }}>
+                  <span className="sr-only">Ledger</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -168,6 +216,16 @@ export function ChatResult({ result }: { result: ResultFrame }) {
                     {formatValue(row[c.key], c, currency)}
                   </td>
                 ))}
+                {anyLink && (
+                  <td style={{
+                    padding: '7px 12px',
+                    textAlign: 'right',
+                    borderTop: i === 0 ? 'none' : '1px solid var(--border-warm)',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {rowLinks[i] && <LedgerLink href={rowLinks[i]!} label="Open these transactions in the ledger" />}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
