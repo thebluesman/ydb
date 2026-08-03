@@ -81,6 +81,26 @@ describe('accountNameScope — which identifiers mean Account here', () => {
     expect(scope.qualifiers).toEqual([])
     expect(scope.bareNameIsAccount).toBe(false)
   })
+
+  it('does not lose a JOINed Account when the preceding table has no alias ([chat-sql] 9)', () => {
+    // `FROM Transaction JOIN Account a` — TABLE_SOURCE_RE used to swallow the
+    // `JOIN` keyword into Transaction's optional alias slot (later discarded by
+    // NOT_AN_ALIAS, but only after the regex's cursor had already moved past
+    // it), so this whole clause was never matched and Account vanished.
+    const scope = accountNameScope(
+      'SELECT 1 FROM Transaction JOIN Account a ON a.id = Transaction.accountId WHERE a.name = 1',
+    )
+    expect(scope.qualifiers).toContain('a')
+    expect(scope.qualifiers).toContain('Account')
+  })
+
+  it('does not lose a JOINed Account behind a LEFT/RIGHT/INNER modifier either', () => {
+    const scope = accountNameScope(
+      'SELECT 1 FROM Transaction LEFT JOIN Account a ON a.id = Transaction.accountId',
+    )
+    expect(scope.qualifiers).toContain('a')
+    expect(scope.qualifiers).toContain('Account')
+  })
 })
 
 describe('extractAccountPredicates', () => {
@@ -133,6 +153,14 @@ describe('unknownAccountLiterals', () => {
     // names an account that, so the query runs and matches nothing.
     const sql = `SELECT 1 FROM "Transaction" t JOIN Account a ON a.id = t.accountId WHERE a.name LIKE '%credit card%'`
     expect(unknownAccountLiterals(sql, ACCOUNTS)).toEqual(['%credit card%'])
+  })
+
+  it('catches an unmatched name even when Account is the second, unaliased-predecessor table ([chat-sql] 9)', () => {
+    // Before the fix, `FROM Transaction JOIN Account a` lost Account entirely
+    // from detection — this would have returned [] (fail-open) rather than
+    // flagging the unmatched literal.
+    const sql = `SELECT 1 FROM Transaction JOIN Account a ON a.id = Transaction.accountId WHERE a.name = 'Barclays Everyday'`
+    expect(unknownAccountLiterals(sql, ACCOUNTS)).toEqual(['Barclays Everyday'])
   })
 
   it('accepts a LIKE fragment that occurs in a stored name', () => {

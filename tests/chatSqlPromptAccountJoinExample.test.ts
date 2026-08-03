@@ -99,34 +99,28 @@ describe('the Account-join worked example', () => {
   })
 })
 
-describe('why the example is aliased (characterisation of accountNameScope)', () => {
-  // Not a preference — the unaliased form is invisible to the resolver. Its
-  // TABLE_SOURCE_RE consumes the JOIN keyword as the first table's optional
-  // alias, so the Account source is never matched and no qualifier is bound.
+describe('why the example was aliased (characterisation of accountNameScope, [chat-sql] 9)', () => {
+  // FIXED in [chat-sql] 9: TABLE_SOURCE_RE used to consume the JOIN keyword as
+  // the first table's optional alias whenever that first table had no alias of
+  // its own — NOT_AN_ALIAS correctly declined to BIND it, but only after the
+  // regex's cursor had already advanced past it, so the Account source that
+  // followed was never matched at all. A negative lookahead now excludes
+  // JOIN/LEFT/RIGHT/INNER/OUTER/CROSS/NATURAL/FULL from the alias slot itself,
+  // so the keyword is left for the next matchAll iteration instead of being
+  // swallowed. This block used to pin the broken behaviour as a before/after
+  // fixture for whoever picked up the fix; the assertions below are the "after."
   //
-  // This pins the reason. If accountNameScope is ever fixed to resolve these
-  // shapes, this block is what should be deleted — and the prompt's join rule
-  // can relax with it. Until then, changing the example to any shape below would
-  // silently disable the guard on the shape the prompt teaches, which is the
-  // failure mode this whole ticket exists to avoid.
-  //
-  // The resolver defect itself is OUT OF SCOPE here and routed to its own
-  // follow-up ticket. What follows is a complete before/after fixture for
-  // whoever picks that up: every shape below is characterised as it behaves
-  // TODAY, so a fix flips these assertions and the diff shows exactly what it
-  // bought. Each was verified empirically against the real resolver, not
-  // inferred from reading the regex.
+  // NOTE: this does NOT mean the prompt's join rule (teach the model to always
+  // alias) should be relaxed. The comma-join shape below is a distinct, still-
+  // open gap — different mechanism, no JOIN keyword to anchor on at all — so an
+  // unaliased-but-still-JOINed example remains resolvable while a comma-joined
+  // one would not be. Changing the worked example's shape is a separate call,
+  // not made here.
   const BOGUS = 'Main Credit Card' // not in ACCOUNTS
 
-  // ── Fail-open: the guard sees no Account source, so a bogus name is not caught.
-  //
-  // The common factor is that the FIRST table source carries no alias, so the
-  // `JOIN` keyword lands in TABLE_SOURCE_RE's optional-alias group. `NOT_AN_ALIAS`
-  // correctly declines to BIND it as an alias, but the regex has already consumed
-  // it, so the `Account` source that follows is never matched. Quoting and line
-  // breaks are incidental — they are enumerated because the model can emit any of
-  // them, not because they are separate causes.
-  const FAIL_OPEN: Record<string, string> = {
+  // ── Previously fail-open, now correctly resolved: an alias-less first table
+  // immediately followed by JOIN Account no longer loses the Account source.
+  const NOW_RESOLVED: Record<string, string> = {
     'unaliased':
       `SELECT SUM(-"Transaction".amount) / 100.0 AS total_spent FROM "Transaction" ` +
       `JOIN Account ON "Transaction".accountId = Account.id WHERE Account.name = '${BOGUS}'`,
@@ -139,22 +133,28 @@ describe('why the example is aliased (characterisation of accountNameScope)', ()
     'unaliased with a quoted "Account"':
       `SELECT SUM(-"Transaction".amount) / 100.0 AS total_spent FROM "Transaction" ` +
       `JOIN "Account" ON "Transaction".accountId = "Account".id WHERE "Account".name = '${BOGUS}'`,
-    // The one that is aliased and still fails, by a different route: there is no
-    // JOIN keyword at all, and TABLE_SOURCE_RE only anchors on FROM or JOIN, so
-    // the second table in the comma list is never a table source. Aliasing alone
-    // is therefore not the whole rule — the prompt teaches an explicit JOIN too.
-    'comma join, even fully aliased':
-      `SELECT SUM(-t.amount) / 100.0 AS total_spent FROM "Transaction" t, Account a ` +
-      `WHERE t.accountId = a.id AND a.name = '${BOGUS}'`,
   }
 
-  for (const [shape, sql] of Object.entries(FAIL_OPEN)) {
-    it(`fails open on a Transaction→Account join: ${shape}`, () => {
-      expect(accountNameScope(sql).qualifiers).toEqual([])
-      expect(extractAccountPredicates(sql)).toEqual([])
-      expect(unknownAccountLiterals(sql, ACCOUNTS)).toEqual([])
+  for (const [shape, sql] of Object.entries(NOW_RESOLVED)) {
+    it(`resolves a Transaction→Account join with no alias on the first table: ${shape}`, () => {
+      expect(accountNameScope(sql).qualifiers).toContain('Account')
+      expect(extractAccountPredicates(sql)).toHaveLength(1)
+      expect(unknownAccountLiterals(sql, ACCOUNTS)).toEqual([BOGUS])
     })
   }
+
+  it('STILL fails open on a comma join, even fully aliased — a distinct, unfixed gap', () => {
+    // There is no JOIN keyword at all here, and TABLE_SOURCE_RE only anchors on
+    // FROM or JOIN, so the second table in a comma-separated FROM list is never
+    // a table source regardless of aliasing. Not what [chat-sql] 9 fixed —
+    // aliasing was never the mechanism here, the missing anchor keyword is.
+    const COMMA_JOIN =
+      `SELECT SUM(-t.amount) / 100.0 AS total_spent FROM "Transaction" t, Account a ` +
+      `WHERE t.accountId = a.id AND a.name = '${BOGUS}'`
+    expect(accountNameScope(COMMA_JOIN).qualifiers).toEqual([])
+    expect(extractAccountPredicates(COMMA_JOIN)).toEqual([])
+    expect(unknownAccountLiterals(COMMA_JOIN, ACCOUNTS)).toEqual([])
+  })
 
   it('resolves the same join once the tables are aliased, line breaks and all', () => {
     // The control. Line breaks are NOT the cause — this is the line-broken shape
@@ -167,18 +167,19 @@ describe('why the example is aliased (characterisation of accountNameScope)', ()
     expect(unknownAccountLiterals(ALIASED, ACCOUNTS)).toEqual([BOGUS])
   })
 
-  it('falsely claims a bare name when Account is joined to another table', () => {
+  it('no longer falsely claims a bare name when Account is joined to another table', () => {
     // The mirror defect, and the more damaging one: not a missed check but a
-    // WRONG one. Same alias swallow, with Account first — `JOIN` is consumed as
-    // Account's alias slot, so `Category` never enters `tables`, `tables.size`
-    // is 1, and bareNameIsAccount comes back true for a query where a bare
-    // `name` is genuinely ambiguous. Here it is Category.name, so a perfectly
-    // valid category filter is reported as an unknown ACCOUNT literal and the
-    // query is refused. Fail-open loses a check; this invents one.
+    // WRONG one. Same alias swallow, with Account first — `JOIN` used to be
+    // consumed as Account's alias slot, so `Category` never entered `tables`,
+    // `tables.size` came back 1, and bareNameIsAccount was wrongly true for a
+    // query where a bare `name` is genuinely ambiguous. Here it is Category.name,
+    // so a perfectly valid category filter used to be reported as an unknown
+    // ACCOUNT literal and the query wrongly refused. Now Category is correctly
+    // seen as a second table, so the bare name is correctly left unresolved.
     const FALSE_POSITIVE = `SELECT c.id FROM Account JOIN Category c ON 1=1 WHERE name = 'Groceries'`
     const scope = accountNameScope(FALSE_POSITIVE)
-    expect(scope.bareNameIsAccount).toBe(true)
-    expect(unknownAccountLiterals(FALSE_POSITIVE, ACCOUNTS)).toEqual(['Groceries'])
+    expect(scope.bareNameIsAccount).toBe(false)
+    expect(unknownAccountLiterals(FALSE_POSITIVE, ACCOUNTS)).toEqual([])
   })
 
   it('correctly claims a bare name when Account really is the only table', () => {

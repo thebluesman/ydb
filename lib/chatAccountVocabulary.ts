@@ -160,8 +160,23 @@ ${list}
  * is simply not checked. The query still runs, still hits the read-only driver,
  * and a genuine miss still lands on ADR-0014's `no-data` refusal rather than a
  * narrated zero. It never rewrites SQL — it only decides whether to run it.
+ *
+ * The alias slot excludes JOIN and its modifiers (LEFT/RIGHT/INNER/OUTER/CROSS/
+ * NATURAL/FULL) via lookahead, not just via NOT_AN_ALIAS filtering after the
+ * fact ([chat-sql] 9). An alias-less table immediately followed by another JOIN
+ * — `FROM Transaction JOIN Account a ON ...` — used to have that JOIN swallowed
+ * into the first match's optional alias group. NOT_AN_ALIAS correctly discarded
+ * it as an alias, but by then the regex's global cursor had already advanced
+ * past the keyword, so the second table's own `JOIN Account a` clause was never
+ * matched at all: Account silently vanished from `tables` and `qualifiers`, not
+ * merely from alias detection. The lookahead stops the first match from
+ * consuming the keyword in the first place, leaving it for the next iteration.
  */
-const TABLE_SOURCE_RE = /\b(?:FROM|JOIN)\s+"?([A-Za-z_][A-Za-z0-9_]*)"?((?:\s+(?:AS\s+)?"?[A-Za-z_][A-Za-z0-9_]*"?)?)/gi
+const JOIN_KEYWORDS = 'join|left|right|inner|outer|cross|natural|full'
+const TABLE_SOURCE_RE = new RegExp(
+  String.raw`\b(?:FROM|JOIN)\s+"?([A-Za-z_][A-Za-z0-9_]*)"?((?:\s+(?:AS\s+)?(?!(?:${JOIN_KEYWORDS})\b)"?[A-Za-z_][A-Za-z0-9_]*"?)?)`,
+  'gi',
+)
 
 /**
  * Words that can follow a table name without being an alias. Without this,
