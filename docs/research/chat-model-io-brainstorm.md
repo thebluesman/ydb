@@ -56,7 +56,42 @@ implies Phase B (the loop itself) and/or Phase C (new code-computed tools beyond
 10. **Cross-reference to ledger/dashboard** — a deep link back into the existing UI ("see this in the
     ledger") rather than trying to replace it.
 
+## Input shapes, batch 2
+
+12. **Time-shifted/relative** — "how am I doing this quarter vs the same quarter last year," "what did
+    I spend the week before my paycheck hits" — needs date-math beyond the "today" injection that
+    already exists.
+13. **Cross-account/holistic** — "across all my accounts, where's my money actually going" — spans
+    account boundaries explicitly rather than one account at a time.
+14. **Category-hierarchy questions** — "how much on all food-related stuff" if food/groceries/dining-out
+    are separate categories — implies a taxonomy the model would need to reason over, not just
+    literal-match.
+15. **Person/vendor-specific** — "how much have I spent at [specific merchant] this year" — vendor as a
+    first-class filter dimension, separate from category.
+16. **Recurring/subscription detection** — "list my recurring charges," "which subscriptions am I still
+    paying for" — pattern-detection over transaction cadence, not a simple filter.
+17. **Threshold/alert-style retrospective** — "did I ever go over budget in category X," "when did my
+    balance dip below $500" — needs point-in-time balance reconstruction, which is exactly the gap
+    ADR-0010/0015 currently decline.
+18. **Multi-entity comparison** — "which of my three credit cards do I use most," "compare checking vs
+    savings growth."
+
+## Output shapes, batch 2
+
+11. **Exportable artifact** — "give me a CSV of this," reusing the existing CSV-import machinery in
+    reverse.
+12. **Annotated transaction list** — not just a total, but the actual line items behind it, so the user
+    can audit the number themselves.
+13. **Narrative summary over a period** — a "monthly recap" style paragraph rather than a single-number
+    answer, more editorial than a lookup response.
+14. **Comparison visualization** — side-by-side or delta-highlighted chart, distinct from a single chart
+    (this vs that, not just "a chart").
+15. **Plain refusal with reasoning shown** — already exists as `no-answer`, but surfaced more visibly/
+    richly as a "here's specifically why I can't answer this" rather than a terse decline.
+16. **Voice/tone variants** — blunt numbers vs. softer "coaching" framing — could be a user-configurable
+    output style rather than one fixed narration voice.
+
 ## Status
 
-Batch 1 recorded 2026-08-03, all items kept except the one struck through above. Session ongoing —
-more batches to follow in this same document.
+Batches 1 and 2 recorded 2026-08-03. Brainstorm concluded by Shyam after batch 2 — no further batches
+planned. Next step (prioritization/feasibility triage) not yet scheduled.
