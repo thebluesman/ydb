@@ -9,7 +9,31 @@ import {
   type NonAnswerReason,
 } from '@/lib/chatNonAnswer'
 import { ChatResult } from './ChatResult'
+import { ChatSuggestions } from './ChatSuggestions'
 import type { ResultFrame } from '@/lib/chatResultFrame'
+import { TEMPLATE_ORDER, type Suggestion, type SuggestionTemplate } from '@/lib/chatSuggestions'
+
+/**
+ * ADR-0024's frame, validated on arrival rather than trusted.
+ *
+ * The route composes these from a closed template set, so this should never
+ * reject anything in practice — it is here because the frame is the one thing
+ * in the stream the client turns back into an OUTGOING question, and a
+ * malformed `suggestions` frame must degrade to "no chips" rather than to a
+ * button that submits arbitrary text. Same posture as the `no-answer` reason
+ * check beside it.
+ */
+function parseSuggestions(value: unknown): Suggestion[] {
+  if (!Array.isArray(value)) return []
+  const templates = new Set<string>(TEMPLATE_ORDER)
+  return value.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const { text, template } = item as { text?: unknown; template?: unknown }
+    if (typeof text !== 'string' || text.trim().length === 0) return []
+    if (typeof template !== 'string' || !templates.has(template)) return []
+    return [{ text, template: template as SuggestionTemplate }]
+  })
+}
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -27,6 +51,11 @@ export type Message = {
    *  one. In-memory only for now — `ChatMessage` has no rows column, so this
    *  does not survive a reload (that is a schema decision of its own). */
   result?: ResultFrame
+  /** ADR-0024: route-composed follow-up questions. In-memory only, like
+   *  `result` — `ChatMessage` stores no such column, so they vanish on reload.
+   *  Whatever resolves that for `result` resolves it for these, by storing the
+   *  emitted frame verbatim rather than recomputing it. */
+  suggestions?: Suggestion[]
 }
 
 export function ChatPane({
@@ -73,11 +102,19 @@ export function ChatPane({
     setMessages((prev) => updater(prev))
   }
 
-  async function send() {
-    const question = input.trim()
+  /**
+   * `overrideText` is how an ADR-0024 suggestion chip submits: it takes the
+   * SAME path as typed input, deliberately. A suggestion is a pre-filled
+   * question and gets no special-casing — no trust level, no marker on the
+   * request, nothing the server could distinguish.
+   */
+  async function send(overrideText?: string) {
+    const question = (overrideText ?? input).trim()
     if (!question || loading) return
 
-    setInput('')
+    // A chip submits its own text, so a half-typed question in the box is not
+    // what was sent and must survive.
+    if (overrideText === undefined) setInput('')
     setLoading(true)
 
     const history = messages
@@ -149,6 +186,18 @@ export function ChatPane({
                 next[next.length - 1] = { ...next[next.length - 1], result: event as ResultFrame }
                 return next
               })
+            } else if (event.type === 'suggestions') {
+              // ADR-0024. Arrives at most once, after `result` and before the
+              // first token. An empty parse (a frame that failed validation)
+              // leaves the message without chips rather than with broken ones.
+              const questions = parseSuggestions(event.questions)
+              if (questions.length > 0) {
+                updateMessages((prev) => {
+                  const next = [...prev]
+                  next[next.length - 1] = { ...next[next.length - 1], suggestions: questions }
+                  return next
+                })
+              }
             } else if (event.type === 'token') {
               accumulatedText += event.response ?? ''
               updateMessages((prev) => {
@@ -408,6 +457,20 @@ export function ChatPane({
                 <ChatResult result={msg.result} />
               )}
 
+              {/* ADR-0024. Only under the LATEST answer: a chip is an input
+                  path, and offering "ask this next" under a turn that already
+                  has five turns after it is a follow-up to nothing. Hidden
+                  while a response streams for the same reason `send` refuses
+                  one — there is nothing to follow up on yet. */}
+              {msg.role === 'assistant' && !msg.error && !msg.nonAnswer && msg.suggestions
+                && i === messages.length - 1 && !loading && (
+                <ChatSuggestions
+                  questions={msg.suggestions}
+                  disabled={loading}
+                  onPick={(text) => send(text)}
+                />
+              )}
+
               {msg.role === 'assistant' && !msg.error && msg.text && !(loading && i === messages.length - 1) && (
                 <button
                   onClick={() => copyMessage(msg.text, i)}
@@ -526,7 +589,10 @@ export function ChatPane({
               </button>
             ) : (
               <button
-                onClick={send}
+                // Arrow-wrapped, not bare: `send` now takes an optional
+                // override, and a bare handler would pass the click event in as
+                // the question text.
+                onClick={() => send()}
                 disabled={!input.trim()}
                 aria-label="Send message"
                 className="btn"

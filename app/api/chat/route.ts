@@ -44,6 +44,8 @@ import {
 import { applyMoneyUnits, moneyUnitsPlan } from '@/lib/chatMoneyUnits'
 import { buildResultFrame } from '@/lib/chatResultFrame'
 import { hedgeGrounds, hedgeInstruction } from '@/lib/chatHedge'
+import { suggestionsFrame } from '@/lib/chatSuggestions'
+import { recapInstruction } from '@/lib/chatRecap'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -767,6 +769,39 @@ export async function POST(request: Request) {
     today: new Date(),
   }))
 
+  // ADR-0024. Follow-up suggestions, composed by the route from a closed
+  // template set — evaluated against the question and the SAME `sql` binding
+  // the `result` frame above was built from, so the suggestion and the table
+  // describe the same query.
+  //
+  // No model writes these: a suggestion is clickable, so it is an input path
+  // into the SQL prompt, and text a model composed from third-party-controlled
+  // rows is not something this app hands the user to click. Slot values come
+  // from ranges resolved here and from the vocabularies already loaded above —
+  // `accounts` is reused rather than requeried.
+  //
+  // `null` is ordinary and silent: an unresolvable query shape emits no frame
+  // and says nothing about it. ADR-0024 makes this the one place in the
+  // pipeline allowed to degrade without declaring it, because the absence of a
+  // suggestion is a non-event.
+  const suggestions = suggestionsFrame({
+    question,
+    sql,
+    categories,
+    accounts,
+    today: new Date(),
+  })
+
+  // [chat-model] output 13. Whether this question wants a period paragraph
+  // instead of a sentence is decided in lib/chatRecap.ts, same posture as the
+  // hedge note above — the system prompt's RECAP_RULE holds the other branch.
+  //
+  // It appends an instruction, never rows: NARRATION_ROW_CAP is untouched and
+  // `narrationRows` is the same slice the `result` frame carries. A recap is a
+  // SQL-shape question (grouped aggregates, nudged in lib/chatSqlPrompt.ts),
+  // not a narration-length one.
+  const recapNote = recapInstruction(question)
+
   // Knowledge injection (ADR-0007): narration prompt only, never the SQL
   // prompt. Read fresh off disk each turn; the loader never throws, so a
   // missing or unreadable docs/knowledge/ just means no block.
@@ -787,7 +822,7 @@ export async function POST(request: Request) {
         // instruction smuggled in there would undercut exactly that claim.
         prompt: `${priorContext}User: ${question}\n\n${NARRATION_DATA_BOUNDARY}\n\n`
           + `${NARRATION_DATA_OPEN}\n${JSON.stringify(narrationRows, null, 2)}\n${NARRATION_DATA_CLOSE}`
-          + truncationNote + hedgeNote,
+          + truncationNote + hedgeNote + recapNote,
         stream: true,
         keep_alive: OLLAMA_KEEP_ALIVE,
         options: { num_ctx: NARRATION_NUM_CTX },
@@ -816,11 +851,16 @@ export async function POST(request: Request) {
       const emit = (obj: object) => controller.enqueue(enc.encode(JSON.stringify(obj) + '\n'))
 
       emit({ type: 'sql', sql })
-      // ADR-0023's frame order: `sql`, then exactly one `result`, then tokens.
+      // ADR-0023's frame order, generalised by ADR-0024: `sql`, then exactly
+      // one `result`, then at most one `suggestions`, then tokens. The token
+      // stream is always last, so everything after the prose starts is prose
+      // and the client never resumes parsing once it is rendering escaped text.
+      //
       // Emitted only on this path, which is reached only after narration has
       // returned OK — so a `no-answer` still arrives alone and a transport
       // fault is still an HTTP status beside no data (ADR-0014).
       emit(resultFrame)
+      if (suggestions) emit(suggestions)
 
       const reader = narrateBody.getReader()
       const dec = new TextDecoder()

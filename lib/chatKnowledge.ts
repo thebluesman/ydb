@@ -179,6 +179,23 @@ export const CONFIDENCE_RULE =
   'plainly, and do not hedge, qualify, estimate, or speculate about data you were not given.'
 
 /**
+ * The standing length rule ([chat-model] output 13). Two branches, same shape
+ * as CONFIDENCE_RULE and for the same reason: whether this turn is a recap is
+ * decided in lib/chatRecap.ts and stated in the turn's prompt, so what lives
+ * here is the standing rule for BOTH branches.
+ *
+ * The second branch is again the load-bearing one. A one-branch instruction
+ * ("write a fuller summary for a recap") leaves the model judging every other
+ * turn against a length it now knows is available, and a paragraph wrapped
+ * around a single figure is exactly the padding this feature must not produce.
+ * So the default is written down as a default rather than left implied.
+ */
+export const RECAP_RULE =
+  'If a recap instruction is stated with the data below, write the short period paragraph it asks ' +
+  'for, grounded only in the rows you were given. If no recap instruction is stated, answer in one ' +
+  'or two sentences: give the figure and stop, and do not expand a single number into a summary.'
+
+/**
  * Assemble the narration system prompt.
  *
  * Order is load-bearing, not cosmetic: persona → precedence line → knowledge
@@ -210,8 +227,14 @@ export function buildNarrationSystemPrompt(
   // both branches — and the branch that matters most is the second one, which
   // forbids the free-floating hedging a "qualify when appropriate" instruction
   // would otherwise produce on every answer.
+  // RECAP_RULE ([chat-model] output 13) sits last for the same structural
+  // reason CONFIDENCE_RULE does: it is a standing rule with a per-turn switch
+  // decided server-side (lib/chatRecap.ts), and its default branch — one or two
+  // sentences — is what keeps "write more when it's a recap" from becoming
+  // "write more". It says nothing about how many rows the model gets; that is
+  // NARRATION_ROW_CAP's business and a recap does not move it.
   const operativeRules =
-    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions. ${CONFIDENCE_RULE}`
+    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions. ${CONFIDENCE_RULE} ${RECAP_RULE}`
 
   if (!knowledgeBlock) return `${persona} ${operativeRules}`
 

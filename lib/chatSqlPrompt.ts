@@ -224,6 +224,11 @@ Date rules:
 - Never emit a year you were not given or did not derive from today's date (${today}). If a question needs a year that cannot be derived that way, prefer a relative date('now', ...) expression over guessing one.
 - A bare year ("in 2024") or an explicit month and year ("June 2024") is already unambiguous -- use it as written.
 
+Recap questions:
+- A question asking for a RECAP, summary or overview of a period -- "give me a monthly recap", "summarise my spending this quarter", "how did last month go" -- is asking about the shape of that period, not for one number. Answer it with a GROUPED AGGREGATE over the period: category totals (GROUP BY category ORDER BY total ASC/DESC), or month totals within a longer window (GROUP BY strftime('%Y-%m', date)). The top-spending-categories example below is the shape to copy.
+- Do NOT answer a recap by selecting raw transaction rows. A list of individual transactions is not a summary of a period, it is the thing a summary replaces -- and only the first rows of a long list ever reach the narrator, so a recap built that way describes an arbitrary slice of the period as though it were the whole of it.
+- All the usual guards still apply to a recap: it is a spending figure, so it excludes transfers, split parents and reimbursed pairs exactly as any other spending aggregate does.
+
 Examples:
 Q: How many transactions do I have?
 A: SELECT COUNT(*) AS total FROM "Transaction" WHERE parentTransactionId IS NULL AND status IN ('committed','reconciled')
