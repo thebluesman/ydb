@@ -97,12 +97,18 @@ Grounded in what's actually true today: single-shot generate→narrate pipeline 
 yet), no `computeBalance`-backed chat path, read-only SQL guard is a hard invariant (`lib/prisma.ts`,
 AGENTS.md), no `Goal` model in the schema, categories are flat strings (ADR-0008).
 
-**Tier 1 — buildable now, no architecture change** (prompt/route tweaks, existing tools):
-- Inputs: Comparative (2, simple cases), Time-shifted/relative (12), Cross-account/holistic (13),
-  Vendor-specific (15, if payee is a distinct stored column).
+**Tier 1 — buildable now, no architecture change** (prompt/route tweaks, existing tools). **Shipped
+2026-08-03, PRs #47–#50, ADR-0023 + ADR-0024:**
+- Inputs: Comparative (2, simple cases), Time-shifted/relative (12), Cross-account/holistic (13).
 - Outputs: Table (3), Structured card (4), Confidence-qualified answer (5), Follow-up suggestions (8),
   Cross-reference to ledger (10), Annotated transaction list (12), Narrative summary (13), Plain
-  refusal with reasoning (15), Voice/tone variants (16).
+  refusal with reasoning (15, found already adequate — no change needed), Voice/tone variants (16).
+
+Vendor-specific (15) was cut from Tier 1 during implementation (PR #50), not shipped: `Transaction` has
+no distinct stored payee/vendor column, only free-text `description`/`originalDescription`. The nearest
+candidate, `VendorRule.vendor`, is a confidently-incomplete list (only covers merchants someone wrote a
+rule for) mixed into free text — grounding on it would reintroduce the exact false-empty-match failure
+ADR-0008 exists to prevent. Reclassified to Tier 4 below.
 
 **Tier 2 — needs Phase B (the tool-calling loop), no new backend computation:**
 - Inputs: Explanatory/meta (9), Free-form follow-up (11), Multi-entity comparison (18) — multi-step
@@ -121,6 +127,9 @@ AGENTS.md), no `Goal` model in the schema, categories are flat strings (ADR-0008
 - Goal-tracking (7) — no `Goal` construct exists; schema/product decision before any engineering.
 - Category-hierarchy (14) — categories are flat strings (ADR-0008); grouping needs a taxonomy that
   doesn't exist yet.
+- Vendor-specific (15) — reclassified from Tier 1 during PR #50 (2026-08-03): no distinct stored
+  payee/vendor column on `Transaction`. Needs a real grounded column (ADR-0008-style), not a fuzzy
+  match over `description`.
 
 **Tier 5 — blocked on a real product/architecture decision, not effort:**
 - Action-adjacent writes (10) — directly conflicts with the read-only posture, a canonical invariant.
@@ -139,4 +148,8 @@ indirectly forecasting once real balances exist).
 ## Status
 
 Batches 1 and 2 recorded 2026-08-03. Brainstorm concluded by Shyam after batch 2. Feasibility triage
-added same day. Next step: Shyam to pick a starting tier/item — not yet decided.
+added same day. Tier 1 shipped same day across four PRs (#47–#50): ADR-0023 (`result` frame — table/
+card/annotated-transaction-list), confidence hedging + narration voice setting (no ADR needed),
+ADR-0024 (`suggestions` frame + ledger cross-references + recap narration), and the input-side SQL-prompt
+grounding for comparative/time-shifted/holistic questions (vendor-specific cut to Tier 4, see above).
+Next step: Tier 2 (needs Phase B, the tool-calling loop) — not yet started.
