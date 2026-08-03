@@ -8,6 +8,8 @@ import {
   NON_ANSWER_HEADLINE,
   type NonAnswerReason,
 } from '@/lib/chatNonAnswer'
+import { ChatResult } from './ChatResult'
+import type { ResultFrame } from '@/lib/chatResultFrame'
 
 export type Message = {
   role: 'user' | 'assistant'
@@ -21,6 +23,10 @@ export type Message = {
    *  response, not an error — `text` holds the route-written explanation and
    *  is rendered as the headline, never collapsed. */
   nonAnswer?: NonAnswerReason
+  /** ADR-0023: the structured result set behind the prose, when the route sent
+   *  one. In-memory only for now — `ChatMessage` has no rows column, so this
+   *  does not survive a reload (that is a schema decision of its own). */
+  result?: ResultFrame
 }
 
 export function ChatPane({
@@ -134,6 +140,13 @@ export function ChatPane({
               updateMessages((prev) => {
                 const next = [...prev]
                 next[next.length - 1] = { ...next[next.length - 1], sql: event.sql }
+                return next
+              })
+            } else if (event.type === 'result' && Array.isArray(event.columns) && Array.isArray(event.rows)) {
+              // ADR-0023. Arrives once, between `sql` and the first token.
+              updateMessages((prev) => {
+                const next = [...prev]
+                next[next.length - 1] = { ...next[next.length - 1], result: event as ResultFrame }
                 return next
               })
             } else if (event.type === 'token') {
@@ -389,6 +402,10 @@ export function ChatPane({
                     msg.text || '\u200b'
                   )}
                 </div>
+              )}
+
+              {msg.role === 'assistant' && !msg.error && !msg.nonAnswer && msg.result && (
+                <ChatResult result={msg.result} />
               )}
 
               {msg.role === 'assistant' && !msg.error && msg.text && !(loading && i === messages.length - 1) && (
