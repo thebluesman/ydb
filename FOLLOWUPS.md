@@ -52,8 +52,13 @@ end up in the DB naturally. A "force two-sided" option at import time
   fourth condition (a target may not be claimed by two rows at once) in
   `docs/adr/0022-transfer-pair-trigger-rejects-a-second-claim-on-the-same-target.md`.
   **Read both ADRs**: 0021 is unedited and does not mention the fourth
-  condition. The hand-written logic across the five app write paths stays in
-  place; the triggers are the backstop under it, and
+  condition. The hand-written logic stays in place across five write paths in
+  four files — the PATCH re-pair branch and the DELETE cascade in
+  `app/api/transactions/[id]/route.ts`, the link route, the manual-entry route
+  (`app/api/transactions/manual/route.ts`), and the transfer loop in
+  `app/api/ynab/import/route.ts` — this section previously said four paths in
+  three files, missing the manual-entry route; the triggers are the backstop
+  under it, and
   `app/api/transactions/[id]/link/route.ts` pre-checks both inbound conditions
   so they surface as 409s rather than raw SQLite 500s. Covered by
   `tests/transferPairExclusivity.test.ts`.
