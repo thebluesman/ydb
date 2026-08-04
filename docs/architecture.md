@@ -350,7 +350,13 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   a sign pinned inside a `CASE` value branch (`SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END)`) rather
   than in `WHERE`, which lands on today's signed display rather than a wrong one. Unmeasured, same
   eval-harness question as ADR-0018's and ADR-0020's resolution surfaces, and the same answer if it turns
-  out to be common: widen the classifier, not the fail-open.
+  out to be common: widen the classifier, not the fail-open. **Partially closed 2026-08-04:** the two
+  static worked examples that produced the actual reported live-bug shape (a bare category-filtered spend
+  total, `lib/chatSqlPrompt.ts`'s groceries and travel examples) were widened to negate and pin
+  (`SUM(-amount) ... AND amount < 0`), matching the shape the account-filtered and grouped-category
+  examples already taught — `tests/chatMoneySignRoute.test.ts`'s `UNPINNED_SQL` fixture is kept as
+  defense-in-depth documenting that the classifier still cannot see a bare category filter as pinning
+  direction, for any model output that deviates from the (now-corrected) taught shape.
 - **Whether guard refusals should also land in `ChatVerdict`.** ADR-0026 records only turns that
   reached the verifier, so the full outcome distribution is split between that table and
   `ChatMessage.nonAnswerReason` and can only be joined by hand on timestamps. Deliberately left open:

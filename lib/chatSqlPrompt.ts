@@ -313,12 +313,15 @@ Q: How many transactions do I have?
 A: SELECT COUNT(*) AS total FROM "Transaction" WHERE parentTransactionId IS NULL AND status IN ('committed','reconciled')
 
 Q: How much did I spend on ${groceries.word} last month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${groceries.literal.replace(/'/g, "''")}' AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
--- Nothing here branches on the sign of amount, and the transactionType guard still belongs: this is a
--- spending figure, which is the trigger. See the transfer rules above.
+A: SELECT SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE category = '${groceries.literal.replace(/'/g, "''")}' AND amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
+-- Negated and aliased total_spent, with an explicit amount < 0 filter -- see the alias rule above. Do
+-- NOT drop the amount < 0 filter just because a category is nearly always one sign: a category can
+-- still carry the rare positive row (a refund, a correction), and only the filter, not the category
+-- alone, guarantees the figure comes back meaning what its alias promises. The transactionType guard
+-- still belongs: this is a spending figure, which is the trigger. See the transfer rules above.
 
 Q: What was spent on ${travel.word} in June?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '${travel.literal.replace(/'/g, "''")}' AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '${june}' AND status IN ('committed','reconciled')
+A: SELECT SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE category = '${travel.literal.replace(/'/g, "''")}' AND amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '${june}' AND status IN ('committed','reconciled')
 
 Q: How much did I spend on my ${account.word} last month?
 A: SELECT SUM(-t.amount) / 100.0 AS total_spent FROM "Transaction" t JOIN Account a ON t.accountId = a.id WHERE a.name = '${account.literal.replace(/'/g, "''")}' AND t.amount < 0 AND t.transactionType != 'transfer' AND t.parentTransactionId IS NULL AND t.reimbursementTxId IS NULL AND strftime('%Y-%m', t.date) = strftime('%Y-%m', date('now','-1 month')) AND t.status IN ('committed','reconciled')

@@ -134,10 +134,20 @@ const NET_SQL =
  * fixture set never actually reproduced the reported shape, only the
  * WHERE-pinned one, and that PINNED_SQL's docstring wrongly claimed it did.
  * `moneyKeys` still fixes this row's missing currency symbol (ADR-0023's
- * classifier bug); `magnitudeKeys` correctly does NOT fire, because a bare
- * `WHERE category = ...` cannot tell the classifier every surviving row is an
- * outflow. This residual gap is real and open — see docs/architecture.md —
- * fixed at the SQL-prompt level (teaching this shape to negate), not here.
+ * classifier bug); `magnitudeKeys` correctly does NOT fire on this shape,
+ * because a bare `WHERE category = ...` cannot tell the classifier every
+ * surviving row is an outflow.
+ *
+ * `lib/chatSqlPrompt.ts`'s groceries/travel worked examples were widened
+ * the same day to negate and pin (`SUM(-amount) ... AND amount < 0`, matching
+ * the shape the account-filtered and grouped-category examples already
+ * taught), so the model is no longer TAUGHT to produce this exact shape for
+ * this exact question. This test is kept anyway, as a direct fixture rather
+ * than one routed through the real prompt/model: it documents that the
+ * classifier itself still cannot see a category-only WHERE as pinning
+ * direction, which stays true regardless of what any one worked example
+ * teaches, and is real defense-in-depth against a model that deviates from
+ * its taught examples (which this whole arc has shown happens).
  */
 const UNPINNED_SQL =
   `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" ` +
@@ -191,16 +201,13 @@ describe('POST /api/chat — display sign (ADR-0027)', () => {
     expect(narrationPrompts[0]).toContain('-120.5')
   })
 
-  it('the actual reported live-bug query still displays signed — a real, open, documented gap', async () => {
-    // UNPINNED_SQL is the literal query from the reported bug: a
-    // category-filtered spend total with no negation and no zero-comparison
-    // anywhere in WHERE, so magnitudeKeys correctly does not fire (the
-    // classifier cannot tell from `WHERE category = ...` alone that every
-    // surviving row is an outflow). moneyKeys DOES fire, so the currency
-    // symbol appears even though the sign does not go away — a real, partial
-    // fix, not the illusion of a complete one. Closing this fully is a
-    // SQL-prompt change (teach this shape to negate, same as the grouped
-    // examples already do), tracked as a follow-up, not done here.
+  it('a category-only WHERE still displays signed if a model ever writes it — the classifier gap, independent of what the prompt teaches', async () => {
+    // The SQL prompt no longer teaches this exact shape for this exact
+    // question (widened same-day, see UNPINNED_SQL's docstring), but nothing
+    // stops a model from writing it anyway on a shape the prompt doesn't
+    // explicitly cover. moneyKeys still fires, so the currency symbol
+    // appears even though the sign does not go away — a real, partial
+    // mitigation at the classifier level, not the illusion of a complete fix.
     sqlReplies = [UNPINNED_SQL]
     queryResults = [() => ({ rows: [{ total: -3654.43 }], truncated: false })]
 
