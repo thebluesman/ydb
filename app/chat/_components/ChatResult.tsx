@@ -14,7 +14,10 @@ import { ledgerLinkForRow } from '@/lib/chatLedgerLink'
  * else). All three read the same `columns`/`rows`.
  *
  * Values arrive formatted-ready: money is already in currency units (ADR-0020
- * converted it server-side), so this file formats and never converts. The
+ * converted it server-side) with its display sign already decided (ADR-0027 —
+ * an outflow figure whose direction the query pinned arrives positive, and the
+ * narration above this panel was handed the very same numbers), so this file
+ * formats and never converts, and never touches a sign either. The
  * money helper is `lib/money.ts`'s `fmtMoney`, the same one the ledger uses —
  * it takes cents, hence the round-trip back to cents below rather than a
  * second formatting scheme invented here.

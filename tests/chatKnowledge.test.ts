@@ -151,11 +151,28 @@ describe('buildNarrationSystemPrompt', () => {
   // decided server-side: [chat-model] output 5's confidence rule, then output
   // 13's recap rule (lib/chatHedge.ts and lib/chatRecap.ts respectively).
   const NO_KNOWLEDGE_PROMPT =
-    `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in AED currency units, never raw cents — present them directly without any other currency symbols or conversions. ${CONFIDENCE_RULE} ${RECAP_RULE}`
+    `You are a helpful financial assistant. Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in AED currency units, never raw cents — present them directly without any other currency symbols or conversions. A monetary value's sign is already set for display: present each figure with the sign it arrives with, and describe direction (spending, income, a transfer) from the question and the column name rather than adding or removing a minus sign yourself. ${CONFIDENCE_RULE} ${RECAP_RULE}`
 
   it('with no knowledge block, states units are already normalized (ADR-0020), with no inference clause', () => {
     expect(buildNarrationSystemPrompt('AED', '')).toBe(NO_KNOWLEDGE_PROMPT)
     expect(buildNarrationSystemPrompt('AED', '')).not.toMatch(/infer from context/i)
+  })
+
+  // ADR-0027. The sign sentence sits beside the units one and for the same
+  // reason: narrating "you spent 3654.43" off a row reading -3654.43 was
+  // emergent good behaviour with nothing holding it there. It tells the model
+  // what it is being handed, and forbids the one move that would put the
+  // sentence and the table back into disagreement — flipping a sign itself.
+  // Deliberately does NOT claim outflows always arrive positive — magnitude
+  // is opt-in (magnitudeKeys), not universal, so an unpinned category-spend
+  // total still arrives signed. A first wording asserted the universal claim
+  // and @tech-lead caught it in review of PR #54 before merge: it told the
+  // model something false about the data it was about to be handed.
+  it('states that display sign is already set, and forbids the model adding or removing one', () => {
+    const prompt = buildNarrationSystemPrompt('AED', '')
+    expect(prompt).toContain('sign is already set for display')
+    expect(prompt).not.toMatch(/arrives as a positive magnitude/)
+    expect(prompt).toMatch(/rather than adding or removing a minus sign yourself/)
   })
 
   it('assembles persona → precedence line → knowledge → operative rules', () => {

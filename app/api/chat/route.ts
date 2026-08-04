@@ -41,7 +41,7 @@ import {
   transferSumMessage,
   transferSumViolation,
 } from '@/lib/chatMoneyGuards'
-import { applyMoneyUnits, moneyUnitsPlan } from '@/lib/chatMoneyUnits'
+import { applyMoneySign, applyMoneyUnits, moneyUnitsPlan } from '@/lib/chatMoneyUnits'
 import { buildResultFrame } from '@/lib/chatResultFrame'
 import { hedgeGrounds, hedgeInstruction } from '@/lib/chatHedge'
 import { suggestionsFrame } from '@/lib/chatSuggestions'
@@ -716,7 +716,12 @@ export async function POST(request: Request) {
   // same reasoning as `balanceScopeRowViolation` just above: no second call
   // site to drift, and dividing a NULL aggregate by 100 is still NULL, so
   // running this before or after the no-data check below is equivalent.
-  rows = applyMoneyUnits(rows, moneyUnitsPlan(sql))
+  //
+  // ADR-0027: the plan is bound once here and reused for the sign step and the
+  // `result` frame further down, so all three read the same classification of
+  // the same SQL.
+  const plan = moneyUnitsPlan(sql)
+  rows = applyMoneyUnits(rows, plan)
 
   // A clean run that matched nothing is a non-answer, and it never reaches
   // narration (ADR-0014). Narrating `[{"total": null}]` is what produced "you
@@ -764,9 +769,11 @@ export async function POST(request: Request) {
   }
 
   // Phase A (ADR-0012/0013): the verification pass. One extra non-streaming
-  // call, over the SAME `narrationRows` binding narration is about to be
-  // handed — post-guards, post-`applyMoneyUnits`, under the same
-  // NARRATION_ROW_CAP — asking whether they actually answer `question`.
+  // call, over the same `narrationRows` slice narration is about to be handed
+  // — post-guards, post-`applyMoneyUnits`, under the same NARRATION_ROW_CAP —
+  // asking whether they actually answer `question`. Deliberately BEFORE
+  // ADR-0027's `applyMoneySign` below: the verifier is asked what the SQL
+  // computed, so it sees the query's own signs, not the display ones.
   // ADR-0025 fixes the verdict shape and its fail-open posture: a transport
   // failure or timeout comes back as `unusable`, which is treated exactly
   // like `ok` below and never blocks an answer already in hand. ADR-0026 is
@@ -815,22 +822,37 @@ export async function POST(request: Request) {
     return nonAnswerResponse(nonAnswerFrame('out-of-scope', verifierOutOfScopeMessage(question), sql))
   }
 
-  // ADR-0023. The `result` frame, built here from the SAME `rows` binding
+  // ADR-0027. Display sign, decided per money column from the direction the
+  // query itself already pinned, applied once to the one binding narration and
+  // the `result` frame both consume. Whatever a column's sign ends up being,
+  // the sentence and the table cannot disagree about it, because they are
+  // handed the same numbers.
+  //
+  // Position is load-bearing and it is HERE, not earlier: every check above —
+  // ADR-0016's detectors, `signPromiseViolation`, the Phase A verifier — judges
+  // what the SQL computed. Hand any of them a sign this route invented and they
+  // are grading the server's arithmetic rather than the model's. `applyMoneyUnits`
+  // sits early for the opposite reason: a unit is a property of the stored
+  // column, so converting it early makes every downstream consumer correct.
+  const displayRows = applyMoneySign(narrationRows, plan)
+
+  // ADR-0023. The `result` frame, built here from the SAME rows binding
   // narration is about to be handed — post-ADR-0017 row-key check,
-  // post-`applyMoneyUnits`, post-no-data, under the same NARRATION_ROW_CAP —
-  // never from a copy taken earlier. `present` is chosen by this route from
-  // the returned rows, deliberately not by a marker in the narration stream.
+  // post-`applyMoneyUnits`, post-no-data, post-`applyMoneySign`, under the same
+  // NARRATION_ROW_CAP — never from a copy taken earlier. `present` is chosen by
+  // this route from the returned rows, deliberately not by a marker in the
+  // narration stream.
   //
   // Its truncation summary is derived from the same two flags as
   // `truncationNote` above rather than recomputed, so the table and the
   // sentence can never disagree about how much was shown. `dbCapped` means the
   // read-only driver cut the result upstream, so `total` is a floor.
   const resultFrame = buildResultFrame({
-    rows: narrationRows,
-    sql,
+    rows: displayRows,
+    plan,
     currency: baseCurrency,
     truncated: (narrationTruncated || dbTruncated)
-      ? { shown: narrationRows.length, total: rows.length, dbCapped: dbTruncated }
+      ? { shown: displayRows.length, total: rows.length, dbCapped: dbTruncated }
       : null,
   })
 
@@ -901,7 +923,7 @@ export async function POST(request: Request) {
         // must not be read as instruction (see NARRATION_DATA_BOUNDARY), and an
         // instruction smuggled in there would undercut exactly that claim.
         prompt: `${priorContext}User: ${question}\n\n${NARRATION_DATA_BOUNDARY}\n\n`
-          + `${NARRATION_DATA_OPEN}\n${JSON.stringify(narrationRows, null, 2)}\n${NARRATION_DATA_CLOSE}`
+          + `${NARRATION_DATA_OPEN}\n${JSON.stringify(displayRows, null, 2)}\n${NARRATION_DATA_CLOSE}`
           + truncationNote + hedgeNote + recapNote,
         stream: true,
         keep_alive: OLLAMA_KEEP_ALIVE,

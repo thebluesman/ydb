@@ -17,11 +17,13 @@
  * already-cleared rows keeps that property.
  *
  * Everything here is pure and runs strictly AFTER the guard chain, after
- * `applyMoneyUnits` (ADR-0020) and after the no-data check — it gates nothing
- * and skips nothing.
+ * `applyMoneyUnits` (ADR-0020), after the no-data check and after
+ * `applyMoneySign` (ADR-0027) — it gates nothing and skips nothing. The rows
+ * it carries are the same values narration is handed, sign included, which is
+ * what stops the sentence and the table disagreeing about a minus sign.
  */
 
-import { moneyUnitsPlan } from './chatMoneyUnits'
+import type { MoneyUnitsPlan } from './chatMoneyUnits'
 
 export type ResultColumnKind = 'money' | 'date' | 'number' | 'text'
 
@@ -132,28 +134,35 @@ export function classifyPresent(rows: unknown[], keys: string[] = resultColumnKe
 /**
  * Build the frame from the rows narration receives.
  *
- * `kind: 'money'` membership is ADR-0020's classifier, reused rather than
- * reimplemented: a key is money exactly when `moneyUnitsPlan(sql).convertKeys`
- * named it, which is exactly the set `applyMoneyUnits` divided. Matching is
- * exact for the same reason — the client must be told "this is currency" only
- * for values that actually were converted. Money values are already in
- * currency units; the client formats, never converts.
+ * `kind: 'money'` membership is the plan's `moneyKeys` (ADR-0027), not its
+ * `convertKeys`: a key is money when its projection resolves to a money
+ * column, whether or not the server had to divide it. ADR-0023 originally
+ * stated the `convertKeys` rule, reusing ADR-0020's classifier as-is; that was
+ * wrong for the dominant query shape, because every projection that already
+ * divides by 100 — all nine of the SQL prompt's worked examples — classifies
+ * as `already-converted` and never enters `convertKeys`, so the commonest
+ * money column in the app rendered as a bare number with no currency.
+ *
+ * The plan is passed in rather than recomputed from `sql`, so this frame and
+ * the route's own `applyMoneyUnits`/`applyMoneySign` calls are guaranteed to
+ * be reading one plan and cannot drift. Money values are already in currency
+ * units with their display sign already applied; the client formats, never
+ * converts.
  */
 export function buildResultFrame({
   rows,
-  sql,
+  plan,
   currency,
   truncated,
 }: {
   rows: unknown[]
-  sql: string
+  plan: MoneyUnitsPlan
   currency: string
   truncated: ResultTruncation | null
 }): ResultFrame {
   const keys = resultColumnKeys(rows)
 
-  const plan = moneyUnitsPlan(sql)
-  const moneyKeys = new Set(plan.kind === 'ok' ? plan.convertKeys : [])
+  const moneyKeys = new Set(plan.kind === 'ok' ? plan.moneyKeys : [])
 
   const columns: ResultColumn[] = keys.map((key) => ({
     key,

@@ -221,6 +221,13 @@ export function buildNarrationSystemPrompt(
   // this comment used to sit above is deleted, not softened — a hedge here
   // would just relocate the wrong-number risk back onto model judgement.
   //
+  // ADR-0027 adds the sign sentence beside it, from the same module and for the
+  // same reason. Narrating "you spent 3654.43" off a row reading -3654.43 was
+  // the model doing something sensible unprompted, with nothing holding it
+  // there and nothing making it agree with the table beneath. Fixing the table
+  // side deterministically and leaving the prose side emergent would only have
+  // moved the disagreement.
+  //
   // CONFIDENCE_RULE follows the same logic one step further ([chat-model]
   // output 5): whether a caveat is warranted is decided in lib/chatHedge.ts and
   // stated in the turn's prompt, so what lives here is the standing rule for
@@ -234,7 +241,7 @@ export function buildNarrationSystemPrompt(
   // "write more". It says nothing about how many rows the model gets; that is
   // NARRATION_ROW_CAP's business and a recap does not move it.
   const operativeRules =
-    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions. ${CONFIDENCE_RULE} ${RECAP_RULE}`
+    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions. A monetary value's sign is already set for display: present each figure with the sign it arrives with, and describe direction (spending, income, a transfer) from the question and the column name rather than adding or removing a minus sign yourself. ${CONFIDENCE_RULE} ${RECAP_RULE}`
 
   if (!knowledgeBlock) return `${persona} ${operativeRules}`
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { isoDayOf, ledgerFiltersForRow, ledgerLinkForRow } from '@/lib/chatLedgerLink'
 import { buildResultFrame } from '@/lib/chatResultFrame'
+import { moneyUnitsPlan } from '@/lib/chatMoneyUnits'
 import { parseLedgerQuery } from '@/lib/transactions-query'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -16,7 +17,12 @@ import { parseLedgerQuery } from '@/lib/transactions-query'
 // ─────────────────────────────────────────────────────────────────────────────
 
 const columnsOf = (rows: Record<string, unknown>[]) =>
-  buildResultFrame({ rows, sql: 'SELECT 1', currency: 'AED', truncated: null }).columns
+  buildResultFrame({
+    rows,
+    plan: moneyUnitsPlan('SELECT 1'),
+    currency: 'AED',
+    truncated: null,
+  }).columns
 
 describe('isoDayOf', () => {
   it('reads a stored datetime string', () => {

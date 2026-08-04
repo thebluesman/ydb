@@ -186,8 +186,8 @@ the units ticket, before any code was written:
   expression computes the wrong number (misplaced or redundant unit conversion inside a derived ratio,
   live-reproduced during the `[chat-bug]` derived-values re-scoping, 2026-08-03). That is a correctness
   question the units classifier cannot and does not try to answer; only the eval harness below can.
-- **A spend total narrated positive next to a table showing it negative** (ADR-0027, designed 2026-08-04,
-  **not yet implemented**) — the same move as ADR-0020, one money property across. Nothing decided display
+- **A spend total narrated positive next to a table showing it negative** (ADR-0027, designed and
+  implemented 2026-08-04) — the same move as ADR-0020, one money property across. Nothing decided display
   sign: `lib/chatSqlPrompt.ts`'s alias convention ("spent"/"spending" promises a negated sum, `total`/`net`
   keeps the raw signed value) was standing in for a display rule, so what the user saw depended on which
   alias the model wrote that turn, and narration's positive phrasing was emergent — the narration prompt
