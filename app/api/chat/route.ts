@@ -753,7 +753,7 @@ export async function POST(request: Request) {
   // rows are written by the client after the stream completes.
   const verifyStart = Date.now()
   const verification = await verifyResult(
-    ollamaUrl, sqlModel, sqlPrompt, sql, narrationRows, verifierSignal(request.signal), OLLAMA_KEEP_ALIVE,
+    ollamaUrl, sqlModel, sqlPrompt, sql, narrationRows, new Date(), verifierSignal(request.signal), OLLAMA_KEEP_ALIVE,
   )
   const verifyLatencyMs = Date.now() - verifyStart
 

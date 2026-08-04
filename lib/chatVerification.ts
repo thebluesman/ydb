@@ -17,6 +17,8 @@
  * second opinion is not evidence against an answer already in hand.
  */
 
+import { isoDate } from '@/lib/chatSqlPrompt'
+
 // ── Verdict type ─────────────────────────────────────────────────────────────
 
 /** What the model itself may say. */
@@ -47,6 +49,51 @@ function isGroundedMismatch(reason: string): boolean {
   return MISMATCH_TAG_RE.test(reason)
 }
 
+// ── Deterministic sign-promise check ────────────────────────────────────────
+//
+// `lib/chatSqlPrompt.ts` teaches the generator a mechanical rule: an alias
+// containing "spent" or "spending" (total_spent, category_spent, ...) promises
+// a POSITIVE value, so the generator negates a raw signed sum before handing
+// it that name. Nothing previously checked the generator actually kept that
+// promise. This is decidable from the row keys and their values alone — no
+// need to know what the question meant, the same property ADR-0016 used to
+// split guards between "route-level detector" and "prompt-only" — so it
+// belongs here as code, not as a rule the verifier model has to apply
+// correctly every time.
+//
+// A first attempt (2026-08-04) put this reasoning into the verifier's own
+// prompt instead: "an alias containing spent/spending promises positive,
+// otherwise sign is not informative." Measured against
+// `scripts/evalChatVerifier.ts`, that wording made precision WORSE (0.50 ->
+// 0.43) — the model generalized "spending" (the question's topic) into
+// "any total on a spending question should be positive," exactly the
+// backwards reasoning the instruction was trying to rule out. A tighter
+// rewrite with a worked example partially recovered it (0.62) but cost
+// recall (1.00 -> 0.80) and left the LLM still doing sign arithmetic it
+// didn't reliably get right. Moving the actual promise-check to code and
+// telling the model to leave sign alone entirely removes that failure mode
+// instead of continuing to word-tune around it.
+const SIGN_PROMISE_RE = /spen(t|ding)/i
+
+/**
+ * Scans result rows for a column whose name promises a positive value
+ * (contains "spent"/"spending") but whose value is negative. Returns the
+ * first violation found, or null. Runs before the model call in
+ * `verifyResult` — a violation here is a `mismatch` verdict the model is
+ * never even asked about.
+ */
+export function signPromiseViolation(rows: unknown[]): { column: string; value: number } | null {
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue
+    for (const [column, value] of Object.entries(row as Record<string, unknown>)) {
+      if (typeof value === 'number' && value < 0 && SIGN_PROMISE_RE.test(column)) {
+        return { column, value }
+      }
+    }
+  }
+  return null
+}
+
 // ── Prompt ───────────────────────────────────────────────────────────────────
 //
 // [chat-security] Same reasoning as the narration prompt's data markers
@@ -73,9 +120,31 @@ const VERIFY_DATA_BOUNDARY =
  * material invites an echo of the generator's confidence rather than a second
  * look — the SQL is presented here as a claim to check, not as context to
  * trust.
+ *
+ * It DOES need one piece of ground truth that's a fact about the world
+ * rather than about how to write SQL: today's date. `lib/chatSqlPrompt.ts`'s
+ * `buildSqlSystemPrompt` already states it to the generator; a first eval run
+ * (`scripts/evalChatVerifier.ts`, 2026-08-04) measured 50% precision on
+ * genuinely-correct SQL without it — every false positive was the verifier
+ * either assuming "now" was its training cutoff (flagging a correct
+ * `2026-07` filter as "the future") or reasoning about amount sign and
+ * getting it backwards. Recall was already 100%.
+ *
+ * Sign is deliberately NOT explained here after that same eval run showed
+ * prose sign-reasoning making precision worse, not better, however it was
+ * worded (see `signPromiseViolation`'s comment for the numbers) — the model
+ * kept re-deriving "a spending answer should be positive," which is false in
+ * this app's convention. The one sign rule that actually needs enforcing
+ * (an alias promising "spent"/"spending" must be positive) is checked in
+ * code before this prompt ever runs, so the model is told flatly to leave
+ * sign out of its Label judgment rather than trusted to reason about it.
  */
-export function buildVerificationSystemPrompt(): string {
+export function buildVerificationSystemPrompt(today: string): string {
   return `You are checking a SQL query and the rows it returned against the question that was asked — not writing SQL yourself, and not trusting that the query was written correctly.
+
+Today's date is ${today}. This is the real current date, supplied by the server — do not judge a date filter as wrong because it looks future-dated relative to your own sense of "now"; ${today} is now.
+
+Do not judge a value's sign (positive vs negative) as part of the LABEL check. Whether a figure comes back positive or negative is governed by this app's own storage convention, not by what the question was about, and is checked separately, outside your job here. Never flag a column for being negative, or for being positive, on its own — judge LABEL only by whether the column's name describes what its expression computes, not by the sign of the number under it.
 
 Respond with a JSON object of the form {"reason": "<one line>", "verdict": "<label>"}, "reason" first — write the reason before deciding the label, not as a justification for a label you already picked.
 
@@ -167,6 +236,8 @@ export async function verifyResult(
   question: string,
   sql: string,
   rows: unknown[],
+  /** Same role as `buildSqlSystemPrompt`'s `now` param — the real current date, not the model's own assumption. */
+  now: Date,
   signal: AbortSignal,
   /**
    * Same value as `OLLAMA_KEEP_ALIVE` in app/api/chat/route.ts, passed in
@@ -176,6 +247,14 @@ export async function verifyResult(
    */
   keepAlive: string,
 ): Promise<VerificationResult> {
+  const signViolation = signPromiseViolation(rows)
+  if (signViolation) {
+    return {
+      verdict: 'mismatch',
+      reason: `Label: column "${signViolation.column}" promises a positive value (name contains "spent"/"spending") but returned ${signViolation.value}.`,
+    }
+  }
+
   let res: Response
   try {
     res = await fetch(`${ollamaUrl}/api/generate`, {
@@ -183,7 +262,7 @@ export async function verifyResult(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        system: buildVerificationSystemPrompt(),
+        system: buildVerificationSystemPrompt(isoDate(now)),
         prompt: buildVerificationPrompt(question, sql, rows),
         format: VERIFY_FORMAT,
         stream: false,
