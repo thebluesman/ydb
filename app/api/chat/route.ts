@@ -47,6 +47,8 @@ import { hedgeGrounds, hedgeInstruction } from '@/lib/chatHedge'
 import { suggestionsFrame } from '@/lib/chatSuggestions'
 import { recapInstruction } from '@/lib/chatRecap'
 import {
+  signPromiseMessage,
+  signPromiseViolation,
   verifierMismatchMessage,
   verifierOutOfScopeMessage,
   verifierSignal,
@@ -373,11 +375,14 @@ export async function POST(request: Request) {
 
   const trimmedHistory = trimHistory(history)
 
-  // Resolved once per request and reused by the repair round-trip, so both
-  // calls in a turn agree on what "today" is even across a midnight boundary —
-  // and, since ADR-0008, so both see the same category vocabulary. A repair
-  // pass that lost the grounding could reintroduce a guessed literal.
-  const sqlSystemPrompt = buildSqlSystemPrompt(new Date(), categories, accounts)
+  // Resolved once per request and reused everywhere below — the repair
+  // round-trip, the verifier, and the hedge check — so every call in a turn
+  // agrees on what "today" is even across a midnight boundary. Before this,
+  // each call site made its own `new Date()`; the verifier's copy could
+  // disagree with the generator's by however long the turn took to run,
+  // exactly the class of bug ADR-0025's addendum fixed elsewhere in this file.
+  const now = new Date()
+  const sqlSystemPrompt = buildSqlSystemPrompt(now, categories, accounts)
 
   // Build SQL prompt with prior conversation context so follow-up references resolve correctly
   const sqlPrompt = trimmedHistory.length > 0
@@ -741,6 +746,23 @@ export async function POST(request: Request) {
       `${dbTruncated ? ' (capped by the server)' : ''}; only the first ${Math.min(NARRATION_ROW_CAP, rows.length)} are shown above.`
     : ''
 
+  // ADR-0025 addendum (2026-08-04): an alias promising "spent"/"spending"
+  // (lib/chatSqlPrompt.ts's alias-sign rule) must come back positive —
+  // decidable from the column name and its value's sign alone, no need to
+  // know what the question meant, same property ADR-0016 used to move other
+  // guards from prompt to code. Runs here, BEFORE `verifyResult`, not inside
+  // it: `verifyResult` is documented as the one guard in this pipeline that
+  // fails open, and this check is the opposite (fails closed on a mechanical
+  // violation) — folding it in would have made that claim false of the
+  // function it names. Placed as a route-level guard like every other
+  // ADR-0016 detector, a turn caught here never reaches the verifier and
+  // produces no `ChatVerdict` row, same as every other pre-verification
+  // guard (see the model comment on `ChatVerdict` in prisma/schema.prisma).
+  const signViolation = signPromiseViolation(narrationRows)
+  if (signViolation) {
+    return nonAnswerResponse(nonAnswerFrame('unsupported-shape', signPromiseMessage(signViolation), sql))
+  }
+
   // Phase A (ADR-0012/0013): the verification pass. One extra non-streaming
   // call, over the SAME `narrationRows` binding narration is about to be
   // handed — post-guards, post-`applyMoneyUnits`, under the same
@@ -753,7 +775,7 @@ export async function POST(request: Request) {
   // rows are written by the client after the stream completes.
   const verifyStart = Date.now()
   const verification = await verifyResult(
-    ollamaUrl, sqlModel, sqlPrompt, sql, narrationRows, new Date(), verifierSignal(request.signal), OLLAMA_KEEP_ALIVE,
+    ollamaUrl, sqlModel, sqlPrompt, sql, narrationRows, now, verifierSignal(request.signal), OLLAMA_KEEP_ALIVE,
   )
   const verifyLatencyMs = Date.now() - verifyStart
 
@@ -824,7 +846,7 @@ export async function POST(request: Request) {
     sql,
     rows: narrationRows as Record<string, unknown>[],
     truncated: narrationTruncated || dbTruncated,
-    today: new Date(),
+    today: now,
   }))
 
   // ADR-0024. Follow-up suggestions, composed by the route from a closed
@@ -847,7 +869,7 @@ export async function POST(request: Request) {
     sql,
     categories,
     accounts,
-    today: new Date(),
+    today: now,
   })
 
   // [chat-model] output 13. Whether this question wants a period paragraph

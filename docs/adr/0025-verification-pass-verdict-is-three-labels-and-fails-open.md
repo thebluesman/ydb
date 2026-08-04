@@ -113,3 +113,76 @@ deliberately not answered here.
 the `no-answer` frame that already exists, with a route-written message. The model's `reason` string is
 captured (ADR-0026) and never shown — a decline the model phrases is a decline the model can talk
 itself out of, and that text is written from third-party-controlled rows.
+
+## Addendum (2026-08-04): the accuracy measurement this ADR called for, and where its guard boundary sits
+
+The Consequences section above named the missing measurement as "the first thing to run after the call
+ships" and nobody had run it. `scripts/evalChatVerifier.ts` (new) is that measurement: the verifier run
+against golden-query ground-truth SQL (expect `ok`) and hand-written broken SQL (expect
+`mismatch`/`out-of-scope`), on `qwen2.5:32b`, reporting precision and recall.
+
+**First finding: two things `buildSqlSystemPrompt` already tells the generator were missing from the
+verifier prompt.** Baseline was 100% recall, 50% precision, and every false positive traced to one of:
+the verifier assuming "now" was its training cutoff (flagging a correct `2026-07` date filter as "the
+future"), or reasoning about this ledger's amount-sign convention and getting it backwards (flagging a
+correctly-negative expense total as a broken label). Today's date was a straightforward fix — thread
+`now: Date` through `verifyResult` into `buildVerificationSystemPrompt`, same as the generator already
+gets. Sign was not.
+
+**Second finding: teaching the sign convention in prose does not work on this model, and moving it to
+code is a real extension of this ADR's guard boundary, not just a bug fix.** Prose attempts made things
+worse before they got better — 0.50 → 0.43 precision on a first wording, 0.62 precision / 0.80 recall
+(a real recall cost) on a tighter rewrite with a worked example — because the model kept re-deriving "a
+spending answer should be positive," which is false in this app's storage convention, regardless of how
+the counter-instruction was worded.
+
+The one sign rule that actually needs enforcing — `lib/chatSqlPrompt.ts`'s alias-sign rule, that a
+column named with "spent"/"spending" promises a positive value — is decidable from the column name and
+its value's sign alone, with no need to know what the question meant. That is the same property this
+codebase already uses elsewhere (`lib/chatCompoundSelect.ts`, `lib/chatBalanceScope.ts`,
+`lib/chatMoneyGuards.ts`) to justify moving a guard from prompt to code rather than continuing to
+word-tune it. `signPromiseViolation` (`lib/chatVerification.ts`) is that guard, applied to this
+verification pass for the first time.
+
+**Where it was placed matters, and is now settled: NOT inside `verifyResult`.** A first version put the
+check inside `verifyResult` itself, short-circuiting to a `mismatch` before the model was ever called.
+Review before merge caught two problems with that placement:
+
+- This ADR's own Decision section states `verifyResult` is **the one guard in this pipeline that fails
+  open**. A hard-refusing deterministic check bolted to the front of that function would have made that
+  sentence false of the function it names — the fail-open claim would then require reading past the new
+  check to still be true, rather than being true of the call itself.
+- ADR-0026 built `ChatVerdict` specifically to keep "a guard refused" separable from "a model guessed."
+  Routing the check's refusal through `verifyResult`'s return type would have written it into
+  `ChatVerdict` indistinguishable from a real model verdict — the exact conflation ADR-0026 states as
+  its reason for not reusing `NonAnswerReason`, arriving through a different door.
+
+`signPromiseViolation` is instead called by `app/api/chat/route.ts` as a route-level guard, immediately
+before the `verifyResult` call — the same family as ADR-0016's other decidable-from-the-output-alone
+detectors (`lib/chatMoneyGuards.ts`, `balanceScopeRowViolation`). A turn it catches never reaches the
+verifier and produces no `ChatVerdict` row, the same behavior every other pre-verification guard in this
+pipeline already has. `verifyResult` itself is now unchanged from what this ADR originally described:
+it only ever asks the model, and its prompt is simplified to tell the model flatly not to reason about
+sign at all (rather than teach it the one exception that needs enforcing), since that reasoning is what
+was measured making things worse.
+
+**Measured result, with the guard correctly out of `verifyResult`:** combined pipeline (route guard +
+model) — 0.59 precision, 0.91 recall, on 19 good / 11 broken fixture cases. Split by source:
+`signPromiseViolation` alone is 1.00/1.00 (the one case it exists for, caught deterministically, with
+zero false positives across the two GOOD fixtures added specifically to probe it — a correctly-signed
+`SUM(-amount) AS total_spent`, the form the generator is actually taught to emit). The model alone,
+now measured on a fixture set that no longer accidentally routes around it, is 0.56 precision / 0.90
+recall — the more honest number for what Phase B's gate should actually be read against, since it
+reflects the verifier's own judgment rather than a code check riding along with it.
+
+**Accepted risk, unresolved:** a genuinely negative `spent`/`spending`-aliased column now hard-refuses
+without a model ever weighing in. The two worked examples in `lib/chatSqlPrompt.ts` that teach
+`total_spent` both pin `amount < 0`, so the taught shape cannot produce this — but a model deviating
+from the taught shape could still trip it, and nothing currently measures how often that happens in
+practice. Flagged, not fixed, here — real closure is `ChatVerdict`/production data showing whether it
+happens, not more fixture cases.
+
+**Still open, unchanged from before this addendum:** whether 0.56-0.59 precision is good enough to trust
+`ChatVerdict` data for a Phase B scoping decision is Shyam's call, not decided here. A `mismatch` refuses
+the turn outright, so this precision means roughly two-in-five flags on correct SQL are false alarms —
+a real usability cost, not just a research number.

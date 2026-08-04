@@ -3,6 +3,7 @@ import {
   buildVerificationPrompt,
   buildVerificationSystemPrompt,
   parseVerificationResponse,
+  signPromiseMessage,
   signPromiseViolation,
   VERIFY_FORMAT,
   verifierMismatchMessage,
@@ -117,6 +118,19 @@ describe('signPromiseViolation', () => {
   it('returns null for empty rows', () => {
     expect(signPromiseViolation([])).toBeNull()
   })
+
+  it('skips a non-numeric value under a promising alias rather than flagging it (fail-open on an unrecognised shape)', () => {
+    expect(signPromiseViolation([{ total_spent: '-120' }])).toBeNull()
+    expect(signPromiseViolation([{ total_spent: null }])).toBeNull()
+  })
+})
+
+describe('signPromiseMessage', () => {
+  it('names the specific column and value, since this is a route guard\'s own finding, not a model claim to keep off the page', () => {
+    const msg = signPromiseMessage({ column: 'total_spent', value: -120 })
+    expect(msg).toContain('total_spent')
+    expect(msg).toContain('-120')
+  })
 })
 
 describe('parseVerificationResponse', () => {
@@ -203,18 +217,27 @@ describe('verifyResult', () => {
     vi.unstubAllGlobals()
   })
 
-  it('short-circuits to a mismatch on a sign-promise violation, never calling the model', async () => {
-    const fetchSpy = vi.fn()
+  // signPromiseViolation is NOT checked here — it's a route-level guard
+  // (app/api/chat/route.ts checks it before ever calling verifyResult), not
+  // something verifyResult does internally. See its own describe block above
+  // and lib/chatVerification.ts's comment on signPromiseViolation for why:
+  // folding it into verifyResult would have made "the one guard in this
+  // pipeline that fails open" untrue of the function it names, and would have
+  // written a route-guard refusal through ChatVerdict indistinguishably from
+  // a real model verdict.
+
+  it('always calls the model — sign is never checked inside verifyResult itself', async () => {
+    const fetchSpy = vi.fn(async () => new Response(
+      JSON.stringify({ response: JSON.stringify({ reason: 'ok', verdict: 'ok' }) }),
+      { status: 200 },
+    ))
     vi.stubGlobal('fetch', fetchSpy)
 
-    const result = await verifyResult(
+    await verifyResult(
       'http://ollama.test', 'qwen2.5:32b', 'q', 'SELECT 1', [{ total_spent: -120 }],
       new Date('2026-08-04'), new AbortController().signal, KEEP_ALIVE,
     )
-    expect(result.verdict).toBe('mismatch')
-    expect(result.reason).toMatch(/^Label:/)
-    expect(result.reason).toContain('total_spent')
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 
   it('returns the parsed verdict on a clean call', async () => {

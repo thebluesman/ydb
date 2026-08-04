@@ -308,13 +308,19 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   describe what its expression computes"). It is a mitigation, not a closure: the verifier is the same
   local model and fails open, so an unchallenged figure is now less likely rather than impossible. The
   real closure is still the `computeBalance` path above.
-- **Nobody knows how accurate the Phase A verifier is, and Phase B's gate depends on it.** The verifier
-  shipped 2026-08-04 with its error rate unmeasured — it is running in production and writing to
-  `ChatVerdict` now, which is a different (better) state than "designed but unmeasured," but the
-  measurement itself still has not happened. `scripts/chatEval` can measure it directly — run the
-  fixture questions once with ground-truth SQL and once with deliberately broken SQL, read precision and
-  recall — and that run should happen before any Phase B decision is argued from `ChatVerdict` data.
-  **This is the actual next step for Tier 2/Phase B, not building the loop itself.** Not yet run.
+- **The Phase A verifier's accuracy has now been measured, and it is not high enough to be a settled
+  question.** `scripts/evalChatVerifier.ts` (new, 2026-08-04) runs the verifier against golden-query
+  ground-truth SQL (expect `ok`) and hand-written broken SQL (expect `mismatch`/`out-of-scope`), on
+  `qwen2.5:32b`. Combined pipeline result (route guard + model): **0.59 precision, 0.91 recall**, on 19
+  good / 11 broken fixture cases. The measurement surfaced a real deterministic-guard addition along the
+  way — `signPromiseViolation` (ADR-0025's addendum) — which alone scores 1.00/1.00 and is reported
+  separately from the model's own 0.56 precision / 0.90 recall, so a future guard addition cannot
+  inflate "verifier accuracy" without the model's own judgment improving. **Since a `mismatch` refuses
+  the turn outright, ~0.56-0.59 precision means roughly two-in-five flags on genuinely correct SQL are
+  false alarms — a real usability cost, not just a research number.** Whether that clears ADR-0013's
+  Phase B gate is Shyam's call and is explicitly not decided here; see ADR-0025's addendum for the full
+  breakdown and the two prompt-wording attempts that made precision worse before the deterministic fix
+  made it better.
 - **Whether guard refusals should also land in `ChatVerdict`.** ADR-0026 records only turns that
   reached the verifier, so the full outcome distribution is split between that table and
   `ChatMessage.nonAnswerReason` and can only be joined by hand on timestamps. Deliberately left open:

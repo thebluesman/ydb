@@ -70,17 +70,40 @@ function isGroundedMismatch(reason: string): boolean {
 // backwards reasoning the instruction was trying to rule out. A tighter
 // rewrite with a worked example partially recovered it (0.62) but cost
 // recall (1.00 -> 0.80) and left the LLM still doing sign arithmetic it
-// didn't reliably get right. Moving the actual promise-check to code and
-// telling the model to leave sign alone entirely removes that failure mode
-// instead of continuing to word-tune around it.
+// didn't reliably get right.
+//
+// This is called by `app/api/chat/route.ts` as a guard BEFORE `verifyResult`
+// is ever invoked — the same place ADR-0016's other decidable-from-the-output
+// guards live (`lib/chatMoneyGuards.ts`, `lib/chatBalanceScope.ts`) —
+// deliberately not from inside `verifyResult` itself. Two reasons, both from
+// ADR-0025 addendum (2026-08-04): first, `verifyResult` is documented as "the
+// one guard in this pipeline that fails open," and a hard-refusing check
+// bolted to its front would make that claim false of the function it names.
+// Second, `ChatVerdict` (ADR-0026) exists specifically to keep "a guard
+// refused" separable from "a model guessed" — writing this check's refusal
+// through `verifyResult`'s return path would have made it indistinguishable
+// from a real model verdict in that table. As a route-level guard, a turn
+// this catches never reaches `verifyResult` at all, so it produces no
+// `ChatVerdict` row — the same behavior every other pre-verification guard in
+// this pipeline already has (see the model comment on `ChatVerdict` in
+// `prisma/schema.prisma`).
+//
+// Accepted risk: a `typeof value === 'number'` value that fails the check
+// (e.g. a non-numeric or BigInt column) is silently skipped, not flagged —
+// deliberately, so this stays fail-open on a shape it doesn't understand
+// rather than refusing on a false read. A legitimately negative `total_spent`
+// column would also hard-refuse here without a model ever weighing in; the
+// two worked examples that teach `total_spent` in `lib/chatSqlPrompt.ts` both
+// pin `amount < 0` so the taught shape can't produce this, but a model
+// deviating from the taught shape could still trip it.
 const SIGN_PROMISE_RE = /spen(t|ding)/i
 
 /**
  * Scans result rows for a column whose name promises a positive value
  * (contains "spent"/"spending") but whose value is negative. Returns the
- * first violation found, or null. Runs before the model call in
- * `verifyResult` — a violation here is a `mismatch` verdict the model is
- * never even asked about.
+ * first violation found, or null. Intended to run as a route-level guard
+ * before `verifyResult` is called — see the comment above for why it does not
+ * live inside `verifyResult` itself.
  */
 export function signPromiseViolation(rows: unknown[]): { column: string; value: number } | null {
   for (const row of rows) {
@@ -247,14 +270,6 @@ export async function verifyResult(
    */
   keepAlive: string,
 ): Promise<VerificationResult> {
-  const signViolation = signPromiseViolation(rows)
-  if (signViolation) {
-    return {
-      verdict: 'mismatch',
-      reason: `Label: column "${signViolation.column}" promises a positive value (name contains "spent"/"spending") but returned ${signViolation.value}.`,
-    }
-  }
-
   let res: Response
   try {
     res = await fetch(`${ollamaUrl}/api/generate`, {
@@ -311,5 +326,20 @@ export function verifierOutOfScopeMessage(question: string): string {
   return (
     `I ran a query for "${question.trim().slice(0, 200)}", but a second check found that nothing in ` +
     `this ledger answers it as asked — no rewrite of the query would help. The query I tried is below.`
+  )
+}
+
+/**
+ * The refusal text for `signPromiseViolation` — a route-level guard, not a
+ * model verdict, so unlike the two messages above this one CAN name the
+ * specific column: there is no third-party-controlled model reasoning to
+ * keep off the page here, just a fact about the query's own output.
+ */
+export function signPromiseMessage(violation: { column: string; value: number }): string {
+  return (
+    `I ran the query, but the "${violation.column}" column came back negative (${violation.value}) even ` +
+    `though a column named that way should read as a positive amount. That's an internal inconsistency ` +
+    `in how the query was written, not a fact about your ledger, so I didn't narrate a figure from it. ` +
+    `The query I tried is below.`
   )
 }

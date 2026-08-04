@@ -25,7 +25,7 @@
  *   npx tsx scripts/evalChatVerifier.ts [--model=qwen2.5:32b] [--url=http://localhost:11434]
  */
 
-import { verifyResult } from '@/lib/chatVerification'
+import { signPromiseViolation, VERIFY_TIMEOUT_MS, verifyResult } from '@/lib/chatVerification'
 import { LLM_DEFAULTS } from '@/lib/llm-models'
 import { buildFixtureDb, REFERENCE_NOW } from './chatEval/fixtureDb'
 import { GOLDEN_QUERIES } from './chatEval/goldenQueries'
@@ -62,6 +62,31 @@ const GOOD_CASES: Case[] = GOLDEN_QUERIES.filter(
   note: gq.note,
 }))
 
+// None of GOLDEN_QUERIES' own ground-truth SQL uses a "spent"/"spending"
+// alias (they're all plain `total`/`total_income`), which meant the first
+// version of this harness never exercised signPromiseViolation's false-
+// positive rate at all — only its true-positive rate, via one BROKEN case.
+// These two are in the exact form lib/chatSqlPrompt.ts's alias-sign rule
+// teaches the generator to produce for a spend question: SUM(-amount),
+// positive, aliased total_spent. The pre-check must NOT fire on these; if it
+// does, that's a real regression, not a model-precision finding.
+const GOOD_SIGN_PROMISE_CASES: Case[] = [
+  {
+    id: 'good:groceries-total-spent-taught-form',
+    question: 'How much did I spend on groceries last month?',
+    sql: `SELECT SUM(-amount)/100.0 AS total_spent FROM "Transaction" WHERE category = 'Groceries' AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '2026-07'`,
+    expected: 'ok',
+    note: 'Taught alias-sign form (SUM(-amount) AS total_spent, positive) — must not trip signPromiseViolation.',
+  },
+  {
+    id: 'good:rent-total-spent-taught-form',
+    question: 'What was my rent last month?',
+    sql: `SELECT SUM(-amount)/100.0 AS total_spent FROM "Transaction" WHERE category = 'Rent' AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '2026-07'`,
+    expected: 'ok',
+    note: 'Same taught form, single-row category — sanity check alongside the multi-row groceries case above.',
+  },
+]
+
 // ── BROKEN cases: hand-written mutations, each targeting one of the
 // verifier's three named checks (FILTER / LABEL / SHAPE), so a miss is
 // attributable to a specific weakness rather than "the model didn't notice".
@@ -85,10 +110,10 @@ const BROKEN_CASES: Case[] = [
   {
     id: 'broken:dining-unrequested-account-filter',
     question: 'How much did I spend on dining last month?',
-    sql: `SELECT t.amount/100.0 AS total FROM "Transaction" t JOIN Account a ON t.accountId = a.id WHERE a.name = 'Rewards Card' AND t.category = 'Dining' AND t.transactionType != 'transfer' AND t.parentTransactionId IS NULL AND t.reimbursementTxId IS NULL AND strftime('%Y-%m', t.date) = '2026-07'`,
+    sql: `SELECT SUM(t.amount)/100.0 AS total FROM "Transaction" t JOIN Account a ON t.accountId = a.id WHERE a.name = 'Rewards Card' AND t.category = 'Dining' AND t.transactionType != 'transfer' AND t.parentTransactionId IS NULL AND t.reimbursementTxId IS NULL AND strftime('%Y-%m', t.date) = '2026-07'`,
     expected: 'flag',
     breakKind: 'filter',
-    note: 'Question never named an account; SQL silently narrows to Rewards Card only.',
+    note: 'Question never named an account; SQL silently narrows to Rewards Card only. SUM restored (an earlier version of this fixture dropped it, conflating the filter break with an accidental shape break).',
   },
   {
     id: 'broken:income-labeled-as-expenses',
@@ -156,19 +181,58 @@ const BROKEN_CASES: Case[] = [
   },
 ]
 
-const ALL_CASES: Case[] = [...GOOD_CASES, ...BROKEN_CASES]
+const ALL_CASES: Case[] = [...GOOD_CASES, ...GOOD_SIGN_PROMISE_CASES, ...BROKEN_CASES]
+
+type Source = 'precheck' | 'model'
+
+function classify(expected: 'ok' | 'flag', flagged: boolean, unusableHit: boolean): 'TP' | 'FP' | 'TN' | 'FN' {
+  if (expected === 'flag') {
+    if (unusableHit) return 'FN' // an unavailable verdict caught nothing — same as missing it
+    return flagged ? 'TP' : 'FN'
+  }
+  return flagged ? 'FP' : 'TN'
+}
+
+/** Accumulates TP/FP/TN/FN for one metrics bucket (combined, precheck-only, model-only). */
+class Tally {
+  tp = 0
+  fp = 0
+  tn = 0
+  fn = 0
+  unusable = 0
+
+  record(outcome: 'TP' | 'FP' | 'TN' | 'FN', unusableHit: boolean) {
+    this[outcome.toLowerCase() as 'tp' | 'fp' | 'tn' | 'fn']++
+    if (unusableHit) this.unusable++
+  }
+
+  get precision(): number | null {
+    return this.tp + this.fp > 0 ? this.tp / (this.tp + this.fp) : null
+  }
+
+  get recall(): number | null {
+    return this.tp + this.fn > 0 ? this.tp / (this.tp + this.fn) : null
+  }
+
+  report(label: string) {
+    const fmt = (v: number | null) => (v === null ? 'n/a' : v.toFixed(2))
+    console.log(`${label}: TP=${this.tp} FP=${this.fp} TN=${this.tn} FN=${this.fn} (unusable=${this.unusable}) — precision=${fmt(this.precision)} recall=${fmt(this.recall)}`)
+  }
+}
 
 async function main() {
   const { model, url } = parseArgs()
-  console.log(`[verifier-eval] model=${model} url=${url} cases=${ALL_CASES.length} (${GOOD_CASES.length} good / ${BROKEN_CASES.length} broken)\n`)
+  console.log(`[verifier-eval] model=${model} url=${url} cases=${ALL_CASES.length} (${GOOD_CASES.length + GOOD_SIGN_PROMISE_CASES.length} good / ${BROKEN_CASES.length} broken)\n`)
 
   const db = buildFixtureDb()
 
-  let tp = 0
-  let fp = 0
-  let tn = 0
-  let fn = 0
-  let unusable = 0
+  // Combined = what the pipeline actually does (route guard, then model).
+  // Precheck/model are reported separately per tech-lead review of PR #53:
+  // mixing them lets a future deterministic guard addition inflate "verifier
+  // accuracy" without the model's own judgment improving at all.
+  const combined = new Tally()
+  const precheck = new Tally()
+  const modelOnly = new Tally()
 
   for (const c of ALL_CASES) {
     let rows: unknown[]
@@ -179,47 +243,47 @@ async function main() {
       continue
     }
 
-    const result = await verifyResult(url, model, c.question, c.sql, rows, REFERENCE_NOW, AbortSignal.timeout(30_000), '30m')
-    const flagged = result.verdict === 'mismatch' || result.verdict === 'out-of-scope'
+    // Mirrors app/api/chat/route.ts: signPromiseViolation is checked BEFORE
+    // verifyResult is ever called, not inside it (ADR-0025 addendum,
+    // 2026-08-04) — a turn caught here never reaches the model.
+    const signViolation = signPromiseViolation(rows)
+    let source: Source
+    let verdict: string
+    let reason: string | null
+    let flagged: boolean
+    let unusableHit = false
 
-    let outcome: 'TP' | 'FP' | 'TN' | 'FN'
-    if (c.expected === 'flag') {
-      if (result.verdict === 'unusable') {
-        unusable++
-        outcome = 'FN' // an unavailable verdict caught nothing — same as missing it
-        fn++
-      } else if (flagged) {
-        tp++
-        outcome = 'TP'
-      } else {
-        fn++
-        outcome = 'FN'
-      }
+    if (signViolation) {
+      source = 'precheck'
+      verdict = 'mismatch (precheck)'
+      reason = `column "${signViolation.column}" is negative`
+      flagged = true
     } else {
-      if (flagged) {
-        fp++
-        outcome = 'FP'
-      } else {
-        tn++
-        outcome = 'TN'
-        if (result.verdict === 'unusable') unusable++
-      }
+      source = 'model'
+      const result = await verifyResult(
+        url, model, c.question, c.sql, rows, REFERENCE_NOW, AbortSignal.timeout(VERIFY_TIMEOUT_MS), '30m',
+      )
+      verdict = result.verdict
+      reason = result.reason
+      flagged = result.verdict === 'mismatch' || result.verdict === 'out-of-scope'
+      unusableHit = result.verdict === 'unusable'
     }
 
+    const outcome = classify(c.expected, flagged, unusableHit)
+    combined.record(outcome, unusableHit)
+    ;(source === 'precheck' ? precheck : modelOnly).record(outcome, unusableHit)
+
     const mark = outcome === 'TP' || outcome === 'TN' ? 'PASS' : 'MISS'
-    console.log(`${mark} [${outcome}] ${c.id}`)
+    console.log(`${mark} [${outcome}/${source}] ${c.id}`)
     console.log(`      Q: ${c.question}`)
-    console.log(`      expected=${c.expected}${c.breakKind ? ` (${c.breakKind})` : ''} got=${result.verdict}${result.reason ? ` — ${result.reason}` : ''}`)
+    console.log(`      expected=${c.expected}${c.breakKind ? ` (${c.breakKind})` : ''} got=${verdict}${reason ? ` — ${reason}` : ''}`)
     console.log('')
   }
 
-  const precision = tp + fp > 0 ? tp / (tp + fp) : null
-  const recall = tp + fn > 0 ? tp / (tp + fn) : null
-
   console.log('─'.repeat(60))
-  console.log(`Confusion: TP=${tp} FP=${fp} TN=${tn} FN=${fn} (unusable=${unusable})`)
-  console.log(`Precision: ${precision === null ? 'n/a' : precision.toFixed(2)}`)
-  console.log(`Recall:    ${recall === null ? 'n/a' : recall.toFixed(2)}`)
+  combined.report('Combined (what the pipeline actually does)')
+  precheck.report('Precheck only (signPromiseViolation)')
+  modelOnly.report('Model only (verifyResult)')
 
   process.exit(0)
 }
