@@ -53,6 +53,7 @@ describe('FORBIDDEN_IDENTIFIERS still blocks genuine access', () => {
     ['aliased with explicit AS', `SELECT b.amount FROM Budget AS b`],
     ['a different forbidden table', `SELECT * FROM "Setting"`],
     ['app-internal table', `SELECT * FROM ChatMessage`],
+    ['ADR-0025/0026 verdict table', `SELECT * FROM ChatVerdict`],
     ['via a subquery, even with an innocuous outer alias', `SELECT (SELECT 1 FROM Budget) AS budget_status FROM "Transaction"`],
     ['sqlite schema introspection', `SELECT * FROM sqlite_master`],
   ])('blocks: %s', (_label, sql) => {

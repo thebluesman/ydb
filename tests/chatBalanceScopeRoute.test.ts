@@ -280,7 +280,8 @@ describe('POST /api/chat — balance intent declined before generation (ADR-0015
     const res = await ask('how much did I pay off my car loan last month')
 
     // Generation happened, the query ran, and the turn narrated normally.
-    expect(systemPrompts).toHaveLength(2)
+    // (SQL generation, Phase A verification, narration — three model calls.)
+    expect(systemPrompts).toHaveLength(3)
     expect(queryCalls).toEqual([sql])
     const out = await frames(res)
     expect(out[0]).toMatchObject({ type: 'sql', sql })

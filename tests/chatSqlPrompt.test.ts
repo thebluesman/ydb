@@ -87,7 +87,7 @@ describe('buildSqlSystemPrompt', () => {
     expect(prompt).toContain("status IN ('committed','reconciled')")
     expect(prompt).toContain('LIMIT 200')
     // Blocked tables must stay listed.
-    expect(prompt).toContain('Setting, ChatSession, ChatMessage, Budget, VendorRule')
+    expect(prompt).toContain('Setting, ChatSession, ChatMessage, ChatVerdict, Budget, VendorRule')
   })
 
   it('defaults to the real current date when called with no argument', () => {

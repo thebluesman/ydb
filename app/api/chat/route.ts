@@ -46,6 +46,12 @@ import { buildResultFrame } from '@/lib/chatResultFrame'
 import { hedgeGrounds, hedgeInstruction } from '@/lib/chatHedge'
 import { suggestionsFrame } from '@/lib/chatSuggestions'
 import { recapInstruction } from '@/lib/chatRecap'
+import {
+  verifierMismatchMessage,
+  verifierOutOfScopeMessage,
+  verifierSignal,
+  verifyResult,
+} from '@/lib/chatVerification'
 
 // Thrown when Ollama is unreachable or errors during SQL generation, so the
 // caller can distinguish a transport failure (503) from a bad query (422).
@@ -734,6 +740,58 @@ export async function POST(request: Request) {
     ? `\n\nNote: query returned ${dbTruncated ? 'a large number of' : String(rows.length)} rows` +
       `${dbTruncated ? ' (capped by the server)' : ''}; only the first ${Math.min(NARRATION_ROW_CAP, rows.length)} are shown above.`
     : ''
+
+  // Phase A (ADR-0012/0013): the verification pass. One extra non-streaming
+  // call, over the SAME `narrationRows` binding narration is about to be
+  // handed — post-guards, post-`applyMoneyUnits`, under the same
+  // NARRATION_ROW_CAP — asking whether they actually answer `question`.
+  // ADR-0025 fixes the verdict shape and its fail-open posture: a transport
+  // failure or timeout comes back as `unusable`, which is treated exactly
+  // like `ok` below and never blocks an answer already in hand. ADR-0026 is
+  // why the write happens here, before narration, into its own table rather
+  // than onto `ChatMessage` — this route has no session id, and `ChatMessage`
+  // rows are written by the client after the stream completes.
+  const verifyStart = Date.now()
+  const verification = await verifyResult(
+    ollamaUrl, sqlModel, sqlPrompt, sql, narrationRows, verifierSignal(request.signal), OLLAMA_KEEP_ALIVE,
+  )
+  const verifyLatencyMs = Date.now() - verifyStart
+
+  // Fire-and-forget: a verdict this route failed to record is a gap in the
+  // eval data, not a reason to fail a turn whose answer is otherwise ready
+  // (ADR-0026). try/catch belt-and-braces the promise's own .catch because
+  // the write is genuinely allowed to fail synchronously too, not just
+  // reject — this call must never be the thing that takes a turn down.
+  try {
+    prisma.chatVerdict.create({
+      data: {
+        question: question.slice(0, 500),
+        sql,
+        rowCount: narrationRows.length,
+        truncated: narrationTruncated || dbTruncated,
+        verdict: verification.verdict,
+        reason: verification.reason?.slice(0, 500) ?? null,
+        model: sqlModel,
+        latencyMs: verifyLatencyMs,
+      },
+    }).catch((err: unknown) => {
+      console.error('Failed to record chat verdict:', err)
+    })
+  } catch (err) {
+    console.error('Failed to record chat verdict:', err)
+  }
+
+  // `mismatch` and `out-of-scope` route to ADR-0014's non-answer frame with a
+  // route-written message (the model's `reason` is captured above but never
+  // shown — same rule as every other non-answer in this pipeline). `ok` and
+  // `unusable` both fall through to narration: the fail-open case is
+  // indistinguishable from a clean pass at this call site by design.
+  if (verification.verdict === 'mismatch') {
+    return nonAnswerResponse(nonAnswerFrame('unsupported-shape', verifierMismatchMessage(question), sql))
+  }
+  if (verification.verdict === 'out-of-scope') {
+    return nonAnswerResponse(nonAnswerFrame('out-of-scope', verifierOutOfScopeMessage(question), sql))
+  }
 
   // ADR-0023. The `result` frame, built here from the SAME `rows` binding
   // narration is about to be handed — post-ADR-0017 row-key check,

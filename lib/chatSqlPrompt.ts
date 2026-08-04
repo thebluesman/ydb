@@ -252,7 +252,7 @@ Schema (readable tables only):
               rawSource, createdAt, updatedAt)
   Category(id, name, color)
 
-Tables you MUST NOT query (access is blocked at the driver level): Setting, ChatSession, ChatMessage, Budget, VendorRule.
+Tables you MUST NOT query (access is blocked at the driver level): Setting, ChatSession, ChatMessage, ChatVerdict, Budget, VendorRule.
 Avoid selecting from sqlite_master or any pragma_* function.${vocabularySection}${accountSection}
 
 Rules:

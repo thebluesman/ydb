@@ -62,9 +62,10 @@ describe('POST /api/chat — knowledge injection stays out of SQL generation (AD
 
       const response = await POST(request)
       expect(response.status).toBe(200)
-      expect(calls).toHaveLength(2)
+      // SQL generation, Phase A verification (ADR-0025), narration.
+      expect(calls).toHaveLength(3)
 
-      const [sqlCall, narrationCall] = calls
+      const [sqlCall, verifyCall, narrationCall] = calls
 
       const block = buildKnowledgeBlock(loadKnowledgeSnippets('P0'))
       expect(block.length).toBeGreaterThan(0) // sanity: there is real content that could leak
@@ -77,6 +78,13 @@ describe('POST /api/chat — knowledge injection stays out of SQL generation (AD
       expect(sqlCall.body.system).not.toContain(block)
       expect(sqlCall.body.prompt).not.toContain(block)
       expect(sqlCall.body.options?.num_ctx).toBe(16_384)
+
+      // Verification call (ADR-0025): also no knowledge content — it is shown
+      // the SQL as a claim to check, not the context the generator had.
+      expect(verifyCall.body.stream).toBe(false)
+      expect(verifyCall.body.system).not.toContain(KNOWLEDGE_PRECEDENCE_LINE)
+      expect(verifyCall.body.system).not.toContain(block)
+      expect(verifyCall.body.prompt).not.toContain(block)
 
       // Narration call: carries the knowledge block and the pinned context window.
       expect(narrationCall.body.stream).toBe(true)
