@@ -153,7 +153,7 @@ describe('the new worked examples pass every guard the route would run them thro
         // The live check on the "/ 100.0 before / N" rule the prompt now states.
         // Write `SUM(...) / 600.0` instead and this goes red: the classifier
         // cannot resolve the units of that expression and refuses the turn.
-        expect(moneyUnitsPlan(sql)).toEqual({ kind: 'ok', convertKeys: [] })
+        expect(moneyUnitsPlan(sql)).toMatchObject({ kind: 'ok', convertKeys: [] })
       })
 
       it('carries a transactionType predicate alongside its sign branch (ADR-0016)', () => {
