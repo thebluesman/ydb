@@ -415,6 +415,17 @@ function directionPinnedColumns(sql: string, sources: TableSources): Set<string>
   const ends = findAllTopLevel(after, CLAUSE_AFTER_WHERE_RE).filter((h) => startsWord(after, h.index))
   const clause = ends.length > 0 ? after.slice(0, ends[0].index) : after
 
+  // A direction predicate joined by a top-level OR does not pin anything:
+  // `amount < 0 OR category = 'Refunds'` is satisfied by positive rows too,
+  // so treating that clause as pinning direction would strip a real sign off
+  // a real net rather than just miss a display upgrade. Bail out on any
+  // depth-0 OR rather than try to reason about which side of it a hit
+  // belongs to — a parenthesised `(amount < 0 OR ...)` is unaffected since it
+  // sits at depth >= 1 and `findAllTopLevel` never looks inside it.
+  if (findAllTopLevel(clause, /^OR\b/i).some((h) => startsWord(clause, h.index))) {
+    return pinned
+  }
+
   for (const hit of findAllTopLevel(clause, DIRECTION_PIN_RE)) {
     if (!startsWord(clause, hit.index)) continue
 

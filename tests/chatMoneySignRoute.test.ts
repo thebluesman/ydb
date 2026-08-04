@@ -113,7 +113,12 @@ const FILTERS =
   `transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL ` +
   `AND status IN ('committed','reconciled')`
 
-/** The live-bug shape: direction pinned by WHERE, plain `total` alias. */
+/**
+ * A direction-pinned shape: `WHERE amount < 0` plus a plain `total` alias.
+ * NOT the literal live-bug query (see UNPINNED_SQL below for that) — this is
+ * the shape the classifier's WHERE-pin trigger targets, used across most of
+ * this file's tests for that reason.
+ */
 const PINNED_SQL =
   `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" ` +
   `WHERE amount < 0 AND category = '🛒 Groceries' AND ${FILTERS}`
@@ -121,6 +126,22 @@ const PINNED_SQL =
 /** No direction filter and no negation — the deferred signed-answer shape. */
 const NET_SQL =
   `SELECT SUM(amount) / 100.0 AS net FROM "Transaction" WHERE ${FILTERS}`
+
+/**
+ * The ACTUAL live-bug query, reported 2026-08-04: a category-filtered spend
+ * total with neither trigger — no negation, no zero-comparison on `amount`
+ * anywhere in the WHERE. `@tech-lead`'s PR #54 review flagged that this
+ * fixture set never actually reproduced the reported shape, only the
+ * WHERE-pinned one, and that PINNED_SQL's docstring wrongly claimed it did.
+ * `moneyKeys` still fixes this row's missing currency symbol (ADR-0023's
+ * classifier bug); `magnitudeKeys` correctly does NOT fire, because a bare
+ * `WHERE category = ...` cannot tell the classifier every surviving row is an
+ * outflow. This residual gap is real and open — see docs/architecture.md —
+ * fixed at the SQL-prompt level (teaching this shape to negate), not here.
+ */
+const UNPINNED_SQL =
+  `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" ` +
+  `WHERE category = '🛒 Groceries' AND ${FILTERS}`
 
 function resultFrame(out: Record<string, unknown>[]): Record<string, unknown> {
   const frame = out.find((f) => f.type === 'result')
@@ -168,6 +189,27 @@ describe('POST /api/chat — display sign (ADR-0027)', () => {
 
     expect(resultFrame(out).rows).toEqual([{ net: -120.5 }])
     expect(narrationPrompts[0]).toContain('-120.5')
+  })
+
+  it('the actual reported live-bug query still displays signed — a real, open, documented gap', async () => {
+    // UNPINNED_SQL is the literal query from the reported bug: a
+    // category-filtered spend total with no negation and no zero-comparison
+    // anywhere in WHERE, so magnitudeKeys correctly does not fire (the
+    // classifier cannot tell from `WHERE category = ...` alone that every
+    // surviving row is an outflow). moneyKeys DOES fire, so the currency
+    // symbol appears even though the sign does not go away — a real, partial
+    // fix, not the illusion of a complete one. Closing this fully is a
+    // SQL-prompt change (teach this shape to negate, same as the grouped
+    // examples already do), tracked as a follow-up, not done here.
+    sqlReplies = [UNPINNED_SQL]
+    queryResults = [() => ({ rows: [{ total: -3654.43 }], truncated: false })]
+
+    const out = await frames(await ask('How much did I spend on groceries last month?'))
+    const frame = resultFrame(out)
+
+    expect(frame.rows).toEqual([{ total: -3654.43 }])
+    expect(frame.columns).toEqual([{ key: 'total', label: 'total', kind: 'money' }])
+    expect(narrationPrompts[0]).toContain('-3654.43')
   })
 
   it('the verifier sees the query\'s own signs, not the display ones', async () => {

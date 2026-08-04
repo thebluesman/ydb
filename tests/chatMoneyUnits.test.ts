@@ -344,6 +344,21 @@ describe('moneyUnitsPlan — magnitudeKeys via a WHERE direction pin (ADR-0027)'
     expect(okPlan(`SELECT * FROM "Transaction" WHERE amount < 0 LIMIT 5`).magnitudeKeys).toEqual(['amount'])
     expect(okPlan(`SELECT * FROM "Transaction" LIMIT 5`).magnitudeKeys).toEqual([])
   })
+
+  it('a top-level OR does not pin — positive rows can still satisfy the clause', () => {
+    // `amount < 0 OR category = 'Refunds'` is not a direction pin: a positive
+    // refund row survives the WHERE too, so stripping the sign here would
+    // remove real information from a real net, not just miss a display
+    // upgrade. This is the one direction ADR-0027 says the classifier must
+    // never fail in.
+    const sql = `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 OR category = 'Refunds'`
+    expect(okPlan(sql).magnitudeKeys).toEqual([])
+  })
+
+  it('a parenthesised OR is unaffected — the pin sits outside the parens, at depth 0', () => {
+    const sql = `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND (category = 'Refunds' OR category = 'Groceries')`
+    expect(okPlan(sql).magnitudeKeys).toEqual(['total'])
+  })
 })
 
 describe('moneyUnitsPlan — what deliberately stays signed (ADR-0027)', () => {

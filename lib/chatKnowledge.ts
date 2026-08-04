@@ -241,7 +241,7 @@ export function buildNarrationSystemPrompt(
   // "write more". It says nothing about how many rows the model gets; that is
   // NARRATION_ROW_CAP's business and a recap does not move it.
   const operativeRules =
-    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions. A monetary value's sign has also already been normalized for display: a figure describing money going out arrives as a positive magnitude, so state the direction from the question and the column name rather than by adding or removing a minus sign yourself. ${CONFIDENCE_RULE} ${RECAP_RULE}`
+    `Answer the user's question in plain English using the data provided. Be concise and specific -- include actual numbers from the data. All monetary values in the data are already in ${baseCurrency} currency units, never raw cents — present them directly without any other currency symbols or conversions. A monetary value's sign is already set for display: present each figure with the sign it arrives with, and describe direction (spending, income, a transfer) from the question and the column name rather than adding or removing a minus sign yourself. ${CONFIDENCE_RULE} ${RECAP_RULE}`
 
   if (!knowledgeBlock) return `${persona} ${operativeRules}`
 
