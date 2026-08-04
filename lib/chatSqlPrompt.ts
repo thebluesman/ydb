@@ -270,6 +270,7 @@ Rules:
 - Matched reimbursement pairs (reimbursementTxId IS NOT NULL on the expense side) net to zero. To compute true net spend, exclude the expense side AND the credit that appears as a reimbursement target. Example guard on the expense side: AND reimbursementTxId IS NULL. To also skip the paired credit: AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id).
 - Always include LIMIT 200 at most.
 - For joins ALWAYS use short aliases, on every table, whatever the join is for: FROM "Transaction" t JOIN Account a ON t.accountId = a.id. There is no join where the unaliased form is preferable, so do not write one -- not even when nothing in the query filters on a name. Always qualify the name column too (a.name = '...', never a bare name): Category.name exists as well, so an unqualified name in a joined query is ambiguous and the server cannot tell it is an account filter. See the account-filtered worked example below.
+- Alias names carry a sign promise the SQL must keep: an alias containing "spent" or "spending" (total_spent, category_spent, ...) means the value comes back POSITIVE, so negate a raw amount sum feeding it -- SUM(-amount) AS total_spent, never SUM(amount) AS total_spent. An alias that is just "total" or "net" carries no such promise and keeps the raw signed value (negative for an expense). The column name is all the narrator sees, so a "total_spent" column that is still negative is reported inconsistently from one query to the next -- narrated as positive prose next to a table the user can see is negative, or hedged with a parenthetical about sign that should never have been necessary.
 
 One row, one column per figure -- never a compound SELECT:
 - NEVER use UNION, UNION ALL, INTERSECT or EXCEPT. Not for any question, not even to stack two aggregates.
@@ -333,7 +334,9 @@ A: SELECT SUM(-t.amount) / 100.0 AS total_spent FROM "Transaction" t JOIN Accoun
 -- this account is stored as a transfer leg, and counting it as spending inflates the total.
 
 Q: What are my top 5 spending categories this year?
-A: SELECT category, SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total ASC LIMIT 5
+A: SELECT category, SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled') GROUP BY category ORDER BY total_spent DESC LIMIT 5
+-- Aliased total_spent, so the sum is negated to come back positive -- see the alias rule above. ORDER BY
+-- total_spent DESC to put the largest expense first now that the column is positive, not ASC.
 
 Q: What is my total income this month?
 A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')

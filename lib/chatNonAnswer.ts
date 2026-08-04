@@ -113,13 +113,30 @@ export function isNoDataResult(rows: unknown[]): boolean {
  * "I couldn't answer that" — ADR-0014's standard. The concrete "your
  * categories are: …" follow-up belongs to ADR-0008's vocabulary grounding and
  * is deliberately not built here.
+ *
+ * `sql` is the query that actually produced the empty result. By the time
+ * `isNoDataResult` fires, that query has already cleared the category and
+ * account vocabulary checks (`app/api/chat/route.ts`, both the first attempt
+ * and any repair round-trip) — a literal outside the ledger's real values
+ * short-circuits to `out-of-scope` before this ever runs. So a spelling
+ * mismatch on a category or account name is not a live possibility here, and
+ * naming it as a "usual cause" alongside the real remaining ones (a date
+ * range with nothing in it, a status filter excluding the rows) reopens a
+ * question the pipeline already answered. `sql` is optional only so existing
+ * callers that predate this note (tests exercising the message in isolation)
+ * don't have to invent one; the route always has it.
  */
-export function noDataMessage(question: string): string {
+export function noDataMessage(question: string, sql?: string): string {
+  const groundingNote = sql
+    ? `Any category or account name that query filtered on was already checked against what's actually ` +
+      `stored, so a spelling mismatch there is ruled out — `
+    : `The usual cause is a filter that doesn't match what's stored — a category or account name spelled ` +
+      `differently, `
   return (
     `I ran a query for "${question.trim().slice(0, 200)}" and it matched no transactions, ` +
     `so I don't have an answer — this is not the same as a total of zero. ` +
-    `The usual cause is a filter that doesn't match what's stored: a category or account name ` +
-    `spelled differently, a date range with nothing in it, or a status filter excluding the rows. ` +
+    groundingNote +
+    `the likely remaining cause is a date range with nothing in it, or a status filter excluding the rows. ` +
     `The query I tried is below.`
   )
 }
