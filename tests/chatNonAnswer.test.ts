@@ -114,4 +114,19 @@ describe('noDataMessage', () => {
   it('bounds an oversized question so the refusal stays readable', () => {
     expect(noDataMessage('x'.repeat(1000))).toContain('x'.repeat(200) + '"')
   })
+
+  it('without a query, still names spelling as a possible cause', () => {
+    const msg = noDataMessage('How much did I spend on groceries last month?')
+    expect(msg.toLowerCase()).toContain('spelled differently')
+  })
+
+  it('given the query that ran, does not blame category/account spelling — grounding already ruled it out', () => {
+    const msg = noDataMessage(
+      'How much did I spend on Groceries this month?',
+      `SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE category = '🛒 Groceries'`,
+    )
+    expect(msg.toLowerCase()).not.toContain('spelled differently')
+    expect(msg).toContain('already checked against what')
+    expect(msg.toLowerCase()).toContain('date range')
+  })
 })

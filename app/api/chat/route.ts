@@ -714,7 +714,7 @@ export async function POST(request: Request) {
   // genuinely matches nothing; ADR-0008's vocabulary check above catches the
   // narrower case of a category literal that could never have matched.
   if (isNoDataResult(rows)) {
-    return nonAnswerResponse(nonAnswerFrame('no-data', noDataMessage(question), sql))
+    return nonAnswerResponse(nonAnswerFrame('no-data', noDataMessage(question, sql), sql))
   }
 
   // Build conversation context for narration
