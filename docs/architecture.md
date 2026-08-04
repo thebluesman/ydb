@@ -219,6 +219,18 @@ rather than separate SQL and narration prompts; **C** — code-computed tools (`
 `computeBalance`), which is what finally closes the balance gap ADR-0010 declines. Only Phase A is
 unblocked; B and C are dormant in the ADR-0002 sense.
 
+Phase A is designed as of 2026-08-04 and not yet built. **ADR-0025** fixes its verdict at three labels
+the model may emit — `ok`, `mismatch`, `out-of-scope` — plus an `unusable` the route assigns when the
+verifier call fails; deliberately its own type rather than ADR-0014's `NonAnswerReason`, because a
+model's opinion about a result and a route's deterministic refusal are different claims and the data
+has to tell them apart. It runs on `sqlModel` at `SQL_NUM_CTX` (no new Settings key, no runner reload)
+with its own 20s timeout, and it is **the one guard in this pipeline that fails open**: an unavailable
+second opinion is not evidence against an answer already in hand. **ADR-0026** puts the verdict record
+in its own `ChatVerdict` table written by the route, not on `ChatMessage` — `/api/chat` receives no
+session id and message rows are written by the client after the stream, so a verdict routed that way is
+lost on exactly the turns worth studying. That table is what ADR-0013's Phase B gate gets read from,
+and `[chat-model]` Tier 2 sits behind it.
+
 Across all phases, declining is a normal outcome: a `no-answer` stream type with an explicit reason
 (`out-of-scope`, `no-data`, `unsupported-shape`, `budget-exhausted`), distinct from an HTTP error
 (ADR-0014). Exhaustion is counted by the route, not self-reported by the model.
@@ -284,8 +296,21 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
 - **Nothing verifies that a returned figure means what narration says it means.** ADR-0015 refuses
   questions that ask for a stock, and ADR-0010's alias check refuses SQL that claims to return one, but
   a balance computed under a neutral alias in answer to a question that named no stock noun still
-  reaches narration unchallenged. Closing it needs the `computeBalance` path above or an eval harness;
-  neither exists.
+  reaches narration unchallenged. **Updated 2026-08-04:** both things this entry said did not exist now
+  do or are designed — the eval harness shipped, and ADR-0025's verifier is aimed squarely at this
+  class ("does each column's label describe what its expression computes"). It is a mitigation, not a
+  closure: the verifier is the same local model and fails open, so an unchallenged figure is now less
+  likely rather than impossible. The real closure is still the `computeBalance` path above.
+- **Nobody knows how accurate the Phase A verifier is, and Phase B's gate depends on it.** ADR-0025
+  ships an instrument whose error rate is unmeasured. `scripts/chatEval` can measure it directly — run
+  the fixture questions once with ground-truth SQL and once with deliberately broken SQL, read
+  precision and recall — and that run should happen before any Phase B decision is argued from
+  `ChatVerdict` data. Not yet run.
+- **Whether guard refusals should also land in `ChatVerdict`.** ADR-0026 records only turns that
+  reached the verifier, so the full outcome distribution is split between that table and
+  `ChatMessage.nonAnswerReason` and can only be joined by hand on timestamps. Deliberately left open:
+  several guards refuse before any SQL exists, so giving one table the whole distribution is a larger
+  change than it looks.
 - **How much of `accountNameScope`'s fail-open surface is real?** ADR-0018 closed the account-name
   grounding gap this entry used to describe, but its `Account`-qualifier resolution is a regex over
   `FROM`/`JOIN` and deliberately fails open: a CTE or an unusual join shape is silently not checked.
