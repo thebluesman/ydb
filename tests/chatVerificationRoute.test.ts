@@ -213,6 +213,23 @@ describe('POST /api/chat — Phase A verification gating (ADR-0025)', () => {
     expect(verdictCreateCalls).toHaveLength(0)
   })
 
+  it('a sign-promise violation refuses before the verifier ever runs, and writes no ChatVerdict row', async () => {
+    // ADR-0025 addendum (2026-08-04): signPromiseViolation is a route-level
+    // guard, checked before verifyResult — same pre-verification family as
+    // the "earlier guard refuses" test above, not something the model is
+    // ever consulted on.
+    sqlReplies = [SQL]
+    queryResults = [() => ({ rows: [{ total_spent: -235 }], truncated: false })]
+
+    const out = await frames(await ask('How much did I spend on groceries?'))
+
+    expect(out).toHaveLength(1)
+    expect(out[0].type).toBe('no-answer')
+    expect(out[0].reason).toBe('unsupported-shape')
+    expect(String(out[0].message)).toContain('total_spent')
+    expect(verdictCreateCalls).toHaveLength(0)
+  })
+
   it('a failure recording the verdict does not fail the turn', async () => {
     sqlReplies = [SQL]
     queryResults = [() => ({ rows: [{ total_spent: 100 }], truncated: false })]
