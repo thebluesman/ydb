@@ -108,6 +108,27 @@ model ChatMessage {
   createdAt DateTime    @default(now())
 }
 
+// ADR-0025/0026: Phase A's verification-pass verdicts. Deliberately not
+// linked to ChatMessage/ChatSession and carries no session id — /api/chat
+// receives none, and ChatMessage rows are written by the client after the
+// stream completes, so a verdict routed that way would be lost on exactly
+// the turns most worth studying (dropped connections, abandoned turns).
+// Written server-side by app/api/chat/route.ts, one row per turn that
+// reaches the verifier; a turn refused by an earlier guard never produced a
+// verdict and gets no row here.
+model ChatVerdict {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  question  String // the user's question for the turn, capped
+  sql       String // the query that actually ran, post-repair
+  rowCount  Int // rows the verifier saw, after NARRATION_ROW_CAP
+  truncated Boolean // whether the row set was cut before it got there
+  verdict   String // 'ok' | 'mismatch' | 'out-of-scope' | 'unusable' (ADR-0025)
+  reason    String? // the model's one line, capped; NULL when 'unusable'
+  model     String // the resolved sqlModel, so a model change is legible in the data
+  latencyMs Int // what the extra round-trip actually cost
+}
+
 model Category {
   id    Int    @id @default(autoincrement())
   name  String @unique

@@ -61,6 +61,7 @@ const FORBIDDEN_IDENTIFIERS = [
   'setting',
   'chatmessage',
   'chatsession',
+  'chatverdict',
   'vendorrule',
   'budget',
   'sqlite_master',

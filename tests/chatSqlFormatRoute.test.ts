@@ -98,7 +98,8 @@ describe('SQL generation requests the JSON-schema format', () => {
     sqlReplies = [JSON.stringify({ sql: PLAIN_SQL })]
     await ask('How many transactions do I have?')
 
-    expect(sqlGenPayloads).toHaveLength(1)
+    // SQL generation, then Phase A verification (ADR-0025) — both non-streaming.
+    expect(sqlGenPayloads).toHaveLength(2)
     expect(sqlGenPayloads[0].format).toEqual({
       type: 'object',
       properties: { sql: { type: 'string' } },
@@ -176,7 +177,8 @@ describe('the repair round-trip also uses the JSON format', () => {
 
     const res = await ask('How many transactions do I have?')
 
-    expect(sqlGenPayloads).toHaveLength(2)
+    // Initial SQL generation, the repair call, then Phase A verification.
+    expect(sqlGenPayloads).toHaveLength(3)
     expect(sqlGenPayloads[1].format).toEqual({
       type: 'object',
       properties: { sql: { type: 'string' } },

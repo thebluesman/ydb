@@ -94,25 +94,28 @@ const sqlCalls = () => payloads.filter((p) => !p.stream)
 const narrationCalls = () => payloads.filter((p) => p.stream)
 
 describe('POST /api/chat — sqlModel / narrationModel split', () => {
-  it('sends SQL generation to sqlModel and narration to narrationModel', async () => {
+  it('sends SQL generation and Phase A verification to sqlModel, narration to narrationModel', async () => {
     await ask()
 
-    expect(payloads).toHaveLength(2)
+    // SQL generation, Phase A verification (ADR-0025 — runs on sqlModel), narration.
+    expect(payloads).toHaveLength(3)
 
-    const [sqlCall, narrationCall] = payloads
+    const [sqlCall, verifyCall, narrationCall] = payloads
     expect(sqlCall.stream).toBe(false)
     expect(sqlCall.model).toBe('coder-model:7b')
+    expect(verifyCall.stream).toBe(false)
+    expect(verifyCall.model).toBe('coder-model:7b')
     expect(narrationCall.stream).toBe(true)
     expect(narrationCall.model).toBe('prose-model:3b')
   })
 
   // Ollama's default 5-minute idle unload is per-runner, so with two different
-  // models a turn can find its second model cold. keep_alive on BOTH calls is
-  // the mitigation; a missing one on either is the stall coming back.
-  it('pins both models resident with keep_alive', async () => {
+  // models a turn can find its second model cold. keep_alive on every call is
+  // the mitigation; a missing one on any is the stall coming back.
+  it('pins all three calls resident with keep_alive', async () => {
     await ask()
 
-    expect(payloads).toHaveLength(2)
+    expect(payloads).toHaveLength(3)
     for (const payload of payloads) expect(payload.keep_alive).toBeTruthy()
     expect(new Set(payloads.map((p) => p.keep_alive)).size).toBe(1)
   })
@@ -130,7 +133,10 @@ describe('POST /api/chat — sqlModel / narrationModel split', () => {
 
   // The repair round-trip is a second SQL call, and it must not drift onto the
   // narration model — it is generating SQL, whatever else is true about it.
-  it('keeps the repair round-trip on sqlModel', async () => {
+  // Phase A verification is also a non-streaming call and also belongs on
+  // sqlModel (ADR-0025), so it is a third member of this same group, not a
+  // separate case.
+  it('keeps the repair round-trip, and verification, on sqlModel', async () => {
     queryResults = [
       () => { throw new Error('no such column: bogus') },
       () => ({ rows: [{ total: 42.5 }], truncated: false }),
@@ -139,7 +145,7 @@ describe('POST /api/chat — sqlModel / narrationModel split', () => {
 
     await ask()
 
-    expect(sqlCalls()).toHaveLength(2)
+    expect(sqlCalls()).toHaveLength(3)
     for (const call of sqlCalls()) expect(call.model).toBe('coder-model:7b')
     expect(narrationCalls()).toHaveLength(1)
     expect(narrationCalls()[0].model).toBe('prose-model:3b')
