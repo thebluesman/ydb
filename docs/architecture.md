@@ -186,6 +186,22 @@ the units ticket, before any code was written:
   expression computes the wrong number (misplaced or redundant unit conversion inside a derived ratio,
   live-reproduced during the `[chat-bug]` derived-values re-scoping, 2026-08-03). That is a correctness
   question the units classifier cannot and does not try to answer; only the eval harness below can.
+- **A spend total narrated positive next to a table showing it negative** (ADR-0027, designed 2026-08-04,
+  **not yet implemented**) — the same move as ADR-0020, one money property across. Nothing decided display
+  sign: `lib/chatSqlPrompt.ts`'s alias convention ("spent"/"spending" promises a negated sum, `total`/`net`
+  keeps the raw signed value) was standing in for a display rule, so what the user saw depended on which
+  alias the model wrote that turn, and narration's positive phrasing was emergent — the narration prompt
+  says nothing about sign at all. The route now decides which money keys show magnitude, from the direction
+  restriction the query already made (unary negation in the projection item, or a top-level `WHERE`
+  predicate pinning the column's direction), and applies it **once, after verification**, to the single row
+  binding narration and the `result` frame both consume. Units convert early because a unit is a property of
+  the stored column; sign normalizes late because every guard upstream — ADR-0016's detectors,
+  `signPromiseViolation`, the Phase A verifier — judges what the SQL computed and must not be handed a sign
+  the server invented. Fails open to signed, never refuses. A bare `SUM(amount) AS net` and a mixed
+  transaction list stay signed by default, so the deferred "the sign is the answer" case needs no exception.
+  Same ticket: the `result` frame's `money`-column set was taken from `moneyUnitsPlan().convertKeys`, which
+  excludes every already-`/100` projection — that is all nine worked examples — so converted aggregates were
+  rendering as plain numbers with no currency; it moves to a `moneyKeys` set covering both.
 
 The balance-alias (ADR-0010) and compound-SELECT (ADR-0011) fixes share a root cause worth stating
 plainly: narration receives `JSON.stringify(rows)` and nothing else, so the column alias — written by
@@ -321,6 +337,20 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   Phase B gate is Shyam's call and is explicitly not decided here; see ADR-0025's addendum for the full
   breakdown and the two prompt-wording attempts that made precision worse before the deterministic fix
   made it better.
+- **Whether the alias sign-promise convention should survive ADR-0027.** Once display sign is decided by
+  the route, `lib/chatSqlPrompt.ts`'s "an alias containing spent/spending promises a positive value" rule
+  no longer decides anything the user sees. It stays for now because `signPromiseViolation` (ADR-0025
+  addendum) reads it and measures 1.00 precision / 1.00 recall, but its remaining value is as a *proxy* for
+  a mis-scoped aggregate — a query that named a negation it never performed may have summed the wrong set —
+  and how often that proxy is right is unmeasured. Deleting the convention would take the guard with it, so
+  the two are one decision, and it needs eval-harness data rather than an argument. One live tension in the
+  meantime: a `SUM(amount) AS total_spent` under `amount < 0` is a turn ADR-0027 could now display correctly
+  but `signPromiseViolation` refuses first.
+- **How often the model writes a direction restriction ADR-0027's classifier cannot see.** The known one is
+  a sign pinned inside a `CASE` value branch (`SUM(CASE WHEN amount < 0 THEN amount ELSE 0 END)`) rather
+  than in `WHERE`, which lands on today's signed display rather than a wrong one. Unmeasured, same
+  eval-harness question as ADR-0018's and ADR-0020's resolution surfaces, and the same answer if it turns
+  out to be common: widen the classifier, not the fail-open.
 - **Whether guard refusals should also land in `ChatVerdict`.** ADR-0026 records only turns that
   reached the verifier, so the full outcome distribution is split between that table and
   `ChatMessage.nonAnswerReason` and can only be joined by hand on timestamps. Deliberately left open:
