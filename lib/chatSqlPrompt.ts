@@ -114,6 +114,59 @@ export function quarterLabel(q: Quarter): string {
   return `Q${q.quarter} ${q.year}`
 }
 
+// ── Week arithmetic ──────────────────────────────────────────────────────────
+//
+// Why the server computes these rather than leaving "this week" to SQLite, on
+// the same terms as the quarter block above.
+//
+// Observed 2026-08-09: "What transactions were on my salary account this week?"
+// generated `date >= date('now','-7 days')` -- a TRAILING window, not the
+// calendar week the question meant -- and the Phase A verifier flagged it as a
+// mismatch. Nothing in this prompt defined what a week is, so the model picked
+// the reading that is easiest to write.
+//
+// Neither SQLite idiom is safe enough to teach:
+//
+//   * `date('now','weekday 0','-7 days')` is the commonly-cited "start of this
+//     week", and it is wrong on exactly one day. The `weekday N` modifier is a
+//     NO-OP when the date is already that weekday, so on the start day itself
+//     the `-7 days` is not cancelled and the window silently slides a whole week
+//     into the past. One day in seven, the answer is confidently about the wrong
+//     week, with nothing in the result to show for it.
+//   * `strftime('%W', ...)` looks like the month rule's direct analogue, but
+//     week 00 is the days before the year's first Monday, so a year boundary
+//     splits a week across two labels and "last week" by subtracting 1 from the
+//     week number breaks outright every January.
+//
+// That is the same shape of failure `mostRecentMonthYm` and `quarterRange` exist
+// to stop: well-formed SQL over the wrong dates. So the server hands the model
+// literals -- pure, UTC, derived from `now`, never from the model's arithmetic.
+
+/**
+ * The half-open date range of a calendar week, as `YYYY-MM-DD` literals.
+ *
+ * `weeksAgo` counts back from the week `now` falls in: 0 is this week, 1 is last
+ * week. Half-open for `quarterRange`'s reason exactly -- `Transaction.date` is a
+ * datetime string, so a closed range against a calendar date drops the final
+ * day's rows.
+ *
+ * Weeks start MONDAY (ISO-8601). It is the convention the surrounding calendar
+ * tooling uses and it matches the local working week; what matters more than
+ * which day is chosen is that one day is chosen here, once, instead of being
+ * rediscovered per query by a model that has no reason to be consistent about
+ * it. UTC throughout, matching `date('now')` and the rest of this file.
+ */
+export function weekRange(now: Date, weeksAgo = 0): { start: string; endExclusive: string } {
+  const DAY_MS = 86_400_000
+  // getUTCDay is 0=Sunday..6=Saturday; shift so Monday is 0.
+  const sinceMonday = (now.getUTCDay() + 6) % 7
+  const startMs =
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) -
+    (sinceMonday + weeksAgo * 7) * DAY_MS
+  const iso = (ms: number) => new Date(ms).toISOString().slice(0, 10)
+  return { start: iso(startMs), endExclusive: iso(startMs + 7 * DAY_MS) }
+}
+
 /**
  * A category literal for a worked example, drawn from the real vocabulary.
  *
@@ -202,6 +255,10 @@ export function buildSqlSystemPrompt(
   const lastYearQuarter = shiftQuarters(thisQuarter, -4)
   const thisQ = quarterRange(thisQuarter)
   const lastYearQ = quarterRange(lastYearQuarter)
+  // Week boundaries, for the reason given above weekRange: both SQLite idioms
+  // for "start of this week" have a silent off-by-a-week failure mode.
+  const thisWeek = weekRange(now, 0)
+  const lastWeek = weekRange(now, 1)
 
   const vocabularyBlock = buildCategoryVocabularyBlock(categories)
   // Empty vocabulary (a ledger with nothing categorised) renders no block and
@@ -299,6 +356,8 @@ Date rules:
 - Never emit a year you were not given or did not derive from today's date (${today}). If a question needs a year that cannot be derived that way, prefer a relative date('now', ...) expression over guessing one.
 - A bare year ("in 2024") or an explicit month and year ("June 2024") is already unambiguous -- use it as written.
 - Quarters: SQLite has NO "start of quarter" modifier, so do not try to build one out of date('now', ...) and do not derive quarter boundaries by arithmetic on strftime('%m', date). The server supplies them. Today is ${today}, so the current quarter is ${quarterLabel(thisQuarter)}: date >= '${thisQ.start}' AND date < '${thisQ.endExclusive}'. The same quarter one year earlier is ${quarterLabel(lastYearQuarter)}: date >= '${lastYearQ.start}' AND date < '${lastYearQ.endExclusive}'. "Last quarter" is the three months before '${thisQ.start}'.
+- Weeks: "this week" and "last week" mean the CALENDAR week, Monday to Sunday -- not the last 7 days. The server supplies the boundaries, the same as for quarters, so do NOT build them yourself: date('now','-7 days') is a trailing window that answers a different question, date('now','weekday 0','-7 days') silently slides a whole week into the past on the one day of the week it lands on, and strftime('%W', date) breaks across the new year. Today is ${today}, so "this week" is date >= '${thisWeek.start}' AND date < '${thisWeek.endExclusive}', and "last week" is date >= '${lastWeek.start}' AND date < '${lastWeek.endExclusive}'.
+- "The last 7 days" is NOT "this week" and keeps its trailing form (date >= date('now','-7 days')); the same goes for "the last 14 days" and similar. Read which one was asked for: a rolling window and a calendar week overlap but are not the same set of rows, and either one reported as the other is a wrong answer that looks right.
 - Write EVERY date range against the date column as half-open -- date >= '<start>' AND date < '<day after the end>'. Transaction.date is a datetime string, so a closed range against a calendar date (date <= '${lastYearQ.endExclusive}') silently drops every row on that final day, because '${lastYearQ.endExclusive} 00:00:00.000' sorts after '${lastYearQ.endExclusive}'. An undercount, with nothing in the result to show for it.
 - Same period one year earlier: for a MONTH, compare against strftime('%Y-%m', date('now','-12 months')) -- resolved by SQLite at execution time, so it stays correct. For a QUARTER, use the literal range given above. Do not shift a year by editing the year digits of a literal you were not given.
 - If a question is anchored to something the ledger does not record -- "the week before my paycheck hits", "since I started my new job" -- do NOT invent the anchor date and do not infer it from the data. There is no stored payday, and a guessed one produces a precisely-bounded window over the wrong dates. Answer the nearest calendar-anchored question you can state exactly, or return no usable window rather than a fabricated one.
@@ -341,8 +400,19 @@ A: SELECT category, SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE
 -- Aliased total_spent, so the sum is negated to come back positive -- see the alias rule above. ORDER BY
 -- total_spent DESC to put the largest expense first now that the column is positive, not ASC.
 
+Q: How much have I spent this week?
+A: SELECT SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND date >= '${thisWeek.start}' AND date < '${thisWeek.endExclusive}' AND status IN ('committed','reconciled')
+-- "This week" is the CALENDAR week, and its boundaries are the literals supplied in the date rules
+-- above -- not date('now','-7 days'), which is a trailing window over a different set of rows, and not
+-- a weekday modifier you assembled yourself. Half-open, like every other range: >= Monday, < the
+-- FOLLOWING Monday. "Last week" is the other supplied pair, used exactly the same way.
+
 Q: What is my total income this month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')
+-- Carries reimbursementTxId IS NULL like every other flow aggregate here, including the paired
+-- income-and-expenses examples below. It is one of the mandatory hygiene filters: a question never
+-- has to ask for it, and an example that omits it reads as permission to omit it everywhere, which
+-- is how this prompt drifted before (see the guard matrix test).
 
 Q: How much did I earn and how much did I spend last month?
 A: SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses, SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id) AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')

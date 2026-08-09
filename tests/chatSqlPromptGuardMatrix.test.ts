@@ -234,6 +234,23 @@ describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', 
         }
       })
 
+      it('resolves a calendar week to the supplied literals, never a trailing window', () => {
+        // Added 2026-08-09 with the week-boundary rule. The guards above already
+        // run over the week example in every rendering; this is the column they
+        // cannot express — the example is only right if it uses the boundaries
+        // the server computed. NOW is 2026-07-31, a Friday, so the week began
+        // Mon 2026-07-27 and ends half-open on Mon 2026-08-03.
+        //
+        // Asserted per rendering rather than once, for the same reason the
+        // guards are: the examples are interpolated at request time, so the
+        // three vocabulary branches are three different strings.
+        const weekExamples = examples.filter((ex) => /this week/i.test(ex.question))
+        expect(weekExamples, 'no week worked example found').toHaveLength(1)
+        expect(weekExamples[0].sql).toContain(`date >= '2026-07-27' AND date < '2026-08-03'`)
+        // The bug the rule exists to stop, on the example itself.
+        expect(/-7 days/.test(weekExamples[0].sql), 'trailing window taught as a calendar week').toBe(false)
+      })
+
       it('never demonstrates a compound SELECT', () => {
         // ADR-0011 cross-check: the route rejects these outright, so an example
         // teaching one would train the model straight into a refusal.
