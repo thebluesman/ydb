@@ -337,6 +337,57 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   Phase B gate is Shyam's call and is explicitly not decided here; see ADR-0025's addendum for the full
   breakdown and the two prompt-wording attempts that made precision worse before the deterministic fix
   made it better.
+- **ADR-0013's Phase B gate is NOT cleared by the first production verdict sample, and the reason is
+  the reason field, not the rate.** First read of real `ChatVerdict` data, 2026-08-09: n=18 (4 from a
+  narrow 2026-08-04 session, 14 from one varied 2026-08-09 session), 10 `ok` / 8 `mismatch` /
+  **0 `out-of-scope`** / 0 `unusable`. Route guards (ADR-0008 grounding refusals, ADR-0015 balance
+  declines, `isNoDataResult`) fire before the verifier, so this table only ever holds turns where SQL
+  ran and returned rows — the 44% mismatch rate is not "44% of questions fail," it is a narrower and
+  worse-behaved population. Reading all eight mismatches against their SQL by hand:
+  - **Three are false positives on correct SQL** — all three condemning the mandatory hygiene filters
+    the SQL prompt requires (ADR-0028 fixes this), and two of the three reject SQL that is *verbatim
+    the shape `lib/chatSqlPrompt.ts`'s own worked examples teach* (the this-month/last-month CASE
+    comparison, the quarter-over-quarter comparison).
+  - **Five flag a turn that genuinely deserved refusal, and not one of the five `reason` strings names
+    the actual defect.** `total income last month` really is missing the reimbursement-settlement
+    exclusion — the PR #46 finding above, reproduced in production — but the stated reason is that
+    excluding transfers "is not explicitly mentioned in the question." `average per grocery
+    transaction` really does silently bound an unbounded question to last month; the stated reason is
+    about the category name. Two more are questions the ledger cannot answer at all (ADR-0029).
+  - So: precision on *should this turn have been refused* is 5/8 ≈ 0.63, consistent with the fixture
+    number. Precision on *does the reason identify the defect* is **0/8**.
+
+  ADR-0013 gates Phase B on verdict data "showing which failure classes actually dominate." A rate
+  without usable class labels does not answer that, so the gate is unmet on its own terms. Two further
+  findings point the same way. First, the `Filter:`/`Label:`/`Shape:` grounding rule (ADR-0025) has
+  degraded into a formatting requirement: `MISMATCH_TAG_RE` is a prefix regex, the model emits the tag
+  reliably, and the tag is uncorrelated with whether the prose after it is true. Second, and decisive
+  for Phase B specifically — **Phase B's headline win is already shipped and already failed here.**
+  ADR-0012/0013 justify the loop as "the model gets to *look* before it commits — `SELECT DISTINCT
+  category` before filtering on a guessed literal." ADR-0008 already injects that vocabulary into every
+  SQL prompt, and the *"am I on track to hit my savings goal"* turn still chose `category = 'YNAB'` —
+  a real stored value, on exactly one transaction — and returned a plausible savings figure from it.
+  Looking was free and available and did not help, because the failure was relevance, not membership.
+  None of the five real defects in this sample is a defect a `run_sql` loop would fix: two are SQL-prompt
+  defects, two are scope gaps (ADR-0029), one is that grounding hole.
+
+  **What would clear the gate:** (1) ADR-0028 landed and `scripts/evalChatVerifier.ts` re-run, showing
+  model-alone precision materially above 0.56 — a verdict table written by a verifier this noisy cannot
+  be a taxonomy no matter how many rows it has; (2) ADR-0029 landed, so unanswerable questions stop
+  entering the sample as `mismatch`; (3) a fresh sample of ~50+ turns on the corrected pipeline, spread
+  over ordinary daily use rather than one sit-down session of deliberately varied probes — 14 distinct
+  questions from one person in one evening is a demo script, not production signal; (4) the resulting
+  reasons readable as failure classes. Until then Phase B stays dormant in the ADR-0002 sense. The
+  cheaper, better-evidenced work is the two ADRs above plus the `total income` reimbursement fix, all
+  of which are prompt-and-route changes to the pipeline that exists.
+- **ADR-0008's grounding is a membership test, not a relevance test.** Surfaced by the `category =
+  'YNAB'` turn above: the check confirms a literal exists in `Transaction.category`, so a category
+  carried by one transaction is exactly as eligible as one carried by four hundred, and a semantically
+  absurd choice passes silently and returns a real number. ADR-0029 stops the one question class that
+  made this visible, and deliberately does not fix it. Whether the injected vocabulary should carry
+  frequency or recency alongside the literal — enough for the model to see that a value is vestigial —
+  is open and unmeasured. Note the interaction: doing so puts ledger statistics into the SQL prompt,
+  which ADR-0007's injection boundary has so far kept out.
 - **Whether the alias sign-promise convention should survive ADR-0027.** Once display sign is decided by
   the route, `lib/chatSqlPrompt.ts`'s "an alias containing spent/spending promises a positive value" rule
   no longer decides anything the user sees. It stays for now because `signPromiseViolation` (ADR-0025
