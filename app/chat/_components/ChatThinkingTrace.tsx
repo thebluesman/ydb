@@ -19,10 +19,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 export type ThinkingStage = 'thinking' | 'querying' | 'preparing' | 'done'
 
+// Only 2 steps shown, not 3: the route runs the query and builds `resultFrame`
+// *before* opening the SSE stream, then emits `sql` and `result` back-to-back
+// with no real gap (app/api/chat/route.ts) — so `querying`→`preparing` never
+// represents an independently-waited-out duration on the client's clock, only
+// `thinking`→`querying` (the SQL-generation call) does. A 3-step list made
+// that look like a bug (steps "skipping" instead of animating in sequence).
 const STEPS: { key: Exclude<ThinkingStage, 'thinking'>; label: string }[] = [
   { key: 'querying', label: 'Understanding the question' },
-  { key: 'preparing', label: 'Querying your transactions' },
-  { key: 'done', label: 'Preparing the answer' },
+  { key: 'done', label: 'Querying your transactions' },
 ]
 
 const STAGE_ORDER: ThinkingStage[] = ['thinking', 'querying', 'preparing', 'done']
@@ -152,21 +157,24 @@ export function ChatThinkingTrace({ stage, elapsedMs }: { stage: ThinkingStage; 
               style={{ top: -8, height: lineHeight ? lineHeight - 2 : 0, transition: 'height 500ms var(--ease-out)' }}
             />
             <div ref={traceRef} className="flex flex-col gap-1 py-1">
-              {STEPS.map((step, i) => {
-                const stepIndex = STAGE_ORDER.indexOf(step.key)
-                const done = currentIndex >= stepIndex
-                const active = !done && currentIndex === stepIndex - 1
-                return (
-                  <div
-                    key={step.key}
-                    className="flex min-h-7 w-full items-center gap-2 rounded-[6px] px-1.5 py-0.5 text-left"
-                    style={{ animation: `ydb-fade-up 320ms var(--ease-out) ${i * 120}ms both` }}
-                  >
-                    {done ? <CheckIcon /> : active ? <SpinnerIcon /> : <PendingDot />}
-                    <span className="min-w-0 truncate text-[12.5px] font-medium text-ink">{step.label}</span>
-                  </div>
-                )
-              })}
+              {(() => {
+                const doneFlags = STEPS.map((step) => currentIndex >= STAGE_ORDER.indexOf(step.key))
+                const firstActiveIndex = doneFlags.indexOf(false)
+                return STEPS.map((step, i) => {
+                  const done = doneFlags[i]
+                  const active = i === firstActiveIndex
+                  return (
+                    <div
+                      key={step.key}
+                      className="flex min-h-7 w-full items-center gap-2 rounded-[6px] px-1.5 py-0.5 text-left"
+                      style={{ animation: `ydb-fade-up 320ms var(--ease-out) ${i * 120}ms both` }}
+                    >
+                      {done ? <CheckIcon /> : active ? <SpinnerIcon /> : <PendingDot />}
+                      <span className="min-w-0 truncate text-[12.5px] font-medium text-ink">{step.label}</span>
+                    </div>
+                  )
+                })
+              })()}
             </div>
           </div>
         </div>
