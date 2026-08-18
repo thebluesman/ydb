@@ -301,6 +301,16 @@ main > * {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── ChatStreamingText (Beautiful UI StreamingText reference) ───────────── */
+@keyframes ydb-stream-in {
+  from { opacity: 0; filter: blur(4px); transform: translateY(2px); }
+  to   { opacity: 1; filter: blur(0); transform: translateY(0); }
+}
+@keyframes ydb-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 /* ── Loading skeletons ────────────────────────────────────────────────── */
 @keyframes ydb-skeleton-pulse {
   0%, 100% { opacity: 1; }
