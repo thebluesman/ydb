@@ -291,7 +291,7 @@ main > * {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── ChatThinkingTrace (Beautiful UI ThinkingState reference) ──────────── */
+/* ── ChatThinkingTrace (Beautiful UI ThinkingState + LoadingState reference) ── */
 @keyframes ydb-shimmer-text {
   from { background-position: 200% 0; }
   to   { background-position: -200% 0; }
@@ -299,6 +299,10 @@ main > * {
 @keyframes ydb-fade-up {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes ydb-pixel-on {
+  0%, 100% { opacity: 0.15; }
+  50%      { opacity: 1; }
 }
 
 /* ── ChatStreamingText (Beautiful UI StreamingText reference) ───────────── */
