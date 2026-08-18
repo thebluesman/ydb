@@ -29,6 +29,40 @@ import { NO_MATCH_SENTINEL, buildCategoryVocabularyBlock } from '@/lib/chatCateg
 import { buildAccountVocabularyBlock } from '@/lib/chatAccountVocabulary'
 import { descriptionSimilarity } from '@/lib/textSimilarity'
 
+/**
+ * The predicates this prompt MANDATES on essentially every financial query,
+ * none of which a user ever asks for in words (ADR-0028).
+ *
+ * This is the single source of truth for "predicates the question never needs
+ * to ask for". It is read from two places and restated in prose in neither:
+ * this file interpolates each fragment into the rule that mandates it (and
+ * into nothing else — the worked examples below spell out real SQL, which is
+ * what teaches the shape), and `lib/chatVerification.ts` renders the list into
+ * the verifier's FILTER check as the closed set of filters that are ledger
+ * hygiene rather than evidence of a mismatch.
+ *
+ * Before ADR-0028 the two prompts were in direct contradiction: the verifier
+ * was told "a filter the question never mentioned is a mismatch" while the
+ * generator was required to write four such filters every time, which made the
+ * verifier condemn its own mandated output. A predicate added to the
+ * generator's mandate without being added here reintroduces exactly that bug,
+ * so `tests/chatPromptHygieneFilters.test.ts` asserts both builders render
+ * every entry.
+ */
+export const MANDATORY_HYGIENE_FILTERS = {
+  /** ADR-0019: a transfer leg is neither income nor spending. */
+  transferExclusion: `transactionType != 'transfer'`,
+  /** A split parent is a placeholder that sums its own legs. */
+  splitLegExclusion: 'parentTransactionId IS NULL',
+  /** The expense side of a matched reimbursement pair nets to zero. */
+  reimbursementExclusion: 'reimbursementTxId IS NULL',
+  /** Unreviewed rows are not yet part of the ledger's answer. */
+  statusFilter: `status IN ('committed','reconciled')`,
+} as const
+
+/** The four predicates above, in the order the prompts state them. */
+export const MANDATORY_HYGIENE_PREDICATES: readonly string[] = Object.values(MANDATORY_HYGIENE_FILTERS)
+
 /** Zero-padded UTC calendar date, `YYYY-MM-DD`. */
 export function isoDate(now: Date): string {
   return now.toISOString().slice(0, 10)
@@ -238,6 +272,20 @@ function noMatchExampleWord(categories: string[]): string {
   return candidates.find((w) => !lower.some((c) => c.includes(w.toLowerCase()))) ?? candidates[0]
 }
 
+/**
+ * The generator prompt. Every mandate of one of the four
+ * `MANDATORY_HYGIENE_FILTERS` interpolates its fragment from that constant, so
+ * the list the verifier exempts (ADR-0028) and the list taught here cannot
+ * drift apart — `tests/chatPromptHygieneFilters.test.ts` pins that in both
+ * directions.
+ *
+ * The interpolations were chosen to leave the RENDERED string byte-identical:
+ * the prompt's model-facing prose about the hygiene filters, including the
+ * `-- (see the guard matrix test)` note on the income example, is deliberately
+ * untouched. ADR-0031 measures a verifier-prompt change on its own, and a
+ * simultaneous reword here would move the generator's output at the same time
+ * and make that eval unattributable.
+ */
 export function buildSqlSystemPrompt(
   now: Date = new Date(),
   categories: string[] = [],
@@ -319,12 +367,12 @@ Rules:
 - Transaction.amount is an INTEGER number of cents. For user-facing sums, divide by 100.0.
 - Transaction.transactionType: 'credit' | 'debit' | 'transfer'.
 - Amount sign: negative = debit/out, positive = credit/in. Use transactionType for filtering by type.
-- Transfers are NEITHER income NOR spending: a transfer moves money between the user's own accounts and is stored as two rows, one negative leg and one positive leg. A bare sign split therefore counts the outgoing leg as an expense AND the incoming leg as income, inflating both totals by the same amount even though the pair nets to zero. Any income, expense, spending, earnings or net-flow aggregate MUST exclude them: AND transactionType != 'transfer' (equivalently AND transactionType IN ('credit','debit')). The trigger is the AGGREGATE, not the sign branch: this applies whenever the query computes a spending, income, earnings or net-flow figure, whether or not it mentions the sign of amount. In particular a category-filtered spend total -- one that pins the category column and makes no comparison against the sign of amount anywhere -- needs the guard just as much, because a transfer leg can carry a real spend category. When it does, the category sits on the OUTGOING leg only and its counterpart leg stays 'Uncategorized', so the two legs do NOT cancel: SUM(amount) over that category returns the full amount moved, reported as spending, with no arithmetic tell that anything is wrong.
+- Transfers are NEITHER income NOR spending: a transfer moves money between the user's own accounts and is stored as two rows, one negative leg and one positive leg. A bare sign split therefore counts the outgoing leg as an expense AND the incoming leg as income, inflating both totals by the same amount even though the pair nets to zero. Any income, expense, spending, earnings or net-flow aggregate MUST exclude them: AND ${MANDATORY_HYGIENE_FILTERS.transferExclusion} (equivalently AND transactionType IN ('credit','debit')). The trigger is the AGGREGATE, not the sign branch: this applies whenever the query computes a spending, income, earnings or net-flow figure, whether or not it mentions the sign of amount. In particular a category-filtered spend total -- one that pins the category column and makes no comparison against the sign of amount anywhere -- needs the guard just as much, because a transfer leg can carry a real spend category. When it does, the category sits on the OUTGOING leg only and its counterpart leg stays 'Uncategorized', so the two legs do NOT cancel: SUM(amount) over that category returns the full amount moved, reported as spending, with no arithmetic tell that anything is wrong.
 - The mirror case for a category filter: when the question is specifically ABOUT a category the ledger happens to put on transfer rows -- "how much did I pay on my car loan", "what have I put towards the personal loan" -- those transfer rows are the SUBJECT of the question, and excluding them answers a different question. Leave AND transactionType != 'transfer' off for that one. The SQL is otherwise the same shape as the spending question, so this cannot be decided from the query: read it off what is being asked. Those two are illustrations, not the complete set: which categories can appear on a transfer is not fixed -- it is whatever the upstream capture pipeline assigned, and it changes without this prompt changing -- so treat a category name as a hint about intent, never as the thing that settles it. Default to including the guard on a spending question; drop it only when the transfer rows are what is being asked about.
 - The mirror case for transfers themselves: when the question is specifically ABOUT transfers -- "how much did I move between my accounts", "how much did I transfer" -- the answer is the VOLUME moved, and a bare SUM(amount) over transactionType = 'transfer' rows CANNOT compute it. The two legs of a transfer are equal and opposite, so they cancel: that sum always evaluates to (approximately) zero no matter how much money actually moved. Zero there is an artefact of how a transfer is stored, not a fact about the ledger. Sum the INFLOW legs only instead: SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0. Each transfer contributes exactly one positive leg whose size is the amount transferred, so that total is the volume moved, counted once. (SUM(ABS(amount)) / 2 is arithmetically the same thing; prefer the CASE form.)
-- status values: 'review', 'committed', 'reconciled'. For financial queries prefer WHERE status IN ('committed','reconciled') unless the user asks otherwise.
-- Split legs: when parentTransactionId IS NOT NULL the row is a leg; the parent is a placeholder that sums the legs. When aggregating spend, exclude parents (WHERE parentTransactionId IS NULL) OR include the legs instead, NOT both.
-- Matched reimbursement pairs (reimbursementTxId IS NOT NULL on the expense side) net to zero. To compute true net spend, exclude the expense side AND the credit that appears as a reimbursement target. Example guard on the expense side: AND reimbursementTxId IS NULL. To also skip the paired credit: AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id).
+- status values: 'review', 'committed', 'reconciled'. For financial queries prefer WHERE ${MANDATORY_HYGIENE_FILTERS.statusFilter} unless the user asks otherwise.
+- Split legs: when parentTransactionId IS NOT NULL the row is a leg; the parent is a placeholder that sums the legs. When aggregating spend, exclude parents (WHERE ${MANDATORY_HYGIENE_FILTERS.splitLegExclusion}) OR include the legs instead, NOT both.
+- Matched reimbursement pairs (reimbursementTxId IS NOT NULL on the expense side) net to zero. To compute true net spend, exclude the expense side AND the credit that appears as a reimbursement target. Example guard on the expense side: AND ${MANDATORY_HYGIENE_FILTERS.reimbursementExclusion}. To also skip the paired credit: AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id).
 - Always include LIMIT 200 at most.
 - For joins ALWAYS use short aliases, on every table, whatever the join is for: FROM "Transaction" t JOIN Account a ON t.accountId = a.id. There is no join where the unaliased form is preferable, so do not write one -- not even when nothing in the query filters on a name. Always qualify the name column too (a.name = '...', never a bare name): Category.name exists as well, so an unqualified name in a joined query is ambiguous and the server cannot tell it is an account filter. See the account-filtered worked example below.
 - Alias names carry a sign promise the SQL must keep: an alias containing "spent" or "spending" (total_spent, category_spent, ...) means the value comes back POSITIVE, so negate a raw amount sum feeding it -- SUM(-amount) AS total_spent, never SUM(amount) AS total_spent. An alias that is just "total" or "net" carries no such promise and keeps the raw signed value (negative for an expense). The column name is all the narrator sees, so a "total_spent" column that is still negative is reported inconsistently from one query to the next -- narrated as positive prose next to a table the user can see is negative, or hedged with a parenthetical about sign that should never have been necessary.
