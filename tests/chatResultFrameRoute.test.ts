@@ -130,7 +130,7 @@ describe('POST /api/chat — the result frame (ADR-0023)', () => {
     ])
   })
 
-  it('classifies a grouped breakdown as a table', async () => {
+  it('classifies a grouped breakdown as a chart (ADR-0030)', async () => {
     sqlReplies = [`SELECT category, SUM(amount) AS total FROM "Transaction" GROUP BY category`]
     queryResults = [() => ({
       rows: [{ category: '🛒 Groceries', total: -40000 }, { category: '✈️ Travel', total: -90000 }],
@@ -139,7 +139,7 @@ describe('POST /api/chat — the result frame (ADR-0023)', () => {
 
     const [, result] = await frames(await ask('What are my top categories?'))
 
-    expect(result.present).toBe('table')
+    expect(result.present).toBe('chart')
     expect(result.columns.map((c: { kind: string }) => c.kind)).toEqual(['text', 'money'])
   })
 

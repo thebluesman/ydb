@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildResultFrame, classifyPresent, resultColumnKeys } from '@/lib/chatResultFrame'
+import { buildResultFrame, CHART_MAX_ROWS, classifyPresent, resultColumnKeys } from '@/lib/chatResultFrame'
 import { moneyUnitsPlan } from '@/lib/chatMoneyUnits'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,7 +58,15 @@ describe('classifyPresent — transactions', () => {
   })
 
   it('falls back to table when amount is missing', () => {
-    const rows = [{ id: 1, date: '2026-07-14' }, { id: 2, date: '2026-07-15' }]
+    // A third column keeps this out of ADR-0030's 2-column chart shape too —
+    // {id, date} alone would now legitimately classify as `chart` (a date
+    // dimension plus a numeric value is exactly that shape), which would test
+    // the chart rule instead of the thing this case exists to check: that
+    // "transactions" itself refuses a Transaction-column row set missing `amount`.
+    const rows = [
+      { id: 1, date: '2026-07-14', status: 'committed' },
+      { id: 2, date: '2026-07-15', status: 'committed' },
+    ]
     expect(classifyPresent(rows)).toBe('table')
   })
 
@@ -67,15 +75,71 @@ describe('classifyPresent — transactions', () => {
   })
 })
 
-describe('classifyPresent — table is the catch-all', () => {
-  it('a grouped breakdown is a table', () => {
+describe('classifyPresent — chart (ADR-0030)', () => {
+  it('a 2-row category breakdown (text + number) is a chart', () => {
     const rows = [
       { category: '🛒 Groceries', total: 400 },
       { category: '✈️ Travel', total: 900 },
     ]
+    expect(classifyPresent(rows)).toBe('chart')
+  })
+
+  it('a date + money trend is a chart', () => {
+    const rows = [
+      { month: '2026-06-01', total_spent: 1200.5 },
+      { month: '2026-07-01', total_spent: 980.25 },
+    ]
+    expect(classifyPresent(rows)).toBe('chart')
+  })
+
+  it('respects the column-kind map so a money-classified key counts as the value column', () => {
+    const rows = [
+      { category: '🛒 Groceries', total_spent: 400 },
+      { category: '✈️ Travel', total_spent: 900 },
+    ]
+    const kinds = new Map<string, 'money' | 'date' | 'number' | 'text'>([
+      ['category', 'text'],
+      ['total_spent', 'money'],
+    ])
+    expect(classifyPresent(rows, undefined, kinds)).toBe('chart')
+  })
+
+  it('exactly CHART_MAX_ROWS rows is still a chart', () => {
+    const rows = Array.from({ length: CHART_MAX_ROWS }, (_, i) => ({ category: `cat${i}`, total: i * 10 }))
+    expect(classifyPresent(rows)).toBe('chart')
+  })
+
+  it('falls back to table beyond CHART_MAX_ROWS — overflow is never truncated to fit', () => {
+    const rows = Array.from({ length: CHART_MAX_ROWS + 1 }, (_, i) => ({ category: `cat${i}`, total: i * 10 }))
     expect(classifyPresent(rows)).toBe('table')
   })
 
+  it('falls back to table with 3 columns — v1 is strictly one dimension, one value', () => {
+    const rows = [
+      { category: '🛒 Groceries', total: 400, txn_count: 5 },
+      { category: '✈️ Travel', total: 900, txn_count: 2 },
+    ]
+    expect(classifyPresent(rows)).toBe('table')
+  })
+
+  it('falls back to table when both columns are values (no dimension)', () => {
+    const rows = [
+      { total_spent: 400, txn_count: 5 },
+      { total_spent: 900, txn_count: 2 },
+    ]
+    expect(classifyPresent(rows)).toBe('table')
+  })
+
+  it('falls back to table when both columns are dimensions (no value)', () => {
+    const rows = [
+      { category: '🛒 Groceries', account: 'ADCB Current' },
+      { category: '✈️ Travel', account: 'ADCB Savings' },
+    ]
+    expect(classifyPresent(rows)).toBe('table')
+  })
+})
+
+describe('classifyPresent — table is the catch-all', () => {
   it('an empty result set is a table (the route never gets here — no-data short-circuits)', () => {
     expect(classifyPresent([])).toBe('table')
   })

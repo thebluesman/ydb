@@ -27,7 +27,7 @@ import type { MoneyUnitsPlan } from './chatMoneyUnits'
 
 export type ResultColumnKind = 'money' | 'date' | 'number' | 'text'
 
-export type ResultPresent = 'card' | 'table' | 'transactions'
+export type ResultPresent = 'card' | 'table' | 'transactions' | 'chart'
 
 export type ResultColumn = {
   key: string
@@ -108,18 +108,39 @@ function inferKind(rows: unknown[], key: string): ResultColumnKind {
 }
 
 /**
+ * ADR-0030's legibility bound for `chart`: below 2 rows a bar/line chart is a
+ * worse card (already `card`'s job); above it the picture stops being
+ * readable. An out-of-range row count falls through to `table` rather than
+ * truncating — truncating rows to make a picture fit would be a derivation
+ * by omission, which ADR-0030's "re-encode, never derive" rule forbids.
+ */
+export const CHART_MAX_ROWS = 10
+
+/**
  * ADR-0023's deterministic rule, over the final rows:
  *
  *   card         — exactly one row and one column.
  *   transactions — more than one row, every key is a `Transaction` column
  *                  name, and `date` and `amount` are both among them.
+ *   chart        — ADR-0030: exactly 2 columns, one dimension (`text` or
+ *                  `date`) and one `money`/`number` value, with row count in
+ *                  `[2, CHART_MAX_ROWS]`. A `date` dimension is a trend
+ *                  (line); a `text` dimension is a breakdown (bar).
  *   table        — everything else.
  *
  * Key matching is case-insensitive: SQLite echoes a projection's casing back
  * as the result key, and `SELECT DATE, AMOUNT` is the same query. This is a
  * styling decision only, so a loose match here cannot affect a value.
+ *
+ * `chart` is checked after `card` and `transactions` so neither of ADR-0023's
+ * existing cases can change: a 2-column `transactions` row set (unlikely, but
+ * not excluded by its own rule) still wins `transactions` first.
  */
-export function classifyPresent(rows: unknown[], keys: string[] = resultColumnKeys(rows)): ResultPresent {
+export function classifyPresent(
+  rows: unknown[],
+  keys: string[] = resultColumnKeys(rows),
+  columnKinds?: Map<string, ResultColumnKind>,
+): ResultPresent {
   if (rows.length === 1 && keys.length === 1) return 'card'
   if (rows.length > 1 && keys.length > 0) {
     const lower = keys.map((k) => k.toLowerCase())
@@ -127,6 +148,12 @@ export function classifyPresent(rows: unknown[], keys: string[] = resultColumnKe
     if (allTransactionColumns && lower.includes('date') && lower.includes('amount')) {
       return 'transactions'
     }
+  }
+  if (keys.length === 2 && rows.length >= 2 && rows.length <= CHART_MAX_ROWS) {
+    const kinds = keys.map((key) => columnKinds?.get(key) ?? inferKind(rows, key))
+    const hasDimension = kinds.some((k) => k === 'text' || k === 'date')
+    const hasValue = kinds.some((k) => k === 'money' || k === 'number')
+    if (hasDimension && hasValue) return 'chart'
   }
   return 'table'
 }
@@ -169,10 +196,11 @@ export function buildResultFrame({
     label: key,
     kind: moneyKeys.has(key) ? 'money' : inferKind(rows, key),
   }))
+  const columnKinds = new Map(columns.map((c) => [c.key, c.kind]))
 
   return {
     type: 'result',
-    present: classifyPresent(rows, keys),
+    present: classifyPresent(rows, keys, columnKinds),
     currency,
     columns,
     rows: rows.filter(isRowObject),

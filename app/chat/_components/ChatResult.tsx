@@ -1,11 +1,17 @@
 'use client'
 
+import { memo } from 'react'
 import Link from 'next/link'
 import { ArrowUpRight } from 'lucide-react'
-import { fmtMoney } from '@/lib/money'
+import {
+  Bar, BarChart, CartesianGrid, Cell, Line, LineChart,
+  ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis,
+} from 'recharts'
+import { fmtMoney, fmtMoneyShort } from '@/lib/money'
 import { formatDate } from '@/lib/format'
 import type { ResultColumn, ResultFrame } from '@/lib/chatResultFrame'
 import { ledgerLinkForRow } from '@/lib/chatLedgerLink'
+import { colorForCategory } from '@/lib/category-colors'
 
 /**
  * ADR-0023's `result` frame, rendered. Three presentations of one contract:
@@ -44,6 +50,84 @@ const panelStyle: React.CSSProperties = {
   backgroundColor: 'var(--bg-card)',
   border: '1px solid var(--border-warm)',
   overflow: 'hidden',
+}
+
+// Tick/grid colors from the same CSS custom properties CategoryTrendChart
+// uses (app/globals.css) — re-themes on the .dark class for free, no isDark
+// branch needed.
+const CHART_TICK_STYLE = { fontSize: 11, fill: 'var(--chart-tick)' }
+const CHART_TOOLTIP_STYLE: React.CSSProperties = {
+  backgroundColor: 'var(--bg-card)',
+  border: '1px solid var(--border-warm)',
+  borderRadius: '8px',
+  fontSize: 12,
+  color: 'var(--tx-primary)',
+}
+
+function axisTick(value: unknown, column: ResultColumn): string {
+  if (column.kind === 'money' && typeof value === 'number') return fmtMoneyShort(Math.round(value * 100))
+  if (column.kind === 'date') return formatDate(value as string | Date)
+  if (typeof value === 'number') return value.toLocaleString('en-US', { maximumFractionDigits: 1 })
+  return String(value)
+}
+
+/**
+ * ADR-0030: renders the exact `rows`/`columns` a `table` presentation would,
+ * as a bar (text dimension) or line (date dimension) instead. No delta, no
+ * period comparison, no threshold framing — a presentation may re-encode a
+ * value, never derive one, so nothing appears here that isn't a returned row.
+ */
+function ChatResultChart({ result }: { result: ResultFrame }) {
+  const { columns, rows, currency } = result
+  const dimCol = columns.find((c) => c.kind === 'text' || c.kind === 'date')
+  const valueCol = columns.find((c) => c.kind === 'money' || c.kind === 'number')
+  if (!dimCol || !valueCol) return null // unreachable given classifyPresent's rule; keeps this a pure renderer
+
+  const tooltipFormatter = (value: unknown) => formatValue(value, valueCol, currency)
+  const labelFormatter = (label: unknown) =>
+    dimCol.kind === 'date' ? formatDate(label as string) : String(label)
+
+  if (dimCol.kind === 'date') {
+    return (
+      <div style={{ padding: '12px 12px 4px' }}>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={rows} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+            <XAxis dataKey={dimCol.key} tick={CHART_TICK_STYLE} tickFormatter={(v) => axisTick(v, dimCol)} />
+            <YAxis tick={CHART_TICK_STYLE} width={48} tickFormatter={(v) => axisTick(v, valueCol)} />
+            <RechartsTooltip
+              formatter={tooltipFormatter}
+              labelFormatter={labelFormatter}
+              contentStyle={CHART_TOOLTIP_STYLE}
+            />
+            <Line type="monotone" dataKey={valueCol.key} stroke="var(--tx-primary)" strokeWidth={1.5} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ padding: '12px 12px 4px' }}>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={rows} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+          <XAxis dataKey={dimCol.key} tick={CHART_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={36} />
+          <YAxis tick={CHART_TICK_STYLE} width={48} tickFormatter={(v) => axisTick(v, valueCol)} />
+          <RechartsTooltip
+            formatter={tooltipFormatter}
+            labelFormatter={labelFormatter}
+            contentStyle={CHART_TOOLTIP_STYLE}
+          />
+          <Bar dataKey={valueCol.key} radius={[4, 4, 0, 0]}>
+            {rows.map((row, i) => (
+              <Cell key={i} fill={colorForCategory(String(row[dimCol.key]))} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
 }
 
 const labelStyle: React.CSSProperties = {
@@ -97,7 +181,23 @@ function TruncationNote({ truncated }: { truncated: NonNullable<ResultFrame['tru
   )
 }
 
-export function ChatResult({ result }: { result: ResultFrame }) {
+/**
+ * Memoized on `result`'s identity, not just as an optimization: `result` is
+ * referentially stable on `msg.result` for the lifetime of a turn (ChatPane
+ * never replaces it once set), but `ChatPane` re-renders this component tree
+ * on every composer keystroke regardless (the `input` and `messages` state
+ * live in the same component). An unmemoized `chart` presentation re-runs
+ * recharts' ResponsiveContainer/tick-measurement effects on every one of
+ * those keystrokes, which reproduces as a live "Maximum update depth
+ * exceeded" from recharts' `RenderedTicksReporter` the moment the effect's
+ * unmount/remount cadence outraces React's own update batching — confirmed
+ * live: `React.memo` here (bailing out when `result` hasn't changed) stops
+ * the chart from re-rendering on keystrokes and the crash no longer
+ * reproduces. `table`/`card`/`transactions` don't need this to be correct,
+ * only `chart` does, but skipping unnecessary re-renders for all four costs
+ * nothing.
+ */
+export const ChatResult = memo(function ChatResult({ result }: { result: ResultFrame }) {
   const { present, columns, rows, currency, truncated } = result
   if (columns.length === 0 || rows.length === 0) return null
 
@@ -111,6 +211,24 @@ export function ChatResult({ result }: { result: ResultFrame }) {
         <div style={{ fontSize: '26px', fontWeight: 600, color: 'var(--tx-primary)', lineHeight: 1.2 }}>
           {formatValue(rows[0][column.key], column, currency)}
         </div>
+      </div>
+    )
+  }
+
+  if (present === 'chart') {
+    return (
+      // A fixed width, not `100%`: this panel sits in a shrink-to-fit flex
+      // item (the message bubble's `maxWidth: 85%` has no other content
+      // forcing a width once the chart is the only wide child), and
+      // recharts' ResponsiveContainer measuring a parent whose own width
+      // circularly depends on the chart drives its tick-measurement effect
+      // into a resize-observer feedback loop — reproduced live as a React
+      // "Maximum update depth exceeded" from `RenderedTicksReporter` the
+      // moment something upstream (e.g. typing, which re-renders the whole
+      // message list) re-triggers layout. A definite width breaks the cycle.
+      <div style={{ ...panelStyle, width: 'min(420px, 100%)' }}>
+        <ChatResultChart result={result} />
+        {truncated && <TruncationNote truncated={truncated} />}
       </div>
     )
   }
@@ -237,4 +355,4 @@ export function ChatResult({ result }: { result: ResultFrame }) {
       {truncated && <TruncationNote truncated={truncated} />}
     </div>
   )
-}
+})
