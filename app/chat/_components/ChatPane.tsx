@@ -8,6 +8,7 @@ import {
   type NonAnswerReason,
 } from '@/lib/chatNonAnswer'
 import { ChatResult } from './ChatResult'
+import { ChatStreamingText } from './ChatStreamingText'
 import { ChatThinkingTrace, type ThinkingStage } from './ChatThinkingTrace'
 import { ChatSuggestions } from './ChatSuggestions'
 import type { ResultFrame } from '@/lib/chatResultFrame'
@@ -471,7 +472,11 @@ export function ChatPane({
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                 }}>
-                  {msg.text}
+                  {msg.role === 'assistant' ? (
+                    <ChatStreamingText text={msg.text} streaming={loading && i === messages.length - 1} />
+                  ) : (
+                    msg.text
+                  )}
                 </div>
               ) : null}
 
