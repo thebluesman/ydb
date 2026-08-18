@@ -68,12 +68,13 @@ function PixelLoader() {
 }
 
 function useLiveSeconds(active: boolean): number {
-  const startRef = useRef(performance.now())
+  const startRef = useRef<number | null>(null)
   const [seconds, setSeconds] = useState(0)
   useEffect(() => {
     if (!active) return
+    if (startRef.current === null) startRef.current = performance.now()
     const id = setInterval(() => {
-      setSeconds((performance.now() - startRef.current) / 1000)
+      setSeconds((performance.now() - startRef.current!) / 1000)
     }, 100)
     return () => clearInterval(id)
   }, [active])
