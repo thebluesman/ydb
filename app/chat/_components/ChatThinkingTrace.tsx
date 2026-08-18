@@ -59,7 +59,7 @@ function PixelLoader() {
       {PIXEL_DELAYS.map((delay, index) => (
         <span
           key={index}
-          className="size-[4px] rounded-[1px] bg-ink"
+          className="size-[4px] rounded-[1px]"
           style={{ opacity: 0.15, animation: `ydb-pixel-on 650ms ease-in-out ${delay}ms infinite` }}
         />
       ))}

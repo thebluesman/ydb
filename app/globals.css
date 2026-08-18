@@ -301,8 +301,8 @@ main > * {
   to   { opacity: 1; transform: translateY(0); }
 }
 @keyframes ydb-pixel-on {
-  0%, 100% { opacity: 0.15; }
-  50%      { opacity: 1; }
+  0%, 100% { opacity: 0.15; background-color: var(--color-line-strong); }
+  50%      { opacity: 1;    background-color: var(--color-accent); }
 }
 
 /* ── ChatStreamingText (Beautiful UI StreamingText reference) ───────────── */
