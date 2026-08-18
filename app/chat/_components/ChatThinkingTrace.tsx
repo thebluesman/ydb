@@ -1,6 +1,6 @@
 'use client'
 
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 /**
  * Real-data adaptation of docs/reference/beautiful-ui/ThinkingState.tsx's
@@ -9,6 +9,12 @@ import { useLayoutEffect, useRef, useState } from 'react'
  * stage transitions (`ChatPane` sets `stage` as the `sql`/`result`/first
  * `token` events land — see ADR-0025's verification pass, which is the real
  * work happening during this window).
+ *
+ * The working-state icon and live elapsed counter are folded in from
+ * docs/reference/beautiful-ui/LoadingState.tsx (its pixel-grid wavefront and
+ * ticking timer) — the local backend genuinely takes 60-90s per query, so a
+ * live "how long has this actually been running" signal is worth having
+ * while the step list is still mid-flight.
  */
 
 export type ThinkingStage = 'thinking' | 'querying' | 'preparing' | 'done'
@@ -41,6 +47,39 @@ function PendingDot() {
   return <span className="size-3 shrink-0 rounded-full border-[1.5px] border-line" />
 }
 
+// 3x3 chevron wavefront, adapted from LoadingState's "Drive" pattern.
+const PIXEL_DELAYS = Array.from({ length: 9 }, (_, i) => {
+  const r = Math.floor(i / 3), c = i % 3
+  return (c + Math.abs(r - 1)) * 90
+})
+
+function PixelLoader() {
+  return (
+    <span aria-hidden className="grid shrink-0 grid-cols-[repeat(3,4px)] gap-[1.5px]">
+      {PIXEL_DELAYS.map((delay, index) => (
+        <span
+          key={index}
+          className="size-[4px] rounded-[1px] bg-ink"
+          style={{ opacity: 0.15, animation: `ydb-pixel-on 650ms ease-in-out ${delay}ms infinite` }}
+        />
+      ))}
+    </span>
+  )
+}
+
+function useLiveSeconds(active: boolean): number {
+  const startRef = useRef(performance.now())
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const id = setInterval(() => {
+      setSeconds((performance.now() - startRef.current) / 1000)
+    }, 100)
+    return () => clearInterval(id)
+  }, [active])
+  return seconds
+}
+
 export function ChatThinkingTrace({ stage, elapsedMs }: { stage: ThinkingStage; elapsedMs: number }) {
   const working = stage !== 'done'
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(null)
@@ -53,6 +92,7 @@ export function ChatThinkingTrace({ stage, elapsedMs }: { stage: ThinkingStage; 
 
   const currentIndex = STAGE_ORDER.indexOf(stage)
   const seconds = Math.max(1, Math.round(elapsedMs / 1000))
+  const liveSeconds = useLiveSeconds(working)
 
   return (
     <div className="flex w-full max-w-95 flex-col">
@@ -62,21 +102,28 @@ export function ChatThinkingTrace({ stage, elapsedMs }: { stage: ThinkingStage; 
         onClick={() => setManualExpanded((current) => !(current ?? working))}
         className="-mx-1.5 flex w-fit items-center gap-2 rounded-control px-1.5 py-1 transition-colors duration-100 hover:bg-hover-2"
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill={working ? 'var(--color-ink-2)' : 'var(--color-ink-3)'}>
-          <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
-        </svg>
+        {working ? (
+          <PixelLoader />
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--color-ink-3)">
+            <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
+          </svg>
+        )}
         <span role="status" className="contents">
           {working ? (
-            <span
-              className="bg-clip-text text-[13px] font-medium whitespace-nowrap text-transparent"
-              style={{
-                backgroundImage: 'linear-gradient(90deg, var(--color-ink-3) 35%, var(--color-ink) 50%, var(--color-ink-3) 65%)',
-                backgroundSize: '200% 100%',
-                animation: 'ydb-shimmer-text 1.4s linear infinite',
-              }}
-            >
-              Thinking
-            </span>
+            <>
+              <span
+                className="bg-clip-text text-[13px] font-medium whitespace-nowrap text-transparent"
+                style={{
+                  backgroundImage: 'linear-gradient(90deg, var(--color-ink-3) 35%, var(--color-ink) 50%, var(--color-ink-3) 65%)',
+                  backgroundSize: '200% 100%',
+                  animation: 'ydb-shimmer-text 1.4s linear infinite',
+                }}
+              >
+                Thinking
+              </span>
+              <span className="font-mono text-[12px] text-ink-3 tabular-nums">{liveSeconds.toFixed(1)}s</span>
+            </>
           ) : (
             <span className="text-[13px] font-medium whitespace-nowrap text-ink-2" style={{ animation: 'ydb-fade-up 350ms ease-out both' }}>
               Thought for {seconds}s
