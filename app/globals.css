@@ -236,6 +236,21 @@
   --font-sans: var(--font-clash-grotesk), system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   --font-display: var(--font-clash-display), system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-ibm-plex-mono), ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+
+  /* ── Beautiful UI reference token bridge (docs/reference/beautiful-ui/) ──
+     Aliases onto existing YDB variables so vendored components' class names
+     (text-ink, bg-hover-2, rounded-control, ...) work unmodified and stay
+     diffable against upstream. Each alias already carries light/dark via the
+     var() it points at — no separate .dark block needed. Grown one slice at
+     a time, as each reference component actually gets wired in (see
+     ChatThinkingTrace, the first one). */
+  --color-ink:          var(--tx-primary);
+  --color-ink-2:        var(--tx-secondary);
+  --color-ink-3:        var(--tx-tertiary);
+  --color-line:         var(--border-warm);
+  --color-line-strong:  var(--border-warm-md);
+  --color-hover-2:      var(--bg-card-alt);
+  --radius-control:     var(--radius-sm);
 }
 
 /* ── Nav active state tokens ─────────────────────────────────────────── */
@@ -273,6 +288,16 @@ main > * {
 
 @keyframes ydb-toast-in {
   from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── ChatThinkingTrace (Beautiful UI ThinkingState reference) ──────────── */
+@keyframes ydb-shimmer-text {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+@keyframes ydb-fade-up {
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 

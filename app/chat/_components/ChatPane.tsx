@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { MessageCircle, SendHorizonal, AlertCircle, Info, Square, Copy, Check } from 'lucide-react'
-import { ThinkingLoader } from '@/app/_components/ThinkingLoader'
 import {
   isNonAnswerReason,
   NON_ANSWER_HEADLINE,
   type NonAnswerReason,
 } from '@/lib/chatNonAnswer'
 import { ChatResult } from './ChatResult'
+import { ChatThinkingTrace, type ThinkingStage } from './ChatThinkingTrace'
 import { ChatSuggestions } from './ChatSuggestions'
 import type { ResultFrame } from '@/lib/chatResultFrame'
 import { TEMPLATE_ORDER, type Suggestion, type SuggestionTemplate } from '@/lib/chatSuggestions'
@@ -56,6 +56,12 @@ export type Message = {
    *  Whatever resolves that for `result` resolves it for these, by storing the
    *  emitted frame verbatim rather than recomputing it. */
   suggestions?: Suggestion[]
+  /** In-memory only, like `result`/`suggestions` above — a live view of the
+   *  stream's progress through ADR-0025's verification pass, not a stored
+   *  field. Absent on messages loaded from history, so ChatThinkingTrace
+   *  only ever renders for turns streamed in this session. */
+  stage?: ThinkingStage
+  thinkingMs?: number
 }
 
 export function ChatPane({
@@ -124,12 +130,14 @@ export function ChatPane({
     updateMessages((prev) => [
       ...prev,
       { role: 'user', text: question },
-      { role: 'assistant', text: '', sql: undefined },
+      { role: 'assistant', text: '', sql: undefined, stage: 'thinking' },
     ])
 
     let accumulatedText = ''
     let accumulatedSql: string | undefined
     let accumulatedNonAnswer: NonAnswerReason | undefined
+    let firstTokenSeen = false
+    const startedAt = performance.now()
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -176,14 +184,14 @@ export function ChatPane({
               accumulatedSql = event.sql
               updateMessages((prev) => {
                 const next = [...prev]
-                next[next.length - 1] = { ...next[next.length - 1], sql: event.sql }
+                next[next.length - 1] = { ...next[next.length - 1], sql: event.sql, stage: 'querying' }
                 return next
               })
             } else if (event.type === 'result' && Array.isArray(event.columns) && Array.isArray(event.rows)) {
               // ADR-0023. Arrives once, between `sql` and the first token.
               updateMessages((prev) => {
                 const next = [...prev]
-                next[next.length - 1] = { ...next[next.length - 1], result: event as ResultFrame }
+                next[next.length - 1] = { ...next[next.length - 1], result: event as ResultFrame, stage: 'preparing' }
                 return next
               })
             } else if (event.type === 'suggestions') {
@@ -200,10 +208,18 @@ export function ChatPane({
               }
             } else if (event.type === 'token') {
               accumulatedText += event.response ?? ''
+              const justFinishedThinking = !firstTokenSeen
+              firstTokenSeen = true
               updateMessages((prev) => {
                 const next = [...prev]
                 const last = next[next.length - 1]
-                next[next.length - 1] = { ...last, text: last.text + (event.response ?? '') }
+                next[next.length - 1] = {
+                  ...last,
+                  text: last.text + (event.response ?? ''),
+                  ...(justFinishedThinking
+                    ? { stage: 'done' as const, thinkingMs: performance.now() - startedAt }
+                    : {}),
+                }
                 return next
               })
             } else if (event.type === 'no-answer' && isNonAnswerReason(event.reason)) {
@@ -222,6 +238,8 @@ export function ChatPane({
                   nonAnswer: event.reason,
                   error: false,
                   errorDetail: undefined,
+                  stage: 'done',
+                  thinkingMs: performance.now() - startedAt,
                 }
                 return next
               })
@@ -377,6 +395,11 @@ export function ChatPane({
             }}
           >
             <div style={{ maxWidth: '85%' }}>
+              {msg.role === 'assistant' && !msg.error && msg.stage && (
+                <div style={{ marginBottom: '8px' }}>
+                  <ChatThinkingTrace stage={msg.stage} elapsedMs={msg.thinkingMs ?? 0} />
+                </div>
+              )}
               {msg.error ? (
                 <div style={{
                   padding: '10px 14px',
@@ -433,7 +456,10 @@ export function ChatPane({
                   </div>
                   {msg.text}
                 </div>
-              ) : (
+              ) : (msg.role === 'user' || msg.text) ? (
+                /* An in-flight assistant turn with no text yet is fully
+                   represented by ChatThinkingTrace above \u2014 an empty bubble
+                   here would just be dead padding under it. */
                 <div style={{
                   padding: '10px 14px',
                   borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
@@ -445,13 +471,9 @@ export function ChatPane({
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                 }}>
-                  {msg.role === 'assistant' && !msg.text && loading && i === messages.length - 1 ? (
-                    <ThinkingLoader />
-                  ) : (
-                    msg.text || '\u200b'
-                  )}
+                  {msg.text}
                 </div>
-              )}
+              ) : null}
 
               {msg.role === 'assistant' && !msg.error && !msg.nonAnswer && msg.result && (
                 <ChatResult result={msg.result} />
