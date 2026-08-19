@@ -44,7 +44,7 @@ import {
   fixtureCategorySource,
   REFERENCE_NOW,
 } from './chatEval/fixtureDb'
-import { GOLDEN_QUERIES, groundTruthValue, type GoldenQuery } from './chatEval/goldenQueries'
+import { GOLDEN_QUERIES, groundTruthColumns, groundTruthValue, type GoldenQuery } from './chatEval/goldenQueries'
 
 // Same JSON-schema constraint as app/api/chat/route.ts's SQL_FORMAT ([chat-perf]).
 // Not imported — that constant isn't exported, and duplicating four lines here
@@ -193,6 +193,14 @@ function extractSingleValue(rows: unknown[]): number | null {
   return typeof value === 'number' ? value : null
 }
 
+/** Named-column counterpart to `extractSingleValue`, for a `kind: 'columns'` fixture. */
+function extractNamedValue(rows: unknown[], name: string): number | null {
+  if (rows.length === 0) return null
+  const row = rows[0] as Record<string, unknown>
+  const value = row[name]
+  return typeof value === 'number' ? value : null
+}
+
 type Verdict = 'pass' | 'fail' | 'error'
 
 function judge(gq: GoldenQuery, outcome: RunOutcome, db: ReturnType<typeof buildFixtureDb>): { verdict: Verdict; detail: string } {
@@ -209,6 +217,31 @@ function judge(gq: GoldenQuery, outcome: RunOutcome, db: ReturnType<typeof build
       return { verdict: 'pass', detail: `refused (${outcome.reason}) — acceptable for this fixture` }
     }
     return { verdict: 'fail', detail: `unexpectedly refused: ${outcome.reason}` }
+  }
+
+  if (gq.expect.kind === 'columns') {
+    const expectedColumns = groundTruthColumns(db, gq.expect.sql)
+    if (expectedColumns === null) throw new Error(`ground truth for ${gq.id} did not produce numeric columns`)
+
+    const mismatches: string[] = []
+    for (const col of gq.expect.columns) {
+      const actual = extractNamedValue(outcome.rows, col.name)
+      if (actual === null) {
+        mismatches.push(`${col.name}: missing from result (${JSON.stringify(outcome.rows[0] ?? null)})`)
+        continue
+      }
+      const expected = expectedColumns[col.name]
+      const tolerance = col.tolerance ?? 0.01
+      const a = col.signInsensitive ? Math.abs(actual) : actual
+      const e = col.signInsensitive ? Math.abs(expected) : expected
+      if (Math.abs(a - e) > tolerance) {
+        mismatches.push(`${col.name}: expected ${expected}, got ${actual}`)
+      }
+    }
+
+    return mismatches.length === 0
+      ? { verdict: 'pass', detail: `all columns matched: ${JSON.stringify(expectedColumns)}` }
+      : { verdict: 'fail', detail: mismatches.join('; ') }
   }
 
   const actual = extractSingleValue(outcome.rows)

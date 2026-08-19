@@ -20,6 +20,23 @@ export type Expectation =
   | { kind: 'count'; sql: string }
   | { kind: 'refusal' }
   | { kind: 'value-or-refusal'; sql: string; tolerance?: number; signInsensitive?: boolean }
+  /**
+   * A multi-figure answer (ADR-0011's "one row, several aliased columns"
+   * shape) checked BY COLUMN NAME rather than positionally. `sql` is one
+   * ground-truth query producing every named column in one row; each entry
+   * in `columns` is checked against the ground-truth column of the same
+   * name in the model's actual result row, ignoring column order and any
+   * extra columns. Column names must match the exact alias
+   * `lib/chatSqlPrompt.ts`'s worked examples teach (`total_income`,
+   * `total_expenses`) — the prompt teaches a specific alias per figure for a
+   * multi-figure answer, so an exact-name match enforces the taught
+   * convention rather than working around a model that didn't follow it.
+   */
+  | {
+      kind: 'columns'
+      sql: string
+      columns: { name: string; tolerance?: number; signInsensitive?: boolean }[]
+    }
 
 export type GoldenQuery = {
   id: string
@@ -202,11 +219,14 @@ export const GOLDEN_QUERIES: GoldenQuery[] = [
     id: 'income-and-expenses-together',
     question: 'What was my income and my expenses last month?',
     expect: {
-      kind: 'value',
-      signInsensitive: false,
-      sql: `SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END)/100.0 AS total_income FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id) AND strftime('%Y-%m', date) = '2026-07'`,
+      kind: 'columns',
+      sql: `SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END)/100.0 AS total_income, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END)/100.0 AS total_expenses FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id) AND strftime('%Y-%m', date) = '2026-07'`,
+      columns: [
+        { name: 'total_income', signInsensitive: false },
+        { name: 'total_expenses', signInsensitive: true },
+      ],
     },
-    note: 'Multi-figure question (ADR-0011): must be one row, two aliased columns, never a UNION. This checks the income half specifically since it is the more error-prone of the two.',
+    note: 'Multi-figure question (ADR-0011): must be one row, two aliased columns, never a UNION. Checks BOTH figures by column name — a prior version of this fixture checked the income column only (`Object.values(row)[0]`, positional), so a model that answered with income alone, or with the wrong figure in the first column, passed. total_income carries reimbursementTxId IS NULL and the NOT EXISTS reimbursement-credit exclusion, matching the shipped two-figure worked example — the guard applies to income here too, not only to expenses, since a reimbursement settlement inflates income exactly as an unexcluded reimbursed expense inflates spend. total_expenses stays sign-tolerant (the worked example teaches it positive, but this fixture is not the one enforcing that convention).',
   },
   {
     id: 'percentage-of-spending-derived-ratio',
@@ -231,6 +251,22 @@ export const GOLDEN_QUERIES: GoldenQuery[] = [
     note: 'FOLLOWUPS.md §6: split legs\' individual categories (Household, here) are not surfaced by the default category-aggregate convention, which uses the parent\'s category (Shopping). "Household" is not in the vocabulary as a distinct top-level category presence for this ledger the way the model would need to answer directly, so a no-data/refusal is the documented-correct outcome, not a bug in the fixture.',
   },
 ]
+
+/**
+ * Runs a `kind: 'columns'` fixture's ground-truth SQL against the fixture DB
+ * and returns every named column, keyed by name rather than position — the
+ * counterpart to `groundTruthValue` for a multi-figure answer.
+ */
+export function groundTruthColumns(db: Db, sql: string): Record<string, number> | null {
+  const row = db.prepare(sql).get() as Record<string, unknown> | undefined
+  if (!row) return null
+  const out: Record<string, number> = {}
+  for (const [key, value] of Object.entries(row)) {
+    if (typeof value !== 'number') return null
+    out[key] = value
+  }
+  return out
+}
 
 /** Runs a fixture's ground-truth SQL against the fixture DB. */
 export function groundTruthValue(db: Db, sql: string): number | null {
