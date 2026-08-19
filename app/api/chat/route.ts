@@ -28,6 +28,7 @@ import {
   unknownAccountMessage,
 } from '@/lib/chatAccountVocabulary'
 import { balanceIntentMatch, balanceIntentMessage } from '@/lib/chatBalanceIntent'
+import { planningIntentMatch, planningIntentMessage } from '@/lib/chatPlanningIntent'
 import {
   balanceScopeMessage,
   balanceScopeRowMessage,
@@ -406,6 +407,15 @@ export async function POST(request: Request) {
   const balanceIntent = balanceIntentMatch(question)
   if (balanceIntent) {
     return nonAnswerResponse(nonAnswerFrame('out-of-scope', balanceIntentMessage(balanceIntent)))
+  }
+
+  // ADR-0029: same mechanism as the balance check above, second scope class —
+  // a plan, target or prediction rather than something that happened. The
+  // ledger has no budget/goal/forecast model, so there is no SQL rewrite that
+  // answers it. Current turn only, no `sql` on the frame, same reasons as above.
+  const planningIntent = planningIntentMatch(question)
+  if (planningIntent) {
+    return nonAnswerResponse(nonAnswerFrame('out-of-scope', planningIntentMessage(planningIntent)))
   }
 
   // Phase 1: generate SQL (non-streaming). temperature 0 — SQL generation wants
