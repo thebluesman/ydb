@@ -202,6 +202,48 @@ export function weekRange(now: Date, weeksAgo = 0): { start: string; endExclusiv
 }
 
 /**
+ * The SQL expression that maps a row's `date` to the Monday its calendar week
+ * began on — the bucket key for a weekly GROUP BY.
+ *
+ * Weekly bucketing is the one week question the two supplied literals cannot
+ * answer. "This week" and "last week" are single ranges the server can compute
+ * up front; "each of the last four weeks" needs a key computed PER ROW, and
+ * there is no literal to hand the model for that.
+ *
+ * The obvious per-row idiom is `date(<col>, 'weekday 1', '-7 days')`, and it is
+ * wrong in exactly the way the block above describes: `weekday N` is a NO-OP on
+ * a date that is already that weekday, so every row that actually falls on a
+ * Monday is bucketed into the PREVIOUS week. One row in seven lands in the wrong
+ * bucket, and since the bucket still exists and still has a plausible total,
+ * nothing in the result says so.
+ *
+ * This form avoids the modifier entirely: it reads the row's weekday as a
+ * number and subtracts that many days. `strftime('%w', ...)` is 0=Sunday..
+ * 6=Saturday, so `(%w + 6) % 7` is "days since Monday" -- 0 on a Monday, 6 on a
+ * Sunday -- and the shift is plain day arithmetic, which has no special case at
+ * zero (`date(x, '-0 days')` is the identity), across a month, across a year, or
+ * on a leap day. Verified against real SQLite over 1,501 consecutive days
+ * (2023-01-01 onwards, with a time component on every value): the result is
+ * always a Monday, never after the row's own date, and never more than six days
+ * before it. `strftime('%u')` would be more readable but was not used -- it only
+ * exists in newer SQLite builds, and a modifier that silently returns NULL on an
+ * older one is the same class of bug as the two this whole block exists to stop.
+ *
+ * Returned as a builder rather than written into the prompt by hand for the same
+ * reason the date boundaries are computed here: the expression is exact but
+ * fiddly, and a model transcribing it with `%w` alone, or without the `+ 6`,
+ * produces valid SQL whose buckets are shifted by a day or six. The prompt tells
+ * the model to copy it verbatim, so there is one authored copy of it and this is
+ * it.
+ *
+ * @param dateColumn the date column reference, qualified if the query joins
+ *   (`t.date`); the prompt's own examples pass the unqualified default.
+ */
+export function weekStartExpr(dateColumn = 'date'): string {
+  return `date(${dateColumn}, '-' || ((CAST(strftime('%w', ${dateColumn}) AS INTEGER) + 6) % 7) || ' days')`
+}
+
+/**
  * A category literal for a worked example, drawn from the real vocabulary.
  *
  * The examples used to filter on the bare literals 'Groceries' and 'Travel',
@@ -405,6 +447,8 @@ Date rules:
 - A bare year ("in 2024") or an explicit month and year ("June 2024") is already unambiguous -- use it as written.
 - Quarters: SQLite has NO "start of quarter" modifier, so do not try to build one out of date('now', ...) and do not derive quarter boundaries by arithmetic on strftime('%m', date). The server supplies them. Today is ${today}, so the current quarter is ${quarterLabel(thisQuarter)}: date >= '${thisQ.start}' AND date < '${thisQ.endExclusive}'. The same quarter one year earlier is ${quarterLabel(lastYearQuarter)}: date >= '${lastYearQ.start}' AND date < '${lastYearQ.endExclusive}'. "Last quarter" is the three months before '${thisQ.start}'.
 - Weeks: "this week" and "last week" mean the CALENDAR week, Monday to Sunday -- not the last 7 days. The server supplies the boundaries, the same as for quarters, so do NOT build them yourself: date('now','-7 days') is a trailing window that answers a different question, date('now','weekday 0','-7 days') silently slides a whole week into the past on the one day of the week it lands on, and strftime('%W', date) breaks across the new year. Today is ${today}, so "this week" is date >= '${thisWeek.start}' AND date < '${thisWeek.endExclusive}', and "last week" is date >= '${lastWeek.start}' AND date < '${lastWeek.endExclusive}'.
+- Any OTHER whole week -- "two weeks ago", "three weeks ago", "next week" -- is derived from the "this week" Monday above by shifting a whole number of DAYS: "two weeks ago" is date >= date('${thisWeek.start}','-14 days') AND date < date('${thisWeek.start}','-7 days'), and next week is date('${thisWeek.start}','+7 days') to date('${thisWeek.start}','+14 days'). Multiples of 7 days only, always off that literal, never off date('now'). A fixed day count applied to a date that is already the right Monday is exact arithmetic -- it has no equivalent of the weekday-modifier trap and it carries across month, year and leap-day boundaries -- but it is only exact because the anchor is the supplied literal, so do not start it from a Monday you worked out yourself.
+- Weekly BUCKETING -- "each of the last four weeks", "week by week", a weekly breakdown -- groups by the Monday each row's week began on. Use this expression verbatim as the bucket key, copying it character for character: ${weekStartExpr()}. Do NOT write date(date,'weekday 1','-7 days') instead: the weekday modifier does nothing when the date is already a Monday, so every Monday row is filed under the previous week and one row in seven lands in a bucket with a plausible total and the wrong contents. Alias the bucket week_start, GROUP BY and ORDER BY that alias, and still bound the query with an explicit half-open range built from the "this week" literal as above -- the bucket key decides which week a row belongs to, not which weeks the answer covers.
 - "The last 7 days" is NOT "this week" and keeps its trailing form (date >= date('now','-7 days')); the same goes for "the last 14 days" and similar. Read which one was asked for: a rolling window and a calendar week overlap but are not the same set of rows, and either one reported as the other is a wrong answer that looks right.
 - Write EVERY date range against the date column as half-open -- date >= '<start>' AND date < '<day after the end>'. Transaction.date is a datetime string, so a closed range against a calendar date (date <= '${lastYearQ.endExclusive}') silently drops every row on that final day, because '${lastYearQ.endExclusive} 00:00:00.000' sorts after '${lastYearQ.endExclusive}'. An undercount, with nothing in the result to show for it.
 - Same period one year earlier: for a MONTH, compare against strftime('%Y-%m', date('now','-12 months')) -- resolved by SQLite at execution time, so it stays correct. For a QUARTER, use the literal range given above. Do not shift a year by editing the year digits of a literal you were not given.
@@ -454,6 +498,21 @@ A: SELECT SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE amount < 
 -- above -- not date('now','-7 days'), which is a trailing window over a different set of rows, and not
 -- a weekday modifier you assembled yourself. Half-open, like every other range: >= Monday, < the
 -- FOLLOWING Monday. "Last week" is the other supplied pair, used exactly the same way.
+
+Q: How much did I spend two weeks ago?
+A: SELECT SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND date >= date('${thisWeek.start}','-14 days') AND date < date('${thisWeek.start}','-7 days') AND status IN ('committed','reconciled')
+-- A week that was NOT supplied as a literal, derived by shifting the supplied Monday by a whole number
+-- of days. Both ends move together, so the window is still exactly seven days and still half-open. Do
+-- NOT reach for date('now','-14 days') here -- that is a trailing window ending today, not the calendar
+-- week -- and do NOT assemble a Monday with a weekday modifier.
+
+Q: How much did I spend in each of the last 4 weeks?
+A: SELECT ${weekStartExpr()} AS week_start, SUM(-amount) / 100.0 AS total_spent FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND date >= date('${thisWeek.start}','-21 days') AND date < '${thisWeek.endExclusive}' AND status IN ('committed','reconciled') GROUP BY week_start ORDER BY week_start
+-- A weekly breakdown: one row per week, keyed by the Monday that week began on. The bucket expression is
+-- copied verbatim from the date rules above -- it subtracts "days since Monday" rather than using
+-- 'weekday 1', which would file every Monday row under the previous week. The WHERE clause still bounds
+-- the answer explicitly, anchored to the supplied Monday: three weeks back from it, up to the end of
+-- this one. The bucket key says which week a row belongs to; it does not say which weeks are in scope.
 
 Q: What is my total income this month?
 A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')

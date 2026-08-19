@@ -210,6 +210,18 @@ description. Both fixes police that claim. ADR-0017 is the same rule reaching th
 *not* write: a star projection's columns are named by the schema, and narration cannot tell the
 difference.
 
+**Calendar boundaries are computed server-side (ADR-0032).** A separate root cause with the same
+signature: three times now — a bare month name resolved to 2023 from training data (2026-07-29), a
+quarter SQLite has no `start of quarter` modifier for, a calendar week generated as a trailing
+`date('now','-7 days')` window (2026-08-09) — the model produced well-formed SQL over the wrong dates,
+with no error and nothing in the result to show for it. `lib/chatSqlPrompt.ts` computes the boundary
+in TypeScript from `now` (UTC, half-open) and hands the model a literal; the model may derive a further
+boundary only by prose off a supplied literal ("the three months before `<thisQ.start>`") or by shifting
+a supplied date a whole number of days. Where the boundary is per-row rather than per-request — weekly
+bucketing — the server authors the expression instead (`weekStartExpr`) and the prompt has it copied
+verbatim, because `date(d,'weekday 1','-7 days')` files every Monday row under the previous week.
+ADR-0032 states the rule so a fourth granularity cites it instead of re-deriving it.
+
 These diagnoses came from `ChatMessage.sql`, which persists every generated query. It is the first
 place to look when a chat answer is wrong; ADR-0009 was written without it and misdiagnosed the bug.
 
