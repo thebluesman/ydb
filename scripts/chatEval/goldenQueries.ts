@@ -194,9 +194,9 @@ export const GOLDEN_QUERIES: GoldenQuery[] = [
       kind: 'value',
       signInsensitive: true,
       tolerance: 0.02,
-      sql: `SELECT AVG(amount)/100.0 AS total FROM "Transaction" WHERE category = 'Groceries' AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '2026-07'`,
+      sql: `SELECT AVG(amount)/100.0 AS average_transaction FROM "Transaction" WHERE category = 'Groceries' AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = '2026-07'`,
     },
-    note: 'AVG() aggregate — exercises the money-units classifier\'s aggregate-wrapper resolution (ADR-0020) on a function other than SUM.',
+    note: 'AVG() aggregate — exercises the money-units classifier\'s aggregate-wrapper resolution (ADR-0020) on a function other than SUM. Aliased average_transaction, not total: scripts/evalChatVerifier.ts reuses this ground-truth SQL as a GOOD case, and an average aliased total is a genuine name/expression contradiction that the LABEL check is right to flag (ADR-0031 review, 2026-08-18). Both readers of this SQL take the value positionally, so the alias text is free to be accurate.',
   },
   {
     id: 'income-and-expenses-together',

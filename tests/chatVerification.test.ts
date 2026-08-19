@@ -25,12 +25,21 @@ describe('buildVerificationSystemPrompt', () => {
     expect(prompt).toContain('2026-08-04')
   })
 
-  it('tells the model to leave sign out of the LABEL check, rather than reason about it', () => {
+  it('keeps sign out of the LABEL check by stating the convention, not by forbidding it', () => {
     // The sign-promise rule (an alias containing "spent"/"spending" must be
     // positive) is enforced deterministically by signPromiseViolation, not by
     // asking the model to reason about sign — a first attempt at teaching it
     // in prose made precision worse, not better (see the function's own doc).
-    expect(prompt.toLowerCase()).toMatch(/do not judge a value's sign/)
+    //
+    // ADR-0031 changed HOW sign is kept out. The prohibition ("never flag a
+    // column for being negative") was rephrased past by the model, which
+    // complained the NAME failed to encode the sign instead; it is replaced by
+    // ADR-0027's fact that the server decides display sign after this check.
+    // Asserted as an absence as well as a presence, so re-adding the
+    // prohibition alongside the fact fails here.
+    expect(prompt).toContain("a column's name is not the sign channel")
+    expect(prompt).toMatch(/decided by the server after this check runs/)
+    expect(prompt.toLowerCase()).not.toMatch(/never flag a column for being negative/)
     expect(prompt.toLowerCase()).not.toContain('negative = debit')
   })
 

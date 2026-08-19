@@ -17,7 +17,7 @@
  * second opinion is not evidence against an answer already in hand.
  */
 
-import { isoDate } from '@/lib/chatSqlPrompt'
+import { isoDate, MANDATORY_HYGIENE_PREDICATES } from '@/lib/chatSqlPrompt'
 
 // ── Verdict type ─────────────────────────────────────────────────────────────
 
@@ -159,21 +159,42 @@ const VERIFY_DATA_BOUNDARY =
  * kept re-deriving "a spending answer should be positive," which is false in
  * this app's convention. The one sign rule that actually needs enforcing
  * (an alias promising "spent"/"spending" must be positive) is checked in
- * code before this prompt ever runs, so the model is told flatly to leave
- * sign out of its Label judgment rather than trusted to reason about it.
+ * code before this prompt ever runs.
+ *
+ * How sign is kept out of the LABEL judgment changed with ADR-0031. The
+ * original wording was a prohibition — "never flag a column for being
+ * negative, or for being positive, on its own" — and the 2026-08-18 eval run
+ * showed the model routing around it by complaining that the column's NAME
+ * failed to encode the sign rather than that the number was negative. A
+ * prohibition the model can rephrase past is not a guard, so the prohibition
+ * is replaced by ADR-0027's fact: display sign is decided by the server after
+ * this check runs, and the alias is not the sign channel.
+ *
+ * The same substitution is why the FILTER check names the four
+ * `MANDATORY_HYGIENE_FILTERS` (ADR-0028) instead of hoping the model infers
+ * they were required, and why LABEL asks for a contradiction rather than for
+ * a self-documenting name (ADR-0031). Both state a fact about the query being
+ * read. Neither states anything about how the SQL was produced: no worked
+ * examples, no category or account vocabulary, no claim that the generator
+ * was careful — ADR-0025 stands.
  */
 export function buildVerificationSystemPrompt(today: string): string {
+  // Rendered from the constant, never restated in prose here: the exemption is
+  // only correct as long as it names exactly the predicates the generator was
+  // required to write, and two hand-maintained copies of that list is the drift
+  // ADR-0028 exists to prevent.
+  const hygieneFilters = MANDATORY_HYGIENE_PREDICATES.join(', ')
   return `You are checking a SQL query and the rows it returned against the question that was asked — not writing SQL yourself, and not trusting that the query was written correctly.
 
 Today's date is ${today}. This is the real current date, supplied by the server — do not judge a date filter as wrong because it looks future-dated relative to your own sense of "now"; ${today} is now.
 
-Do not judge a value's sign (positive vs negative) as part of the LABEL check. Whether a figure comes back positive or negative is governed by this app's own storage convention, not by what the question was about, and is checked separately, outside your job here. Never flag a column for being negative, or for being positive, on its own — judge LABEL only by whether the column's name describes what its expression computes, not by the sign of the number under it.
+Whether a figure comes back positive or negative is governed by this app's own storage convention, not by what the question was about. The sign a user finally sees is decided by the server after this check runs; a column's name is not the sign channel and is not expected to encode direction, so the sign of a number and the presence or absence of direction in its name are both outside what you are judging here.
 
 Respond with a JSON object of the form {"reason": "<one line>", "verdict": "<label>"}, "reason" first — write the reason before deciding the label, not as a justification for a label you already picked.
 
 Ask exactly three questions:
-1. FILTER — does every filter in the query (category, account, date range, status, and so on) correspond to something the question actually asked for? A filter the question never mentioned, or one that narrows a period/category/account the question named more broadly, is a mismatch.
-2. LABEL — does each column's label describe what its expression actually computes? A column named total_spent that is not a spend figure, or a label that claims a different figure than the one under it, is a mismatch.
+1. FILTER — does every filter in the query (category, account, date range, grain, and so on) correspond to something the question actually asked for? These four are ledger hygiene, applied to every query of this kind and present by construction: ${hygieneFilters}. A question never asks for them and they are never evidence of a mismatch. Any OTHER filter the question never mentioned, or one that narrows a period, category or account the question named more broadly, is a mismatch.
+2. LABEL — does any column's name claim something its expression does NOT compute? This is a contradiction test, not a test of how descriptive the name is. This codebase names a filtered aggregate total, net or total_spent and carries the category, account and period in the WHERE clause, so a generic name, or one that leaves out filters the query applied, is the expected output and is never on its own a mismatch. A name that asserts something false about the expression under it is a mismatch: a column named total_expenses whose expression sums positive amounts, or a name claiming a different figure than the one being computed.
 3. SHAPE — is the result's shape the shape the question asked for? A single figure when the question asked "which categories", or a breakdown when the question asked for one number, is a mismatch.
 
 Verdicts:
