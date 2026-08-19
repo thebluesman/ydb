@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildSqlSystemPrompt, isoDate, mostRecentMonthYm, weekRange } from '@/lib/chatSqlPrompt'
+import Database from 'better-sqlite3'
+import { buildSqlSystemPrompt, isoDate, mostRecentMonthYm, weekRange, weekStartExpr } from '@/lib/chatSqlPrompt'
 
 // Fixed reference point: the date of the reported bug. The model resolved
 // "June" to 2023-06 on this day.
@@ -102,6 +103,99 @@ describe('weekRange', () => {
   })
 })
 
+describe('weekStartExpr, against real SQLite', () => {
+  // Exercised through an actual SQLite engine rather than asserted as a string,
+  // because the whole reason this expression exists is that two idioms that
+  // "should" have worked did not. The doc comments were not enough evidence for
+  // the last two; they are not enough for this one either.
+  const db = new Database(':memory:')
+  const bucket = (value: string): string =>
+    (db.prepare(`SELECT ${weekStartExpr('?')} AS ws`).get(value, value) as { ws: string }).ws
+
+  it('buckets every day of a week onto the same Monday', () => {
+    // Mon 2026-07-27 .. Sun 2026-08-02, with a time component like real rows.
+    for (const day of ['27', '28', '29', '30', '31']) {
+      expect(bucket(`2026-07-${day} 13:45:07.123`)).toBe('2026-07-27')
+    }
+    expect(bucket('2026-08-01 00:00:00.000')).toBe('2026-07-27')
+    expect(bucket('2026-08-02 23:59:59.999')).toBe('2026-07-27')
+  })
+
+  it('does NOT slide a Monday row into the previous week', () => {
+    // The trap in date(x,'weekday 1','-7 days'): the modifier is a no-op on a
+    // date that is already Monday, so the -7 days is not cancelled. One row in
+    // seven would land in the wrong bucket, with a plausible total either side.
+    expect(bucket('2026-08-03 00:00:00.000')).toBe('2026-08-03')
+    const trap = db
+      .prepare(`SELECT date(?, 'weekday 1', '-7 days') AS ws`)
+      .get('2026-08-03 00:00:00.000') as { ws: string }
+    expect(trap.ws).toBe('2026-07-27') // the bug, pinned so the claim stays evidence
+  })
+
+  it('crosses a year boundary without a special case', () => {
+    // strftime('%W') splits this week across two labels; the day shift does not.
+    expect(bucket('2026-01-01 08:00:00.000')).toBe('2025-12-29')
+    expect(bucket('2025-12-29 00:00:00.000')).toBe('2025-12-29')
+  })
+
+  it('crosses a leap day', () => {
+    expect(bucket('2024-02-29 00:00:00.000')).toBe('2024-02-26')
+  })
+
+  it('holds over 1500 consecutive days', () => {
+    // The general property, rather than the handful of dates someone thought to
+    // pick: the bucket is always a Monday, never after the row's own date, and
+    // never more than six days before it.
+    const rows = db
+      .prepare(
+        `WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq WHERE n < 1500),
+              d(x) AS (SELECT date('2023-01-01', '+' || n || ' days') || ' 13:45:07.123' FROM seq)
+         SELECT COUNT(*) AS total,
+                SUM(CASE WHEN strftime('%w', ${weekStartExpr('x')}) != '1' THEN 1 ELSE 0 END) AS notMonday,
+                SUM(CASE WHEN julianday(date(x)) - julianday(${weekStartExpr('x')}) NOT BETWEEN 0 AND 6 THEN 1 ELSE 0 END) AS outOfRange
+           FROM d`,
+      )
+      .get() as { total: number; notMonday: number; outOfRange: number }
+    expect(rows.total).toBe(1501)
+    expect(rows.notMonday).toBe(0)
+    expect(rows.outOfRange).toBe(0)
+  })
+
+  it('agrees with weekRange, which is the same week boundary computed in TypeScript', () => {
+    // The two must not be able to disagree: one decides which weeks the answer
+    // covers, the other decides which week a row falls in.
+    for (const iso of ['2026-07-29', '2026-08-03', '2026-08-02', '2026-01-01', '2024-02-29']) {
+      expect(bucket(`${iso} 06:00:00.000`)).toBe(weekRange(new Date(`${iso}T06:00:00.000Z`)).start)
+    }
+  })
+
+  it('qualifies the column when given a qualified reference', () => {
+    expect(weekStartExpr('t.date')).toContain('t.date')
+    expect(weekStartExpr()).toContain(`strftime('%w', date)`)
+  })
+})
+
+describe('whole-week offsets off the supplied Monday, against real SQLite', () => {
+  // The prompt's new rule claims a fixed day-count shift off an already-correct
+  // Monday is exact, unlike the weekday modifier. Checked rather than assumed.
+  const db = new Database(':memory:')
+  const shift = (anchor: string, mod: string): string =>
+    (db.prepare(`SELECT date(?, ?) AS d`).get(anchor, mod) as { d: string }).d
+
+  it('lands on a Monday for every multiple of 7, in both directions', () => {
+    for (let n = -60; n <= 60; n++) {
+      const mod = `${n < 0 ? '' : '+'}${n * 7} days`
+      const got = shift('2026-07-27', mod)
+      expect(got, mod).toBe(weekRange(new Date('2026-07-27T00:00:00.000Z'), -n).start)
+    }
+  })
+
+  it('carries across year and leap-day boundaries', () => {
+    expect(shift('2026-01-05', '-14 days')).toBe('2025-12-22')
+    expect(shift('2024-03-04', '-14 days')).toBe('2024-02-19')
+  })
+})
+
 describe('isoDate', () => {
   it('returns a UTC YYYY-MM-DD', () => {
     expect(isoDate(JUL_29_2026)).toBe('2026-07-29')
@@ -188,6 +282,50 @@ describe('buildSqlSystemPrompt', () => {
       // Few-shot shape beats prose: an `A:` line resolving "this week" to
       // date('now','-7 days') would teach exactly the bug this rule fixes.
       expect(answerLines.filter((l) => /date\('now','-7 days'\)/.test(l))).toEqual([])
+    })
+
+    // The gap flagged when the week rule shipped (2026-08-09) and closed here:
+    // the quarter section gave the model a way to reach a quarter that was not
+    // explicitly computed ("the three months before <literal>"), and the week
+    // section gave it nothing beyond this week and last week.
+    describe('weeks other than the two supplied', () => {
+      it('teaches whole-day shifts off the supplied Monday', () => {
+        expect(prompt).toContain(`date >= date('2026-07-27','-14 days') AND date < date('2026-07-27','-7 days')`)
+        expect(prompt).toMatch(/Multiples of 7 days only, always off that literal, never off date\('now'\)/)
+      })
+
+      it('carries a worked example for a week that was not supplied', () => {
+        const twoWeeks = answerLines.filter((l) => /'-14 days'/.test(l))
+        expect(twoWeeks).toHaveLength(1)
+        expect(twoWeeks[0]).toContain('SUM(-amount) / 100.0 AS total_spent')
+        // Anchored to the literal, not to now.
+        expect(twoWeeks[0]).not.toMatch(/date\('now'/)
+      })
+
+      it('teaches weekly bucketing with the verified expression, verbatim', () => {
+        expect(prompt).toContain(weekStartExpr())
+        expect(prompt).toMatch(/copying it character for character/)
+      })
+
+      it('names the weekday-modifier bucket trap so it is not reinvented', () => {
+        expect(prompt).toContain(`date(date,'weekday 1','-7 days')`)
+        expect(prompt).toMatch(/every Monday row is filed under the previous week/)
+      })
+
+      it('carries a worked bucketing example that still bounds its own window', () => {
+        const bucketed = answerLines.filter((l) => l.includes('AS week_start'))
+        expect(bucketed).toHaveLength(1)
+        expect(bucketed[0]).toContain('GROUP BY week_start')
+        // The bucket key decides which week a row is in, not which weeks are in
+        // scope — so an explicit half-open range is still required.
+        expect(bucketed[0]).toContain(`date >= date('2026-07-27','-21 days') AND date < '2026-08-03'`)
+      })
+
+      it('never demonstrates the weekday modifier on an answer line', () => {
+        // Few-shot shape beats prose, so the trap may appear only in the
+        // prohibition, never in SQL the model is being shown to copy.
+        expect(answerLines.filter((l) => /weekday \d/.test(l))).toEqual([])
+      })
     })
 
     it('keeps a genuinely rolling window rolling', () => {
