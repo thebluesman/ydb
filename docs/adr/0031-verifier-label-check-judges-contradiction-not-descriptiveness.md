@@ -1,6 +1,6 @@
 # ADR-0031: The verifier's LABEL check judges contradiction, not descriptiveness
 
-Status: Proposed
+Status: Accepted
 Date: 2026-08-18
 
 ## Context
@@ -86,3 +86,31 @@ survives at all; a third consumer raises the cost of retiring it, and that open 
 **It does not fix the other three false positives.** One is a FILTER-check over-reach on a whole-year
 window (`good:rent-this-year`), and two are eval-fixture defects, not verifier defects — both are
 recorded as scoped follow-ups, not folded into this decision.
+
+## Measured, 2026-08-19 — Accepted
+
+Implemented together with ADR-0028's exemption constant, in one `buildVerificationSystemPrompt` edit, per
+this ADR's own sequencing clause. Re-ran `scripts/evalChatVerifier.ts` once against the same fixture set,
+live Ollama (qwen2.5:32b):
+
+- Combined: 0.59/0.91 → **0.65/1.00** (TP=11 FP=6 TN=13 FN=0)
+- Model only: 0.56/0.90 → **0.63/1.00** (TP=10 FP=6 TN=13 FN=0)
+- Precheck (`signPromiseViolation`): 1.00/1.00, unchanged
+
+Precision moved, clearing this ADR's own falsification bar. The accepted recall risk did not materialize
+— recall rose rather than fell, and the single prior FN (`broken:dining-unrequested-account-filter`) is
+now caught on FILTER, exactly where the Consequences section above said a persisting break belonged.
+
+Four of the five LABEL false positives named in Context are gone. `good:account-filtered-category` still
+draws a sign-framing LABEL complaint post-fix — treated as a residual model-limitation instance, not a
+prompt contradiction (the diagnosis held; this is one surviving case, not a sign the wording failed). A
+scoped follow-up ticket tracks it rather than a further prompt edit, per this ADR's own reasoning against
+wording that accretes.
+
+Caveat, stated plainly rather than glossed: this is n=30, one run, against a nondeterministic local
+model. Directionally-confirmed, not a settled number — a future eval showing regression is information to
+act on, not a reason to have withheld acceptance now.
+
+Reviewed independently by `@tech-lead` (PR #65): rendered `buildSqlSystemPrompt` diffed byte-identical
+against `main` across all three vocabulary branches, confirming the SQL-generation prompt was untouched;
+full suite (1198/1198), `tsc`, and lint independently re-run clean in a separate worktree.
