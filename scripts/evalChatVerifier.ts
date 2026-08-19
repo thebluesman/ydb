@@ -50,10 +50,15 @@ type Case = {
 }
 
 // ── GOOD cases: every golden query that has a real ground-truth SQL ────────
-// (kind 'value' / 'count' / 'value-or-refusal' all carry one; 'refusal'
-// fixtures never reach the verifier in the real pipeline, so they're excluded).
+// (kind 'value' / 'count' / 'value-or-refusal' / 'columns' all carry one;
+// 'refusal' fixtures never reach the verifier in the real pipeline, so
+// they're excluded).
 const GOOD_CASES: Case[] = GOLDEN_QUERIES.filter(
-  (gq) => gq.expect.kind === 'value' || gq.expect.kind === 'count' || gq.expect.kind === 'value-or-refusal',
+  (gq) =>
+    gq.expect.kind === 'value' ||
+    gq.expect.kind === 'count' ||
+    gq.expect.kind === 'value-or-refusal' ||
+    gq.expect.kind === 'columns',
 ).map((gq) => ({
   id: `good:${gq.id}`,
   question: gq.question,
