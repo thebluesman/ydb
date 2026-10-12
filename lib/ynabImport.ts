@@ -338,6 +338,49 @@ async function partitionTransfersByExisting(transfers: PlannedTransfer[]): Promi
   return { toWrite, duplicates, changed, orphaned }
 }
 
+/** Transfer legs whose counterpart wasn't in this pull. A delta re-delivers
+ *  only the legs YNAB touched since the cursor, so one leg of an
+ *  already-imported pair routinely arrives alone; when *both* legs' `ynabId`s
+ *  are already in the ledger it is an ordinary re-delivery (or, if its
+ *  fingerprint moved, a YNAB-side edit to report), not an incomplete transfer.
+ *  Counting it as incomplete held the delta cursor forever — every later pull
+ *  re-fetched the same window (found 2026-10-12, cursor stuck since June).
+ *  Anything else — counterpart not in YDB, or either account unmapped — stays
+ *  incomplete: one side alone can't be written safely. */
+async function partitionLoneTransferLegs(
+  legs: YnabTransaction[],
+  map: YnabAccountMap,
+): Promise<{ incomplete: number; duplicates: number; changed: YnabChangeReportItem[] }> {
+  if (legs.length === 0) return { incomplete: 0, duplicates: 0, changed: [] }
+  const ids = legs.flatMap((t) => [t.id, t.transfer_transaction_id].filter((id): id is string => id != null))
+  const existing = await findManyChunked(
+    ids,
+    (chunk) =>
+      prisma.transaction.findMany({ where: { ynabId: { in: chunk } }, select: FINGERPRINT_SELECT }) as Promise<
+        ExistingFingerprint[]
+      >,
+  )
+  const existingById = new Map(existing.filter((r) => r.ynabId != null).map((r) => [r.ynabId as string, r]))
+
+  let incomplete = 0
+  let duplicates = 0
+  const changed: YnabChangeReportItem[] = []
+  for (const leg of legs) {
+    const found = existingById.get(leg.id)
+    const accountId = map[leg.account_id]
+    const counterpartAccountId = leg.transfer_account_id ? map[leg.transfer_account_id] : undefined
+    const counterpartStored = leg.transfer_transaction_id ? existingById.has(leg.transfer_transaction_id) : false
+    if (!found || !counterpartStored || accountId == null || counterpartAccountId == null) {
+      incomplete++
+      continue
+    }
+    const planned = mapYnabTransaction(leg, accountId, counterpartAccountId)
+    if (fingerprintDiffers(planned, found)) changed.push(toReportItem(planned))
+    else duplicates++
+  }
+  return { incomplete, duplicates, changed }
+}
+
 /**
  * Match YNAB tombstones against the ledger (ADR-0004). Only tombstones whose
  * `ynabId` is actually in YDB are reported — a tombstone for a transaction
@@ -531,7 +574,7 @@ export async function planYnabImport(map: YnabAccountMap): Promise<ImportPlan> {
   const byId = new Map(transferLegs.map((t) => [t.id, t]))
   const processed = new Set<string>()
   const transfers: PlannedTransfer[] = []
-  let skippedTransfersIncomplete = 0
+  const loneLegs: YnabTransaction[] = []
   let skippedTransfersCrossCurrency = 0
   let skippedTransfersSameAccount = 0
 
@@ -546,7 +589,7 @@ export async function planYnabImport(map: YnabAccountMap): Promise<ImportPlan> {
 
     const counterpart = leg.transfer_transaction_id ? byId.get(leg.transfer_transaction_id) : undefined
     if (!counterpart) {
-      skippedTransfersIncomplete++
+      loneLegs.push(leg)
       continue
     }
     processed.add(counterpart.id)
@@ -594,17 +637,22 @@ export async function planYnabImport(map: YnabAccountMap): Promise<ImportPlan> {
     changed: transfersChanged,
     orphaned: orphanedTransferLegs,
   } = await partitionTransfersByExisting(transfers)
+  const {
+    incomplete: skippedTransfersIncomplete,
+    duplicates: loneLegDuplicates,
+    changed: loneLegsChanged,
+  } = await partitionLoneTransferLegs(loneLegs, map)
   const deletedInYnab = await detectDeletions(deletedTransactions)
 
   return {
     rows,
     transfers: keptTransfers,
     serverKnowledge,
-    skippedAlreadyImported: rowDuplicates + transferDuplicates,
+    skippedAlreadyImported: rowDuplicates + transferDuplicates + loneLegDuplicates,
     skippedTransfersIncomplete,
     skippedTransfersCrossCurrency,
     skippedTransfersSameAccount,
-    changedInYnab: [...rowsChanged, ...transfersChanged],
+    changedInYnab: [...rowsChanged, ...transfersChanged, ...loneLegsChanged],
     deletedInYnab,
     orphanedTransferLegs,
     skippedUnmappedAccounts: [...unmapped].sort(),

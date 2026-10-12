@@ -532,6 +532,63 @@ describe('planYnabImport — transfer pairing', () => {
   })
 })
 
+// Found 2026-10-12: a delta re-delivers only the legs YNAB touched, so one leg
+// of an already-imported pair arrives alone. Counting that as "incomplete"
+// held the delta cursor forever.
+describe('planYnabImport — lone leg of an already-imported transfer', () => {
+  const outLeg = transferLeg({ id: 'out', account_id: 'acct-1', account_name: 'ENBD', amount: -500_000, transfer_account_id: 'acct-2', transfer_transaction_id: 'in' })
+  const inLeg = transferLeg({ id: 'in', account_id: 'acct-2', account_name: 'Liv', amount: 500_000, transfer_account_id: 'acct-1', transfer_transaction_id: 'out' })
+  const map = { 'acct-1': 1, 'acct-2': 2 }
+
+  async function runImport() {
+    const { POST } = await import('@/app/api/ynab/import/route')
+    await POST(
+      new Request('http://x/api/ynab/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accountMap: map }),
+      }),
+    )
+  }
+
+  beforeEach(async () => {
+    resetStore()
+    ynabStore.accounts.set(1, { id: 1, currency: 'AED', name: 'ENBD' })
+    ynabStore.accounts.set(2, { id: 2, currency: 'AED', name: 'Liv' })
+    fetchYnabTransactionsMock.mockResolvedValueOnce({ transactions: [outLeg, inLeg], serverKnowledge: 'v1', deletedTransactions: [] })
+    await runImport()
+  })
+
+  it('counts an unchanged lone leg as already imported and lets the cursor advance', async () => {
+    fetchYnabTransactionsMock.mockResolvedValueOnce({ transactions: [outLeg], serverKnowledge: 'v2', deletedTransactions: [] })
+    await runImport()
+    expect(ynabStore.settings.get('ynabServerKnowledge')).toBe('v2')
+    expect(ynabStore.transactions.size).toBe(2)
+
+    fetchYnabTransactionsMock.mockResolvedValueOnce({ transactions: [outLeg], serverKnowledge: 'v3', deletedTransactions: [] })
+    const plan = await planYnabImport(map)
+    expect(plan.skippedTransfersIncomplete).toBe(0)
+    expect(plan.skippedAlreadyImported).toBe(1)
+    expect(plan.changedInYnab).toHaveLength(0)
+  })
+
+  it('reports an edited lone leg as changed (ADR-0004), not incomplete', async () => {
+    const edited = { ...outLeg, memo: 'edited in YNAB' }
+    fetchYnabTransactionsMock.mockResolvedValueOnce({ transactions: [edited], serverKnowledge: 'v2', deletedTransactions: [] })
+    const plan = await planYnabImport(map)
+    expect(plan.skippedTransfersIncomplete).toBe(0)
+    expect(plan.skippedAlreadyImported).toBe(0)
+    expect(plan.changedInYnab.map((c) => c.ynabId)).toEqual(['out'])
+  })
+
+  it('still counts a lone leg as incomplete when its counterpart is not in the ledger', async () => {
+    const stray = transferLeg({ id: 'stray', account_id: 'acct-1', amount: -100_000, transfer_account_id: 'acct-2', transfer_transaction_id: 'never-seen' })
+    fetchYnabTransactionsMock.mockResolvedValueOnce({ transactions: [stray], serverKnowledge: 'v2', deletedTransactions: [] })
+    const plan = await planYnabImport(map)
+    expect(plan.skippedTransfersIncomplete).toBe(1)
+  })
+})
+
 describe('POST /api/ynab/import — idempotency', () => {
   beforeEach(() => {
     resetStore()
