@@ -61,6 +61,11 @@ export type YnabTransaction = {
    *  matching by date/amount is exact and avoids false pairs on same-day,
    *  same-amount coincidences. */
   transfer_transaction_id: string | null
+  /** Set on *both* halves when YNAB matches an imported transaction to one
+   *  the user entered (often a scheduled one). The imported half is then
+   *  hidden in YNAB but still delivered, `deleted: false`, by delta pulls —
+   *  see `dropHiddenMatchedHalves`. Optional because older fixtures omit it. */
+  matched_transaction_id?: string | null
   deleted: boolean
 }
 
@@ -222,8 +227,8 @@ export async function fetchYnabAccounts(): Promise<YnabAccount[]> {
  * returns full history with a 200, so getting this name wrong degrades every
  * delta pull into a full re-scan without any error to notice.
  *
- * Only tombstones (`deleted: true`, present in delta responses) are dropped
- * here. Transfer legs (`transfer_account_id != null`) are returned — they're
+ * Only tombstones (`deleted: true`, present in delta responses) and the hidden
+ * half of a YNAB match (`dropHiddenMatchedHalves`) are dropped here. Transfer legs (`transfer_account_id != null`) are returned — they're
  * paired into YDB's two-sided transfer model by `planYnabImport` in
  * lib/ynabImport.ts, not filtered here, because credit card/loan payments are
  * modelled as transfers too and dropping them was the balance-correctness bug
@@ -263,8 +268,42 @@ export async function fetchYnabTransactions(serverKnowledge?: string | null): Pr
   const deleted = all.filter((t) => t.deleted)
 
   return {
-    transactions: notDeleted,
+    transactions: await dropHiddenMatchedHalves(notDeleted, creds),
     serverKnowledge: String(data.server_knowledge ?? ''),
     deletedTransactions: deleted,
   }
+}
+
+/**
+ * Drop the hidden half of each YNAB match from a delta pull.
+ *
+ * When YNAB matches an imported transaction (e.g. one the SMS capture
+ * pipeline sent) to one the user entered — typically a scheduled loan or rent
+ * payment — it keeps one visible transaction and hides the imported copy.
+ * Both carry `matched_transaction_id` pointing at each other. Delta responses
+ * still deliver the hidden copy with `deleted: false`, so without this filter
+ * it imports as a phantom duplicate debit (found 2026-10-12: a 5,028 personal
+ * loan EMI double-counted alongside its real transfer). The non-delta list
+ * excludes hidden copies.
+ *
+ * Neither half's own fields reliably say which is hidden — approval, payee
+ * and category all vary with whether the match has been approved yet — so
+ * YNAB's non-delta list is asked instead: a matched row that list doesn't
+ * contain is hidden. Costs one extra request, scoped by `since_date` to the
+ * earliest matched row, and only when the pull contains a matched row at all.
+ */
+async function dropHiddenMatchedHalves(
+  transactions: YnabTransaction[],
+  creds: YnabCredentials,
+): Promise<YnabTransaction[]> {
+  const matched = transactions.filter((t) => t.matched_transaction_id)
+  if (matched.length === 0) return transactions
+
+  const sinceDate = matched.reduce((min, t) => (t.date < min ? t.date : min), matched[0].date)
+  const data = await ynabFetch<{ transactions: YnabTransaction[] }>(
+    `/budgets/${encodeURIComponent(creds.budgetId)}/transactions?since_date=${encodeURIComponent(sinceDate)}`,
+    creds,
+  )
+  const visible = new Set((Array.isArray(data.transactions) ? data.transactions : []).map((t) => t.id))
+  return transactions.filter((t) => !t.matched_transaction_id || visible.has(t.id))
 }
