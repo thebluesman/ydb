@@ -184,13 +184,22 @@ describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', 
         }
       })
 
-      it('demonstrates the paired-credit half of the reimbursement guard', () => {
-        // Exactly once, not everywhere. The clause is only correct for true net
-        // spend and real income; teaching it on every example would attach it to
-        // questions about reimbursements themselves, where it removes the very
-        // rows being asked about.
+      it('carries the paired-credit half on every income figure, and only there', () => {
+        // ADR-0016 addendum (2026-10-21). The paid-back credit is a positive row,
+        // so any figure built from amount > 0 counts it as income without the
+        // NOT EXISTS — a single demonstration was not enough, and the model copied
+        // the bare income example instead. A spend-only figure never needs it, and
+        // keeping it off those still keeps it from reading as boilerplate to attach
+        // to questions about reimbursements themselves. The transfer-volume example
+        // also sums amount > 0, but over transfer rows, where no paid-back credit lives.
+        const incomeFigure = (sql: string) => /amount > 0/i.test(sql) && !/transactionType = 'transfer'/.test(sql)
+        const income = examples.filter((ex) => incomeFigure(ex.sql))
+        expect(income.length).toBeGreaterThan(0)
+        for (const ex of income) {
+          expect(has(ex.sql, PAIRED_CREDIT), `paired-credit guard missing: ${ex.question}`).toBe(true)
+        }
         const withPairedCredit = examples.filter((ex) => has(ex.sql, PAIRED_CREDIT))
-        expect(withPairedCredit).toHaveLength(1)
+        expect(withPairedCredit.every((ex) => incomeFigure(ex.sql))).toBe(true)
       })
 
       it('names a transactionType wherever it computes a spending or flow figure', () => {

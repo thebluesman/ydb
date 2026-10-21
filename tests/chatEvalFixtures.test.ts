@@ -48,6 +48,7 @@ describe('every golden query\'s ground-truth SQL runs and matches its documented
     'shopping-split-leg': -200,
     'travel-reimbursement-netting': -80,
     'total-income-reimbursement-aware': 5000,
+    'reimbursements-received-last-month': 300,
     'total-expenses-last-month': -2120,
     'transfer-volume-non-cancellation': 1500,
     'car-loan-payment-transfer-mirror-case': -500,
