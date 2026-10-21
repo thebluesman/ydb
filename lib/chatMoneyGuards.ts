@@ -22,6 +22,12 @@
  *      result looks wrong. The prompt's own rule fires unconditionally at that
  *      trigger, which is exactly what makes it checkable here.
  *
+ *      Except (ADR-0033) when the WHERE clause pins specific categories. Then
+ *      whether transfers belong in the figure is ADR-0019's mirror case — "what
+ *      did I pay on my car loan" wants the transfer-categorized rows, "what did
+ *      I spend on auto loans" does not, with identical SQL — so this detector
+ *      steps back and the prompt rule alone governs that shape.
+ *
  *   2. `transferSumViolation` — a bare `SUM(amount)` over rows pinned to
  *      `transactionType = 'transfer'`. The legs of a transfer are equal and
  *      opposite, so that sum cancels to approximately zero for any ledger,
@@ -46,7 +52,7 @@
  * and these are scope checks on generated SQL, not safety checks.
  */
 
-import { scanStringLiterals, whereClauseRange } from './chatSqlText'
+import { scanStringLiterals, whereClauseRange, type SqlStringLiteral } from './chatSqlText'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Detector 1 — a sign-branching aggregate with no transactionType predicate
@@ -94,6 +100,84 @@ const SIGN_BRANCH_RE = new RegExp(
  */
 const TRANSACTION_TYPE_PREDICATE_RE = /\btransactionType\s*(?:==?|!=|<>|\bNOT\s+IN\b|\bIN\b)/i
 
+/**
+ * `category =` / `category IN (` — a positive category pin, optionally
+ * qualified. `!=`, `<>` and `NOT IN` deliberately do not match: excluding one
+ * category leaves every transfer leg in scope, so it is no pin at all. `LIKE`
+ * does not match either — a pattern is not a grounded category value (ADR-0008
+ * grounds equality literals) and says much less about what is being asked.
+ */
+const CATEGORY_PIN_RE = new RegExp(String.raw`${QUALIFIER}\bcategory\s*(?:(==?)|\b(NOT\s+)?IN\s*\()`, 'gi')
+
+/**
+ * The default category the upstream pipeline leaves on a transfer's counterpart
+ * leg — and on both legs of a plain transfer (ADR-0019's measurement). A pin to
+ * it puts ordinary transfer pairs straight back in scope, which is the PR #32
+ * double-count, and no mirror-case question is ABOUT it. So it never excuses a
+ * sign branch.
+ */
+const UNCATEGORIZED = 'uncategorized'
+
+/**
+ * Whether the statement's WHERE clause pins `category` to specific, non-default
+ * values at its own top level — the ADR-0033 shape, where whether transfers
+ * belong in the figure is ADR-0019's question-dependent mirror case and not
+ * something this detector can decide.
+ *
+ * Narrow on purpose; anything it is unsure of returns false, which leaves the
+ * detector firing (the over-rejecting direction ADR-0016 accepts):
+ *   - the pin must sit in the WHERE clause, not in a CASE arm or a SELECT list;
+ *   - at parenthesis depth zero relative to that clause, so a subquery's
+ *     category filter cannot excuse an outer bare split;
+ *   - with no `OR` anywhere in the clause, since `amount < 0 OR category = …`
+ *     scopes nothing;
+ *   - every pinned value must be a literal and none may be `Uncategorized`.
+ */
+function wherePinsSpecificCategory(stripped: string, literals: SqlStringLiteral[]): boolean {
+  const where = whereClauseRange(stripped)
+  if (!where) return false
+  const clause = stripped.slice(where.start, where.end)
+  if (/\bOR\b/i.test(clause)) return false
+
+  const depthAt = (offset: number) => {
+    let depth = 0
+    for (let i = where.start; i < offset; i++) {
+      if (stripped[i] === '(') depth++
+      else if (stripped[i] === ')') depth--
+    }
+    return depth
+  }
+  const literalAfter = (offset: number) =>
+    literals.find((lit) => lit.start >= offset && stripped.slice(offset, lit.start).trim() === '')
+  const isSpecific = (value: string) => value.trim().toLowerCase() !== UNCATEGORIZED
+
+  let pinned = false
+  CATEGORY_PIN_RE.lastIndex = 0
+  for (let m = CATEGORY_PIN_RE.exec(stripped); m; m = CATEGORY_PIN_RE.exec(stripped)) {
+    if (m.index < where.start || m.index >= where.end) continue
+    if (depthAt(m.index) !== 0) continue
+    if (m[2]) return false // NOT IN at the top level: an exclusion, not a pin
+
+    if (m[1]) {
+      const literal = literalAfter(m.index + m[0].length)
+      if (!literal || !isSpecific(literal.value)) return false
+      pinned = true
+      continue
+    }
+
+    const open = m.index + m[0].length - 1
+    const close = stripped.indexOf(')', open)
+    if (close === -1) return false
+    const inner = stripped.slice(open + 1, close)
+    const members = literals.filter((lit) => lit.start > open && lit.end <= close)
+    // Every member a literal: strip the literals and only commas/space may remain.
+    if (members.length === 0 || inner.replace(/[\s,]/g, '') !== '') return false
+    if (!members.every((lit) => isSpecific(lit.value))) return false
+    pinned = true
+  }
+  return pinned
+}
+
 export type SignBranchGuardViolation = {
   /** The sign comparison as it appeared, e.g. `amount < 0` — so the refusal can quote it. */
   branch: string
@@ -111,12 +195,19 @@ export function signBranchGuardViolation(sql: string): SignBranchGuardViolation 
   // Literals blanked, so `description LIKE '%amount > 0%'` is not read as a sign
   // branch. On malformed quoting, scan the raw text: over-rejecting is the safe
   // direction, and stripping an unbalanced statement hides its tail.
-  const { stripped, balanced } = scanStringLiterals(sql)
+  const { stripped, balanced, literals } = scanStringLiterals(sql)
   const text = balanced ? stripped : sql
 
   const branch = SIGN_BRANCH_RE.exec(text)
   if (!branch) return null
   if (TRANSACTION_TYPE_PREDICATE_RE.test(text)) return null
+
+  // ADR-0033: a WHERE that pins specific categories hands the transfer question
+  // to ADR-0019's prompt-only mirror-case rule. "What did I pay on my car loan"
+  // (`category = 'Auto Loan Payment' AND amount < 0`, transfers wanted) and
+  // "what did I spend on auto loans" (same SQL, transfers not wanted) cannot be
+  // told apart here. Needs balanced quoting: literal values are read by offset.
+  if (balanced && wherePinsSpecificCategory(stripped, literals)) return null
 
   return { branch: branch[0].replace(/\s+/g, ' ').trim() }
 }
