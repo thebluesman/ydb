@@ -521,11 +521,13 @@ A: SELECT ${weekStartExpr()} AS week_start, SUM(-amount) / 100.0 AS total_spent 
 -- this one. The bucket key says which week a row belongs to; it does not say which weeks are in scope.
 
 Q: What is my total income this month?
-A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')
+A: SELECT SUM(amount) / 100.0 AS total FROM "Transaction" WHERE amount > 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id) AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) AND status IN ('committed','reconciled')
 -- Carries reimbursementTxId IS NULL like every other flow aggregate here, including the paired
 -- income-and-expenses examples below. It is one of the mandatory hygiene filters: a question never
 -- has to ask for it, and an example that omits it reads as permission to omit it everywhere, which
 -- is how this prompt drifted before (see the guard matrix test).
+-- It also carries the NOT EXISTS, like every example that reports an income figure: the credit that
+-- paid back a reimbursed expense is a positive row, so amount > 0 picks it up, and it is not income.
 
 Q: How much did I earn and how much did I spend last month?
 A: SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses, SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id) AND strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND status IN ('committed','reconciled')
@@ -534,14 +536,15 @@ A: SELECT SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_exp
 -- The transactionType guard is not optional: without it every transfer leg is counted, once as
 -- income and once as an expense, and both figures come back too high by the same amount.
 -- This example carries BOTH halves of the reimbursement guard, because it reports an expense figure
--- and an income figure together. reimbursementTxId IS NULL drops the expense that was paid back;
+-- and an income figure together. Every example with an income figure carries the NOT EXISTS; a
+-- spend-only figure never needs it, since the paired credit is positive and amount < 0 already drops it. reimbursementTxId IS NULL drops the expense that was paid back;
 -- the NOT EXISTS drops the credit that paid it back, which is not income. Dropping only one half
 -- leaves the pair half-counted, so net spend looks too low or income looks too high. Use both halves
 -- only when the question is about true net spend or real income -- a question ABOUT reimbursements
 -- ("how much was I paid back") wants exactly the rows these two clauses remove, so it uses neither.
 
 Q: What's my total income and total expenses this year?
-A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')
+A: SELECT SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) / 100.0 AS total_income, SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) / 100.0 AS total_expenses FROM "Transaction" WHERE transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND NOT EXISTS (SELECT 1 FROM "Transaction" x WHERE x.reimbursementTxId = "Transaction".id) AND strftime('%Y', date) = strftime('%Y', date('now')) AND status IN ('committed','reconciled')
 
 Q: How does my spending this month compare to last month?
 A: SELECT SUM(CASE WHEN strftime('%Y-%m', date) = strftime('%Y-%m', date('now')) THEN -amount ELSE 0 END) / 100.0 AS this_month, SUM(CASE WHEN strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) THEN -amount ELSE 0 END) / 100.0 AS last_month FROM "Transaction" WHERE amount < 0 AND transactionType != 'transfer' AND parentTransactionId IS NULL AND reimbursementTxId IS NULL AND date >= date('now','start of month','-1 month') AND status IN ('committed','reconciled')

@@ -132,3 +132,34 @@ what makes the split wrong).
 statement rather than in the clause governing the sign branch, so a subquery carrying one satisfies it
 for an outer bare split. That under-detects rather than over-rejects, needs a real parser to close, and
 has not been seen live. Logged here rather than fixed.
+
+## Addendum (2026-10-21): the paired-credit `NOT EXISTS` goes on every income figure, not on exactly one example
+
+§ Consequences put the paired-credit half of the reimbursement guard in "exactly one example rather
+than all", because over-guarding would teach the model to attach it to reimbursement questions, where
+it is wrong. That example was the two-figure "earn and spend" one. The bare income example ("total
+income this month") and the other two-figure example ("income and expenses this year") went without it.
+
+**The eval measured the cost of that.** Once PR #72 pinned the harness clock,
+`total-income-reimbursement-aware` failed: the model copied the bare income example, left out the
+`NOT EXISTS`, and reported 5300 against 5000, counting the 300 paid-back credit as income. The
+"this year" example was teaching the same wrong figure. One demonstration among several
+counter-demonstrations was not enough.
+
+**The rule is narrowed, not reversed.** The `NOT EXISTS` now appears on every worked example that
+reports an income figure, meaning a sum built from `amount > 0` over non-transfer rows, and on no example
+that reports only spend. Spend never needs it: the paid-back credit is positive, so `amount < 0` already
+drops it. Keeping it off the spend examples still keeps it from reading as boilerplate, which was the
+original concern. The guard-matrix test now checks both directions.
+
+**The over-attachment risk is now measured, not assumed.** A new golden case,
+`reimbursements-received-last-month` ("how much was I reimbursed last month?"), expects the 300 credit.
+It fails if the model attaches the `NOT EXISTS` to a question about reimbursements. Enforcement stays
+prompt-only: § Decision is unchanged, because "real income" and "what was I reimbursed" are still
+indistinguishable from the SQL.
+
+First live run (qwen2.5:32b): the three income cases pass, and the model does not attach the `NOT EXISTS`
+to the reimbursement question. That case still fails, but for an unrelated reason: the model sums the
+reimbursed expense rows (−300), not the paid-back credit (+300). Its direction isn't pinned, so
+ADR-0027 leaves it signed. That's a separate prompt gap, and the case stays strict rather than
+sign-insensitive.

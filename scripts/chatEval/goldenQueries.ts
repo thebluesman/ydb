@@ -109,6 +109,16 @@ export const GOLDEN_QUERIES: GoldenQuery[] = [
     note: 'REIMBURSEMENT TRAP, income side. The $300 settlement credit is not real income and must be excluded via the NOT EXISTS half of the guard, matching the shipped two-figure worked example. A naive income query reports $5,300 instead of $5,000.',
   },
   {
+    id: 'reimbursements-received-last-month',
+    question: 'How much was I reimbursed last month?',
+    expect: {
+      kind: 'value',
+      signInsensitive: false,
+      sql: `SELECT SUM(amount)/100.0 AS total FROM "Transaction" WHERE id IN (SELECT reimbursementTxId FROM "Transaction" WHERE reimbursementTxId IS NOT NULL) AND strftime('%Y-%m', date) = '2026-07'`,
+    },
+    note: 'REIMBURSEMENT TRAP, the other direction. The question is ABOUT the paid-back credit, so the NOT EXISTS half must NOT be attached here: it removes the very $300 row being asked about. Guards the ADR-0016 addendum that put NOT EXISTS on every income-figure worked example against over-attachment.',
+  },
+  {
     id: 'total-expenses-last-month',
     question: 'What were my total expenses last month?',
     expect: {
