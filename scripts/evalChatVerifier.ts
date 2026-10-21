@@ -27,7 +27,7 @@
 
 import { signPromiseViolation, VERIFY_TIMEOUT_MS, verifyResult } from '@/lib/chatVerification'
 import { LLM_DEFAULTS } from '@/lib/llm-models'
-import { buildFixtureDb, REFERENCE_NOW } from './chatEval/fixtureDb'
+import { buildFixtureDb, pinSqlNow, REFERENCE_NOW } from './chatEval/fixtureDb'
 import { GOLDEN_QUERIES } from './chatEval/goldenQueries'
 
 function parseArgs() {
@@ -242,7 +242,7 @@ async function main() {
   for (const c of ALL_CASES) {
     let rows: unknown[]
     try {
-      rows = db.prepare(c.sql).all()
+      rows = db.prepare(pinSqlNow(c.sql)).all()
     } catch (e) {
       console.log(`SKIP  ${c.id} — fixture SQL failed to execute: ${e instanceof Error ? e.message : String(e)}`)
       continue

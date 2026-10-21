@@ -9,7 +9,8 @@ vibes.
 - `fixtureDb.ts` — a small, hand-crafted, in-memory ledger (~20 transactions,
   4 accounts) with known contents. Deliberately not `prisma/dev.db`: the eval
   needs exact, reproducible expected answers, and a real ledger changes
-  underneath you. "Today" is pinned to `REFERENCE_NOW` (2026-08-03) so
+  underneath you. "Today" is pinned to `REFERENCE_NOW` (2026-08-03) — in the
+  prompt, and in model SQL via `pinSqlNow`, which rewrites SQLite's `'now'` — so
   relative dates ("last month") resolve the same way on every run.
 - `goldenQueries.ts` — ~22 natural-language question → expected-result pairs.
   Each expected value is a **ground-truth SQL query** run against the fixture
