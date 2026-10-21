@@ -118,19 +118,20 @@ describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', 
   // bound — which is the drift this matrix exists to catch, arriving through the
   // matrix itself. Adding a row now forces a deliberate count.
   //
-  // Three of the four are static (groceries, travel, and the "than usual"
-  // comparative added by [chat-model] PR 4); the fourth is the ADR-0008
-  // no-matching-category example, which only renders when there is a vocabulary
-  // for a category to fail to correspond to. The account vocabulary adds an
+  // Four of the five are static (groceries spend, travel spend, the travel
+  // COUNT added for the groceries-transaction-count eval failure, and the
+  // "than usual" comparative added by [chat-model] PR 4); the fifth is the
+  // ADR-0008 no-matching-category example, which only renders when there is
+  // a vocabulary for a category to fail to correspond to. The account vocabulary adds an
   // Account-join example that filters on `a.name`, not on category, so it does
   // not move this count.
   const prompts = [
-    { label: 'no stored vocabulary', prompt: buildSqlSystemPrompt(NOW), categoryFiltered: 3 },
-    { label: 'with stored vocabulary', prompt: buildSqlSystemPrompt(NOW, CATEGORIES), categoryFiltered: 4 },
+    { label: 'no stored vocabulary', prompt: buildSqlSystemPrompt(NOW), categoryFiltered: 4 },
+    { label: 'with stored vocabulary', prompt: buildSqlSystemPrompt(NOW, CATEGORIES), categoryFiltered: 5 },
     {
       label: 'with stored category and account vocabulary',
       prompt: buildSqlSystemPrompt(NOW, CATEGORIES, ACCOUNTS),
-      categoryFiltered: 4,
+      categoryFiltered: 5,
     },
   ]
 
@@ -150,12 +151,28 @@ describe('SQL prompt worked examples carry their applicable guards (ADR-0016)', 
         }
       })
 
-      it('excludes split-leg parents wherever it aggregates', () => {
-        // The parent is a placeholder that sums its legs, so counting both
-        // double-counts. Exempt: the transfer-volume example, whose subject is a
-        // matched pair rather than a split.
+      it('excludes split legs wherever it aggregates', () => {
+        // The parent already sums its legs, so reading both double-counts, and
+        // that holds for COUNT as much as SUM: parentTransactionId IS NULL keeps
+        // the parent and drops the legs. Exempt: the transfer-volume example,
+        // whose subject is a matched pair rather than a split.
         for (const ex of examples) {
           if (transferIsSubject(ex.sql)) continue
+          expect(has(ex.sql, SPLIT_LEG), `split-leg guard missing: ${ex.question}`).toBe(true)
+        }
+      })
+
+      it('demonstrates split-leg exclusion on a category-filtered COUNT', () => {
+        // The groceries-transaction-count eval case failed reliably because
+        // every category-filtered example was a SUM, so the model learned the
+        // guard as a spend rule and dropped it from a COUNT, counting a split
+        // leg as an extra transaction. One worked example of that exact shape
+        // has to exist, or the loop above passes without ever teaching it.
+        const categoryCounts = examples.filter(
+          (ex) => /COUNT\s*\(/i.test(ex.sql) && /category\s*=\s*'/.test(ex.sql),
+        )
+        expect(categoryCounts.length, 'no category-filtered COUNT example').toBeGreaterThanOrEqual(1)
+        for (const ex of categoryCounts) {
           expect(has(ex.sql, SPLIT_LEG), `split-leg guard missing: ${ex.question}`).toBe(true)
         }
       })
