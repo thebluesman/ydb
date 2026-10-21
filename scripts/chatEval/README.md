@@ -88,3 +88,31 @@ possibly on guard *order*, or a newly-added guard this file doesn't yet call.
 Neither finding was fixed as part of building this harness — that's a
 separate, scoped decision for whoever picks it up next, not something to fold
 silently into "build the harness" work.
+
+## Current run, 2026-10-21 (`qwen2.5:32b`)
+
+**21/23 passed.** Between August and this run the harness was broken without
+anyone noticing. From September on, SQLite's `'now'` read the real clock rather
+than `REFERENCE_NOW`, so most cases returned no-data; a run on 2026-10-21 scored
+8/22. PR #72 fixed that with `pinSqlNow`. Changes since the baseline:
+
+- **Finding 1 above is fixed** (PR #73, ADR-0016 addendum). The paired-credit
+  `NOT EXISTS` now goes on every income-figure worked example.
+- **`groceries-transaction-count` fixed** (PR #70). The split-leg rule was
+  described backwards and only covered sums.
+- **New case `reimbursements-received-last-month`** (PR #73). It measures the
+  over-attachment risk of that `NOT EXISTS` change.
+
+Still failing, both genuine:
+
+1. **`reimbursements-received-last-month`.** The model does not attach the
+   `NOT EXISTS` (good), but it sums the reimbursed *expense* rows
+   (`WHERE reimbursementTxId IS NOT NULL`, giving −300) instead of the credit
+   they point at (+300). The case is kept sign-strict on purpose: the query does
+   not pin a direction, so ADR-0027 would display −300. This is likely a
+   missing worked example.
+2. **`car-loan-payment-transfer-mirror-case`.** Finding 2 above, in a new form.
+   ADR-0033 stopped the sign-branch guard refusing the category-pinned mirror
+   shape. The model now usually *adds* `transactionType != 'transfer'`, which
+   removes the very rows the question is about, so the query returns no-data.
+   The prompt's mirror-case rule isn't being followed.

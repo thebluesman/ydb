@@ -306,6 +306,13 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   combines an account-name filter with the category filter, and since a transfer's category lives on
   only one leg (ADR-0019) that intersection can be empty — open whether this is a model-reasoning gap or
   a fixture question inviting an over-constrained reading.
+  **Re-run 2026-10-21: 21/23.** Between the August baseline and this re-run the harness was silently
+  broken. SQLite's `'now'` read the real clock rather than `REFERENCE_NOW`, so most cases returned no-data;
+  a run on 2026-10-21 scored 8/22, and PR #72 fixed that. Finding (1) is fixed (PR #73, ADR-0016
+  addendum), as is a split-leg COUNT gap (PR #70). Finding (2) persists in a new form. Since ADR-0033 the
+  guard no longer refuses it, but the model adds the transfer guard and gets no-data. There's also a new
+  failure: "how much was I reimbursed" sums the reimbursed expenses (−300), not the credit (+300).
+  Details are in `scripts/chatEval/README.md`.
   **What this unblocks:** ADR-0006's hosted-inference rejection can now be argued from measured data
   rather than absence of measurement (though 20/22 on one model isn't yet grounds to revisit it). ADR-0007
   can be evaluated for whether a retrieval layer beats the flat P0 injection. ADR-0013's Phase B gate
