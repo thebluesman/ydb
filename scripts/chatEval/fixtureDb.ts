@@ -9,13 +9,55 @@
  *
  * "Today" is pinned to REFERENCE_NOW (2026-08-03) rather than `new Date()`, so
  * "last month" / "this month" / "this year" resolve to the same real dates on
- * every run regardless of when the eval is actually executed.
+ * every run regardless of when the eval is actually executed. That takes two
+ * halves: the prompt is built from REFERENCE_NOW, and model SQL goes through
+ * `pinSqlNow` before it runs, because SQLite's own `'now'` reads the real
+ * clock and ADR-0032 leaves "last month" to `date('now', ...)` on purpose.
  */
 
 import Database from 'better-sqlite3'
 import type { Database as Db } from 'better-sqlite3'
+import { scanStringLiterals } from '@/lib/chatSqlText'
 
 export const REFERENCE_NOW = new Date('2026-08-03T12:00:00.000Z')
+
+/** REFERENCE_NOW as SQLite's own time-value format, `YYYY-MM-DD HH:MM:SS`. */
+const REFERENCE_NOW_SQL = REFERENCE_NOW.toISOString().slice(0, 19).replace('T', ' ')
+
+const CURRENT_KEYWORD_RE = /\bCURRENT_(DATE|TIMESTAMP|TIME)\b/gi
+
+/**
+ * Rewrites a statement so every reading of "now" is REFERENCE_NOW: a `'now'`
+ * string literal (the time-value argument of `date`/`strftime`/`julianday`…)
+ * becomes the pinned timestamp, and the `CURRENT_DATE`/`CURRENT_TIMESTAMP`/
+ * `CURRENT_TIME` keywords become the matching literal. Without it, a correct
+ * `date('now','-1 month')` query reads the month the eval happens to run in
+ * and finds none of the fixture's July/August rows. Eval-only: the route runs
+ * SQL against the real clock, which is the right clock there.
+ *
+ * Other literals are left byte-for-byte alone (`description = 'now'`-style
+ * content is only rewritten if it is exactly `now`, which no fixture uses).
+ * Malformed quoting is returned unchanged — the guards refuse it before this
+ * runs anyway.
+ */
+export function pinSqlNow(sql: string): string {
+  const { stripped, balanced, literals } = scanStringLiterals(sql)
+  if (!balanced) return sql
+
+  const edits: { start: number; end: number; text: string }[] = []
+  for (const lit of literals) {
+    if (lit.value.trim().toLowerCase() === 'now') edits.push({ start: lit.start, end: lit.end, text: `'${REFERENCE_NOW_SQL}'` })
+  }
+  for (const m of stripped.matchAll(CURRENT_KEYWORD_RE)) {
+    const kind = m[1].toUpperCase()
+    const value = kind === 'DATE' ? REFERENCE_NOW_SQL.slice(0, 10) : kind === 'TIME' ? REFERENCE_NOW_SQL.slice(11) : REFERENCE_NOW_SQL
+    edits.push({ start: m.index, end: m.index + m[0].length, text: `'${value}'` })
+  }
+
+  let out = sql
+  for (const e of edits.sort((a, b) => b.start - a.start)) out = out.slice(0, e.start) + e.text + out.slice(e.end)
+  return out
+}
 
 export type FixtureAccount = {
   id: number

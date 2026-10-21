@@ -42,6 +42,7 @@ import {
   buildFixtureDb,
   fixtureAccountSource,
   fixtureCategorySource,
+  pinSqlNow,
   REFERENCE_NOW,
 } from './chatEval/fixtureDb'
 import { GOLDEN_QUERIES, groundTruthColumns, groundTruthValue, type GoldenQuery } from './chatEval/goldenQueries'
@@ -148,7 +149,7 @@ async function runQuestion(
 
   let rows: unknown[]
   try {
-    rows = db.prepare(sql).all()
+    rows = db.prepare(pinSqlNow(sql)).all()
   } catch (err) {
     // One repair round-trip, same as the route.
     const firstMsg = err instanceof Error ? err.message : String(err)
@@ -169,7 +170,7 @@ async function runQuestion(
     if (guard.refused) return { kind: 'refused', reason: guard.reason, sql: repaired }
 
     try {
-      rows = db.prepare(repaired).all()
+      rows = db.prepare(pinSqlNow(repaired)).all()
       sql = repaired
     } catch (err2) {
       return { kind: 'error', message: `SQL error after repair: ${err2 instanceof Error ? err2.message : String(err2)}`, sql: repaired }

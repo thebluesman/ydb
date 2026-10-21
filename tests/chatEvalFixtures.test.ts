@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildFixtureDb, fixtureAccountSource, fixtureCategorySource } from '@/scripts/chatEval/fixtureDb'
+import { buildFixtureDb, fixtureAccountSource, fixtureCategorySource, pinSqlNow } from '@/scripts/chatEval/fixtureDb'
 import { GOLDEN_QUERIES, groundTruthValue } from '@/scripts/chatEval/goldenQueries'
 import { loadAccountVocabulary } from '@/lib/chatAccountVocabulary'
 import { loadCategoryVocabulary } from '@/lib/chatCategoryVocabulary'
@@ -87,5 +87,34 @@ describe('refusal-expected fixtures have no ground-truth SQL to drift', () => {
       'no-transactions-this-category-no-data',
       'household-split-leg-visibility',
     ])
+  })
+})
+
+describe('pinSqlNow — model SQL reads REFERENCE_NOW, not the real clock', () => {
+  it("rewrites every 'now' time-value literal, leaving modifiers alone", () => {
+    expect(pinSqlNow("SELECT 1 WHERE strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month')) AND date >= date('NOW','start of month')"))
+      .toBe("SELECT 1 WHERE strftime('%Y-%m', date) = strftime('%Y-%m', date('2026-08-03 12:00:00','-1 month')) AND date >= date('2026-08-03 12:00:00','start of month')")
+  })
+
+  it('rewrites the CURRENT_* keywords to the matching literal', () => {
+    expect(pinSqlNow('SELECT CURRENT_DATE, current_timestamp, CURRENT_TIME'))
+      .toBe("SELECT '2026-08-03', '2026-08-03 12:00:00', '12:00:00'")
+  })
+
+  it('leaves other literals, and keyword text inside a literal, untouched', () => {
+    const sql = "SELECT 1 WHERE description = 'nowhere CURRENT_DATE' AND category = 'O''Brien'"
+    expect(pinSqlNow(sql)).toBe(sql)
+  })
+
+  it('returns malformed quoting unchanged', () => {
+    const sql = "SELECT date('now) FROM x"
+    expect(pinSqlNow(sql)).toBe(sql)
+  })
+
+  it("makes a relative 'last month' query find the fixture's July rows whatever today is", () => {
+    const db = buildFixtureDb()
+    const sql = `SELECT COUNT(*) AS n FROM "Transaction" WHERE strftime('%Y-%m', date) = strftime('%Y-%m', date('now','-1 month'))`
+    const row = db.prepare(pinSqlNow(sql)).get() as { n: number }
+    expect(row.n).toBeGreaterThan(0)
   })
 })

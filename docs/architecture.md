@@ -469,7 +469,12 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   posture from ADR-0018's fail-open on a similar resolution problem. The same `ChatMessage.sql` /
   eval-harness work that would size ADR-0018's hole would size this one. If refusals turn out to be
   common, the answer is to widen the classifier, not to fail open.
-- **`scripts/evalChatSql.ts` runs against the real wall clock, not `REFERENCE_NOW`.** Found 2026-10-21
+- ~~**`scripts/evalChatSql.ts` runs against the real wall clock, not `REFERENCE_NOW`.**~~ **Answered
+  2026-10-21.** (1) The harness now pins it: `pinSqlNow` in `scripts/chatEval/fixtureDb.ts` rewrites a
+  `'now'` literal and the `CURRENT_*` keywords to `REFERENCE_NOW` before model SQL runs. It rewrites
+  rather than rejects, since `date('now', ...)` is correct SQL. (2) Not a compliance gap: ADR-0032 rule 1
+  leaves "last month"/"this year" to `date('now', ...)` on purpose, and the route's real clock is the
+  right one. Original note, kept for the record: Found 2026-10-21
   while verifying ADR-0033: the model still writes `strftime('%Y-%m', date('now','-1 month'))` for "last
   month" on most category questions, despite ADR-0032's server-computed literals, and the harness
   executes that against the fixture DB, where SQLite's `now` is today. Once real time moved past the
