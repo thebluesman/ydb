@@ -166,6 +166,9 @@ the units ticket, before any code was written:
   transfers cancels to a confident zero. Refused as `unsupported-shape`. The other two money guards,
   split-leg and reimbursement, get no detector: applicability depends on what the question meant, so
   they stay prompt-only, held by a guard-matrix test over the prompt's worked examples.
+  The sign-branch detector steps back when the WHERE pins a specific category (ADR-0033): that shape is
+  ADR-0019's mirror case ("what did I pay on my car loan" wants the transfer-categorized leg), so it is
+  not decidable from the SQL and transfer exclusion there is prompt-only.
 - **`SELECT *` star-expanding `Account.openingBalance` past the text checks** (ADR-0017) — the column
   list of a star projection is not knowable from the query string, so the same balance-scope rules also
   run on the keys of the rows that came back. This was the only guard in the pipeline that ran after
@@ -466,6 +469,13 @@ reimbursement-linking items) — unrelated to the YNAB integration, left as-is.
   posture from ADR-0018's fail-open on a similar resolution problem. The same `ChatMessage.sql` /
   eval-harness work that would size ADR-0018's hole would size this one. If refusals turn out to be
   common, the answer is to widen the classifier, not to fail open.
+- **`scripts/evalChatSql.ts` runs against the real wall clock, not `REFERENCE_NOW`.** Found 2026-10-21
+  while verifying ADR-0033: the model still writes `strftime('%Y-%m', date('now','-1 month'))` for "last
+  month" on most category questions, despite ADR-0032's server-computed literals, and the harness
+  executes that against the fixture DB, where SQLite's `now` is today. Once real time moved past the
+  fixture's July/August data, most golden cases return no-data. Two questions, both open: should the
+  harness pin SQLite's `now` (or reject `date('now')`) so results stop depending on the date of the
+  run, and is the model's continued use of `date('now')` an ADR-0032 compliance gap in production.
 - **ADR-0016's sign-branch detector is satisfied by a `transactionType` comparison anywhere in the
   statement**, including one inside a subquery that does not govern the sign branch. Under-detects
   rather than over-rejects, needs a real parser to close, and has not been seen live (ADR-0016

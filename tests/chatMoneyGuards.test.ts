@@ -154,6 +154,97 @@ describe('signBranchGuardViolation — a sign split with no transactionType pred
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ADR-0033: a WHERE that pins specific categories hands the transfer question
+// to ADR-0019's prompt-only mirror-case rule. The eval case
+// `car-loan-payment-transfer-mirror-case` is the motivating shape.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('signBranchGuardViolation — category-pinned queries (ADR-0033)', () => {
+  // The SQL a correct model writes for "how much did I pay on my car loan last
+  // month": the category sits on the outgoing transfer leg only, so it selects
+  // that leg by sign and, correctly, leaves transactionType unconstrained.
+  const MIRROR_CASE =
+    `SELECT SUM(-amount) / 100.0 AS total_paid FROM "Transaction" ` +
+    `WHERE category = 'Auto Loan Payment' AND amount < 0 AND parentTransactionId IS NULL ` +
+    `AND date >= '2026-07-01' AND date < '2026-08-01' AND status IN ('committed','reconciled')`
+
+  it('passes the car-loan mirror case: a sign branch inside a specific category pin', () => {
+    expect(signBranchGuardViolation(MIRROR_CASE)).toBeNull()
+  })
+
+  it('passes qualified, IN-list and == spellings of the pin', () => {
+    for (const pin of [
+      `t.category = 'Auto Loan Payment'`,
+      `category IN ('🚗 Auto loans', '💰 Personal loans')`,
+      `category=='Auto Loan Payment'`,
+      `"Transaction".category = 'Auto Loan Payment'`,
+    ]) {
+      const sql = `SELECT SUM(-t.amount) AS total FROM "Transaction" t WHERE ${pin} AND t.amount < 0`
+      expect(signBranchGuardViolation(sql), pin).toBeNull()
+    }
+  })
+
+  it('still refuses the same query with the category pin removed — PR #32’s shape', () => {
+    const sql = MIRROR_CASE.replace(`category = 'Auto Loan Payment' AND `, '')
+    expect(signBranchGuardViolation(sql)).toEqual({ branch: 'amount < 0' })
+  })
+
+  it('still refuses an account pin: transfers out of an account are not spending from it', () => {
+    // "How much did I spend from Main Checking" — every outgoing transfer leg
+    // would be counted. No mirror case is implied by an account filter.
+    const sql =
+      `SELECT SUM(-t.amount) AS total FROM "Transaction" t JOIN Account a ON t.accountId = a.id ` +
+      `WHERE a.name = 'Main Checking' AND t.amount < 0`
+    expect(signBranchGuardViolation(sql)).toEqual({ branch: 't.amount < 0' })
+  })
+
+  it('still refuses a pin to Uncategorized — where ordinary transfer pairs live', () => {
+    for (const pin of [`category = 'Uncategorized'`, `category IN ('Groceries', 'uncategorized')`]) {
+      const sql = `SELECT SUM(-amount) AS total FROM "Transaction" WHERE ${pin} AND amount < 0`
+      expect(signBranchGuardViolation(sql), pin).toEqual({ branch: 'amount < 0' })
+    }
+  })
+
+  it('still refuses an exclusion dressed as a filter', () => {
+    for (const pin of [
+      `category != 'Auto Loan Payment'`,
+      `category <> 'Auto Loan Payment'`,
+      `category NOT IN ('Auto Loan Payment')`,
+      `category LIKE '%loan%'`,
+    ]) {
+      const sql = `SELECT SUM(-amount) AS total FROM "Transaction" WHERE ${pin} AND amount < 0`
+      expect(signBranchGuardViolation(sql), pin).toEqual({ branch: 'amount < 0' })
+    }
+  })
+
+  it('still refuses when an OR means the pin scopes nothing', () => {
+    const sql =
+      `SELECT SUM(-amount) AS total FROM "Transaction" ` +
+      `WHERE category = 'Auto Loan Payment' OR amount < 0`
+    expect(signBranchGuardViolation(sql)).toEqual({ branch: 'amount < 0' })
+  })
+
+  it('still refuses when the category is named only inside a CASE arm, not the WHERE', () => {
+    const sql =
+      `SELECT SUM(CASE WHEN category = 'Auto Loan Payment' AND amount < 0 THEN -amount ELSE 0 END) AS loan, ` +
+      `SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END) AS all_out FROM "Transaction"`
+    expect(signBranchGuardViolation(sql)).not.toBeNull()
+  })
+
+  it('still refuses when the pin is inside a subquery, not governing the outer split', () => {
+    const sql =
+      `SELECT SUM(-amount) AS total FROM "Transaction" WHERE amount < 0 ` +
+      `AND accountId IN (SELECT accountId FROM "Transaction" WHERE category = 'Auto Loan Payment')`
+    expect(signBranchGuardViolation(sql)).toEqual({ branch: 'amount < 0' })
+  })
+
+  it('still refuses the category pin when the quoting is malformed', () => {
+    const sql = `SELECT SUM(-amount) AS t FROM "Transaction" WHERE category = 'Auto Loan Payment AND amount < 0`
+    expect(signBranchGuardViolation(sql)).toEqual({ branch: 'amount < 0' })
+  })
+})
+
 describe('transferSumViolation — a bare SUM(amount) over transfer-pinned rows', () => {
   it('flags PR #32’s other bug: transfer volume as SUM(amount)', () => {
     const sql =
